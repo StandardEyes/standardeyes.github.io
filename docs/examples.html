@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Example data and settings — StandardEyes</title>
+<meta name="description" content="Two simulated datasets, worked settings files and their unedited outputs: see a complete StandardEyes analysis before using your own data.">
+<link rel="canonical" href="https://standardeyes.github.io/examples.html">
+<meta property="og:title" content="Example data and settings — StandardEyes">
+<meta property="og:description" content="Two simulated datasets, worked settings files and their unedited outputs: see a complete StandardEyes analysis before using your own data.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://standardeyes.github.io/examples.html">
+<meta property="og:site_name" content="StandardEyes">
+<meta property="og:image" content="https://standardeyes.github.io/assets/og.jpg">
+<meta property="og:image:alt" content="StandardEyes: standardized comparative analysis for refractive surgery">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0f766e">
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="stylesheet" href="assets/site.css?v=a0e2d221">
+</head>
+<body class="page-examples">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="StandardEyes home">
+      <svg class="logo" viewBox="0 0 232 172" aria-hidden="true">
+        <g fill="none" stroke="currentColor" stroke-width="8.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M7 86 C30 44 78 44 101 86 C78 128 30 128 7 86 Z"/>
+          <circle cx="54" cy="86" r="23"/><circle cx="54" cy="86" r="11"/><circle cx="45.5" cy="76" r="4.4"/>
+          <path d="M130 116 V94"/><path d="M148 116 V72"/><path d="M166 116 V84"/><path d="M184 116 V60"/>
+          <path d="M104 68 C138 32 174 16 208 14"/><path d="M194 3 L211 14 L196 28"/>
+          <path d="M104 104 C138 140 174 156 208 158"/><path d="M194 147 L211 158 L196 170"/>
+        </g>
+      </svg>
+      <span class="wm">Standard<b>Eyes</b></span>
+    </a>
+    <a class="btn sm hdr-dl" href="download.html">Download</a>
+    <button class="navtoggle" aria-expanded="false" aria-controls="sitenav" aria-label="Menu"><span></span><span></span><span></span></button>
+    <nav id="sitenav" aria-label="Main">
+      <a href="index.html">Home</a>
+      <a href="download.html">The app</a>
+      <a href="examples.html" aria-current="page">Examples</a>
+      <a href="tutorials.html">Tutorials</a>
+      <a href="guide.html">How it works</a>
+      <a href="about.html">About</a>
+      <a class="btn sm" href="download.html">Download</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="pagehead">
+  <div class="wrap">
+    <div class="kicker">Examples</div>
+    <h1>Example data and settings</h1>
+    <p class="lead">Two simulated datasets, seven worked studies and the outputs they produce. The datasets and settings files are also inside the app download, in the <code>Example Data</code> folder, so you can reproduce each output on your own computer.</p>
+    <div class="cta" style="margin-top:24px">
+      <a class="btn" href="examples/StandardEyes-examples.zip" download>Download the data and settings (348 KB)</a>
+      <a class="btn ghost" href="#outputs">See the outputs</a>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="data">
+  <div class="wrap">
+    <div class="sechead">
+      <div class="kicker">The data</div>
+      <h2>Two simulated datasets</h2>
+      <p>No real patient appears in either file. The values were generated to exercise every feature of the app.</p>
+    </div>
+    <div class="grid g2">
+      <article class="card ex">
+        <div class="tag">Example_Refractive_Dataset.xlsx</div>
+        <h3>Example refractive dataset</h3>
+        <p>558 surgeries in 320 patients, 57 columns. One row per eye per surgery.</p>
+        <p class="fine">Values of the Cohort column: Control (296), Diabetes (137), Autoimmune (125)</p>
+        <p>It includes both eyes of many patients, retreatment rows, mixed plus- and minus-cylinder notation, five follow-up visits with drop-out, all four variable types and missing values.</p>
+        <div class="acts"><a class="btn sm ghost" href="examples/Example_Refractive_Dataset.xlsx" download>Download<span class="sr-only"> the example refractive dataset</span> (153 KB)</a></div>
+      </article>
+      <article class="card ex">
+        <div class="tag">Astigmatism_Validation_Dataset.xlsx</div>
+        <h3>Astigmatism validation dataset</h3>
+        <p>882 surgeries in 882 patients, 44 columns.</p>
+        <p class="fine">Values of the Cohort column: Control (320), Diabetes (220), Autoimmune (180), Thyroid (160), RareSyndrome (2)</p>
+        <p>Built to test the vector analysis. It carries a target cylinder and pre-calculated TIA, SIA and difference vectors, so the vectors the app computes can be checked against known values. The RareSyndrome group has only 2 eyes, to show how the app handles a group that is too small to test.</p>
+        <div class="acts"><a class="btn sm ghost" href="examples/Astigmatism_Validation_Dataset.xlsx" download>Download<span class="sr-only"> the astigmatism validation dataset</span> (191 KB)</a></div>
+      </article>
+    </div>
+
+    <div class="prose" style="margin-top:44px">
+      <h3>How the example dataset is laid out</h3>
+      <div class="tablewrap">
+      <table>
+        <thead><tr><th>Columns</th><th>What they hold</th></tr></thead>
+        <tbody>
+          <tr><td><code>PatientID</code>, <code>PatientName</code>, <code>EyeID</code>, <code>Eye</code>, <code>SurgeryNumber</code></td><td>Identifiers (the names are invented). Two eyes of one person share a <code>PatientID</code>. A retreatment is a second row for the same eye, with <code>SurgeryNumber</code> 2.</td></tr>
+          <tr><td><code>Cohort</code>, <code>Procedure</code>, <code>Surgeon</code></td><td>Columns you can define groups or subsets from.</td></tr>
+          <tr><td><code>Age_Years</code>, <code>Sex</code>, <code>Smoker</code></td><td>Patient-level baseline variables.</td></tr>
+          <tr><td><code>Preop_Sphere_D</code>, <code>Preop_Cylinder_D</code>, <code>Preop_Axis_Deg</code>, <code>Preop_SEQ_D</code>, <code>Preop_UDVA</code>, <code>Preop_CDVA</code></td><td>Preoperative refraction, spherical equivalent (SEQ) and visual acuity (decimal).</td></tr>
+          <tr><td><code>Preop_Pachymetry_um</code>, <code>Preop_Mean_K_D</code>, <code>Preop_DryEye_Grade</code>, <code>Optical_Zone_mm</code>, <code>Ablation_Depth_um</code></td><td>Preoperative and intraoperative parameters.</td></tr>
+          <tr><td><code>FollowUp_Days</code>, <code>Postop_…</code>, <code>Patient_Satisfaction_1to5</code>, <code>DryEye_Symptoms</code>, <code>Retreatment_Required</code>, <code>Complication_Type</code></td><td>Follow-up time, refraction, acuity and haze at the last visit, and the other outcomes.</td></tr>
+          <tr><td><code>Cylinder_Notation</code></td><td>A label saying whether the preoperative and postoperative refraction of the row is in plus or minus cylinder. The app does not read it. Any cylinder above zero is taken as plus notation and transposed. The column is there so you can check the conversion.</td></tr>
+          <tr><td><code>Visit1_…</code> to <code>Visit5_…</code></td><td>Days after surgery and refraction (in minus cylinder) at up to five follow-up visits, for the stability curve.</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p>Your own file does not need these names or all of these columns. See <a href="guide.html#data">how to lay out your data</a>.</p>
+    </div>
+  </div>
+</section>
+
+<section class="block alt" id="settings">
+  <div class="wrap">
+    <div class="sechead">
+      <div class="kicker">The settings</div>
+      <h2>Seven worked studies</h2>
+      <p>A preset is one small file that holds every setting of a study. Each example is in the app as an <b>Example - …</b> preset, and in the <code>Example Data</code> folder as a settings file (the same preset as a <code>.json</code> file).</p>
+    </div>
+    <div class="grid g3">
+<article class="card ex" id="ex01"><div class="tag">Settings_01_Two_cohorts_simple.json</div><h3>01 · Two groups, tables and figures only</h3><p>Two groups compared with the standard tests. No matching, GEE or regression.</p><p>The smallest useful run: the group summary tables and the StandardEyes figures.</p><p class="fine">Two groups: Control, Diabetes</p><p><span class="pill">Figures</span> <span class="pill">Double-angle plots</span> </p><div class="acts"><a class="btn sm ghost" href="examples/Settings_01_Two_cohorts_simple.json" download>Download settings<span class="sr-only"> for example 01</span></a><span class="pill grey">In the app: Example - 01_Two_cohorts_simple</span></div></article>
+<article class="card ex" id="ex02"><div class="tag">Settings_02_Two_cohorts_full.json</div><h3>02 · Two groups, full analysis</h3><p>Two groups with every statistical step and every figure option.</p><p>Propensity-score matching, GEE clustered on the patient, covariate-adjusted regression, the full set of StandardEyes figures with double-angle plots and the stability panel, and within-group tables analysed per patient or per eye.</p><p class="fine">Two groups: Control, Diabetes</p><p><span class="pill">Matching</span> <span class="pill">GEE</span> <span class="pill">Regression</span> <span class="pill">Figures</span> <span class="pill">Stability curve</span> <span class="pill">Double-angle plots</span> </p><div class="acts"><a class="btn sm ghost" href="examples/Settings_02_Two_cohorts_full.json" download>Download settings<span class="sr-only"> for example 02</span></a><span class="pill grey">In the app: Example - 02_Two_cohorts_full</span></div></article>
+<article class="card ex" id="ex03"><div class="tag">Settings_03_Three_cohorts.json</div><h3>03 · Three groups</h3><p>Three groups: an overall test for each variable, and one adjusted estimate for each group against the reference group.</p><p>Shows Welch ANOVA and the Kruskal–Wallis test, the adjusted effect of each comparison, and all three groups on every figure in their own colours.</p><p class="fine">Three groups: Control, Diabetes, Autoimmune</p><p><span class="pill">Matching</span> <span class="pill">GEE</span> <span class="pill">Regression</span> <span class="pill">Figures</span> <span class="pill">Stability curve</span> <span class="pill">Double-angle plots</span> </p><div class="acts"><a class="btn sm ghost" href="examples/Settings_03_Three_cohorts.json" download>Download settings<span class="sr-only"> for example 03</span></a><span class="pill grey">In the app: Example - 03_Three_cohorts</span></div></article>
+<article class="card ex" id="ex04"><div class="tag">Settings_04_Subsets_PRK_LASIK.json</div><h3>04 · Subsets: PRK and LASIK</h3><p>One preset that produces a complete, separate analysis for each procedure.</p><p>The subset column splits the run into a full PRK analysis and a full LASIK analysis.</p><p class="fine">Two groups: Control, Diabetes</p><p><span class="pill">Matching</span> <span class="pill">GEE</span> <span class="pill">Regression</span> <span class="pill">Subsets</span> <span class="pill">Figures</span> <span class="pill">Stability curve</span> <span class="pill">Double-angle plots</span> </p><div class="acts"><a class="btn sm ghost" href="examples/Settings_04_Subsets_PRK_LASIK.json" download>Download settings<span class="sr-only"> for example 04</span></a><span class="pill grey">In the app: Example - 04_Subsets_PRK_LASIK</span></div></article>
+<article class="card ex" id="ex05"><div class="tag">Settings_05_Stability_focus.json</div><h3>05 · Stability over time</h3><p>The stability-over-time curve as its own figure panel.</p><p>Five mapped follow-up visits and the preoperative point. The spherical equivalent is read from a column for visits 1 and 3, and computed from sphere and cylinder for the others.</p><p class="fine">Two groups: Control, Diabetes</p><p><span class="pill">Figures</span> <span class="pill">Stability curve</span> <span class="pill">Double-angle plots</span> </p><div class="acts"><a class="btn sm ghost" href="examples/Settings_05_Stability_focus.json" download>Download settings<span class="sr-only"> for example 05</span></a><span class="pill grey">In the app: Example - 05_Stability_focus</span></div></article>
+<article class="card ex" id="ex06"><div class="tag">Settings_06_Figures_only_no_stats.json</div><h3>06 · Figure options</h3><p>Figure switches: astigmatism panels and vector plots off, stability on.</p><p>Shows the combined figure adapting its section headers when the astigmatism panels are switched off. No matching, GEE or regression sheets.</p><p class="fine">Two groups: Control, Diabetes</p><p><span class="pill">Figures</span> <span class="pill">Stability curve</span> </p><div class="acts"><a class="btn sm ghost" href="examples/Settings_06_Figures_only_no_stats.json" download>Download settings<span class="sr-only"> for example 06</span></a><span class="pill grey">In the app: Example - 06_Figures_only_no_stats</span></div></article>
+<article class="card ex" id="ex07"><div class="tag">Settings_07_Full_figure_suite.json</div><h3>07 · All figures, three groups</h3><p>All three groups on one chart, and double-angle astigmatism plots.</p><p>Every group in its own colour, an overall test and each group against the reference group on every panel, P values clustered by patient, and double-angle plots with each group&#x27;s centroid, its 95% confidence region and a 95% region of the eyes, following the JCRS 2025 astigmatism standard.</p><p class="fine">Three groups: Control, Diabetes, Autoimmune</p><p><span class="pill">Matching</span> <span class="pill">GEE</span> <span class="pill">Regression</span> <span class="pill">Figures</span> <span class="pill">Stability curve</span> <span class="pill">Double-angle plots</span> </p><div class="acts"><a class="btn sm ghost" href="examples/Settings_07_Full_figure_suite.json" download>Download settings<span class="sr-only"> for example 07</span></a><span class="pill grey">In the app: Example - 07_Full_figure_suite</span></div></article>
+      <div class="card howto">
+        <h3>Use one in the app</h3>
+        <p>Follow the <a href="download.html#first-run">first-run steps</a> and click the <b>Example - …</b> preset you want. To open a downloaded settings file instead, click <b>Load config JSON</b> in the sidebar.</p>
+      </div>
+      <div class="card howto">
+        <h3>Or run the engine without the interface</h3>
+        <p>From the app folder, in a command prompt:</p>
+        <pre tabindex="0"><code id="cli">"C:\Program Files\R\R-4.5.2\bin\Rscript.exe" --vanilla engine\run_pipeline.R "Example Data\Settings_02_Two_cohorts_full.json"</code></pre>
+        <p><button class="btn sm ghost" data-copy="#cli">Copy command</button></p>
+        <p class="fine">The settings use paths relative to the app folder. Results appear in <code>Example Output</code>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="outputs">
+  <div class="wrap">
+    <div class="sechead">
+      <div class="kicker">The outputs</div>
+      <h2>What the examples produce</h2>
+      <p>These files were produced by StandardEyes 1.0.0 from the example dataset and the settings above. Nothing was edited afterwards.</p>
+    </div>
+    <h3 style="margin-bottom:16px">Figures</h3>
+    <div class="thumbs">
+<figure class="fig"><button class="zoom" data-full="assets/out/F01_StandardEyes_composite_2groups.jpg" data-caption="Combined figure, two groups: every panel with both groups on it."><img loading="lazy" src="assets/out/thumb_F01_StandardEyes_composite_2groups.jpg" alt="Combined figure, two groups: every panel with both groups on it." width="640" height="618"></button><figcaption>Combined figure, two groups: every panel with both groups on it.</figcaption></figure>
+<figure class="fig"><button class="zoom" data-full="assets/out/F02_panel_SEQ_accuracy.jpg" data-caption="Single panel: spherical-equivalent accuracy."><img loading="lazy" src="assets/out/thumb_F02_panel_SEQ_accuracy.jpg" alt="Single panel: spherical-equivalent accuracy." width="640" height="532"></button><figcaption>Single panel: spherical-equivalent accuracy.</figcaption></figure>
+<figure class="fig"><button class="zoom" data-full="assets/out/F03_panel_refractive_astigmatism.jpg" data-caption="Single panel: refractive astigmatism."><img loading="lazy" src="assets/out/thumb_F03_panel_refractive_astigmatism.jpg" alt="Single panel: refractive astigmatism." width="640" height="532"></button><figcaption>Single panel: refractive astigmatism.</figcaption></figure>
+<figure class="fig"><button class="zoom" data-full="assets/out/F04_panel_correction_index.jpg" data-caption="Single panel: correction index."><img loading="lazy" src="assets/out/thumb_F04_panel_correction_index.jpg" alt="Single panel: correction index." width="640" height="532"></button><figcaption>Single panel: correction index.</figcaption></figure>
+<figure class="fig"><button class="zoom" data-full="assets/out/F05_semicircle_vectors.jpg" data-caption="Semicircle vector plots."><img loading="lazy" src="assets/out/thumb_F05_semicircle_vectors.jpg" alt="Semicircle vector plots." width="640" height="495"></button><figcaption>Semicircle vector plots.</figcaption></figure>
+<figure class="fig"><button class="zoom" data-full="assets/out/F06_balance_loveplot.jpg" data-caption="Love plot: covariate balance before and after matching."><img loading="lazy" src="assets/out/thumb_F06_balance_loveplot.jpg" alt="Love plot: covariate balance before and after matching." width="640" height="427"></button><figcaption>Love plot: covariate balance before and after matching.</figcaption></figure>
+<figure class="fig"><button class="zoom" data-full="assets/out/F07_StandardEyes_composite_3groups.jpg" data-caption="Combined figure, three groups in their own colours."><img loading="lazy" src="assets/out/thumb_F07_StandardEyes_composite_3groups.jpg" alt="Combined figure, three groups in their own colours." width="640" height="618"></button><figcaption>Combined figure, three groups in their own colours.</figcaption></figure>
+<figure class="fig"><button class="zoom" data-full="assets/out/F08_double_angle_TIA_JCRS.jpg" data-caption="JCRS-standard double-angle plot of the target induced astigmatism."><img loading="lazy" src="assets/out/thumb_F08_double_angle_TIA_JCRS.jpg" alt="JCRS-standard double-angle plot of the target induced astigmatism." width="640" height="621"></button><figcaption>JCRS-standard double-angle plot of the target induced astigmatism.</figcaption></figure>
+<figure class="fig"><button class="zoom" data-full="assets/out/F09_double_angle_2x2.jpg" data-caption="Double-angle plots: target induced, surgically induced, difference vector and correction index."><img loading="lazy" src="assets/out/thumb_F09_double_angle_2x2.jpg" alt="Double-angle plots: target induced, surgically induced, difference vector and correction index." width="640" height="628"></button><figcaption>Double-angle plots: target induced, surgically induced, difference vector and correction index.</figcaption></figure>
+<figure class="fig"><button class="zoom" data-full="assets/out/F10_stability_panel.jpg" data-caption="Stability of spherical equivalent over time."><img loading="lazy" src="assets/out/thumb_F10_stability_panel.jpg" alt="Stability of spherical equivalent over time." width="640" height="532"></button><figcaption>Stability of spherical equivalent over time.</figcaption></figure>
+    </div>
+    <h3 style="margin:44px 0 16px">Workbooks</h3>
+    <ul class="filelist">
+<li><span class="ft">XLSX</span><span class="nm">Ex01_Simple_All.xlsx</span><span class="sz">61 KB</span><a class="btn sm ghost" href="examples/output/Ex01_Simple_All.xlsx" download>Download<span class="sr-only"> Ex01_Simple_All.xlsx</span></a></li>
+<li><span class="ft">XLSX</span><span class="nm">Ex02_Full_All.xlsx</span><span class="sz">164 KB</span><a class="btn sm ghost" href="examples/output/Ex02_Full_All.xlsx" download>Download<span class="sr-only"> Ex02_Full_All.xlsx</span></a></li>
+<li><span class="ft">XLSX</span><span class="nm">Ex02_Full_All_MatchedOnly.xlsx</span><span class="sz">74 KB</span><a class="btn sm ghost" href="examples/output/Ex02_Full_All_MatchedOnly.xlsx" download>Download<span class="sr-only"> Ex02_Full_All_MatchedOnly.xlsx</span></a></li>
+<li><span class="ft">XLSX</span><span class="nm">Ex03_Three_All.xlsx</span><span class="sz">260 KB</span><a class="btn sm ghost" href="examples/output/Ex03_Three_All.xlsx" download>Download<span class="sr-only"> Ex03_Three_All.xlsx</span></a></li>
+<li><span class="ft">XLSX</span><span class="nm">Ex03_Three_All_MatchedOnly.xlsx</span><span class="sz">151 KB</span><a class="btn sm ghost" href="examples/output/Ex03_Three_All_MatchedOnly.xlsx" download>Download<span class="sr-only"> Ex03_Three_All_MatchedOnly.xlsx</span></a></li>
+<li><span class="ft">XLSX</span><span class="nm">Ex04_Subsets_LASIK.xlsx</span><span class="sz">129 KB</span><a class="btn sm ghost" href="examples/output/Ex04_Subsets_LASIK.xlsx" download>Download<span class="sr-only"> Ex04_Subsets_LASIK.xlsx</span></a></li>
+<li><span class="ft">XLSX</span><span class="nm">Ex04_Subsets_LASIK_MatchedOnly.xlsx</span><span class="sz">40 KB</span><a class="btn sm ghost" href="examples/output/Ex04_Subsets_LASIK_MatchedOnly.xlsx" download>Download<span class="sr-only"> Ex04_Subsets_LASIK_MatchedOnly.xlsx</span></a></li>
+<li><span class="ft">XLSX</span><span class="nm">Ex04_Subsets_PRK.xlsx</span><span class="sz">127 KB</span><a class="btn sm ghost" href="examples/output/Ex04_Subsets_PRK.xlsx" download>Download<span class="sr-only"> Ex04_Subsets_PRK.xlsx</span></a></li>
+<li><span class="ft">XLSX</span><span class="nm">Ex04_Subsets_PRK_MatchedOnly.xlsx</span><span class="sz">34 KB</span><a class="btn sm ghost" href="examples/output/Ex04_Subsets_PRK_MatchedOnly.xlsx" download>Download<span class="sr-only"> Ex04_Subsets_PRK_MatchedOnly.xlsx</span></a></li>
+<li><span class="ft">XLSX</span><span class="nm">Ex05_Stability_All.xlsx</span><span class="sz">61 KB</span><a class="btn sm ghost" href="examples/output/Ex05_Stability_All.xlsx" download>Download<span class="sr-only"> Ex05_Stability_All.xlsx</span></a></li>
+<li><span class="ft">XLSX</span><span class="nm">Ex06_Figures_All.xlsx</span><span class="sz">61 KB</span><a class="btn sm ghost" href="examples/output/Ex06_Figures_All.xlsx" download>Download<span class="sr-only"> Ex06_Figures_All.xlsx</span></a></li>
+<li><span class="ft">XLSX</span><span class="nm">Ex07_Suite_All.xlsx</span><span class="sz">260 KB</span><a class="btn sm ghost" href="examples/output/Ex07_Suite_All.xlsx" download>Download<span class="sr-only"> Ex07_Suite_All.xlsx</span></a></li>
+<li><span class="ft">XLSX</span><span class="nm">Ex07_Suite_All_MatchedOnly.xlsx</span><span class="sz">151 KB</span><a class="btn sm ghost" href="examples/output/Ex07_Suite_All_MatchedOnly.xlsx" download>Download<span class="sr-only"> Ex07_Suite_All_MatchedOnly.xlsx</span></a></li>
+    </ul>
+    <p class="fine" style="margin-top:14px">A workbook named <code>…_MatchedOnly</code> holds the matched rows of every pairing. In every workbook the first sheet is a contents page and the second is the Manifest: the software versions, the input file and the main settings of the run.</p>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <h2>Now try it with your own data</h2>
+    <p>Load your spreadsheet, start from the example preset closest to your study, and save it under a new name.</p>
+    <div class="cta"><a class="btn lg light" href="download.html">Download StandardEyes</a><a class="btn lg ghost" href="tutorials.html">Watch the tutorials</a></div>
+  </div>
+</section>
+
+</main>
+
+<footer class="site">
+  <div class="wrap cols">
+    <div>
+      <div class="brand small"><span class="wm">Standard<b>Eyes</b></span></div>
+      <p>Standardized comparative analysis and outcomes reporting for refractive surgery. Free, local, reproducible.</p>
+      <p><b style="color:#fff">For Ophthalmologists, By Ophthalmologists.</b></p>
+      <p class="fine">Version 1.0.0 · MIT License · © 2026 Noyman DBE, Mimouni M, Safir M</p>
+    </div>
+    <div>
+      <h2 class="fh">The app</h2>
+      <a href="download.html">Download</a>
+      <a href="download.html#install">Install</a>
+      <a href="download.html#help">Troubleshooting</a>
+      <a href="https://github.com/StandardEyes/standardeyes.github.io/releases">Release notes</a>
+    </div>
+    <div>
+      <h2 class="fh">Learn</h2>
+      <a href="tutorials.html">Video tutorials</a>
+      <a href="guide.html">How it works</a>
+      <a href="examples.html">Example data and settings</a>
+      <a href="guide.html#faq">FAQ</a>
+    </div>
+    <div>
+      <h2 class="fh">Project</h2>
+      <a href="about.html">About</a>
+      <a href="about.html#authors">The authors</a>
+      <a href="about.html#cite">How to cite</a>
+      <a href="https://github.com/StandardEyes/standardeyes.github.io">Source code</a>
+    </div>
+  </div>
+  <div class="wrap"><div class="fine legal">StandardEyes is research software. It is not a medical device and does not give medical advice. Check every result before publication.</div></div>
+</footer>
+
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Enlarged figure" hidden>
+  <button class="close" aria-label="Close enlarged figure">×</button>
+  <figure><img alt=""><figcaption></figcaption></figure>
+</div>
+<script src="assets/site.js?v=a0e2d221" defer></script>
+</body>
+</html>

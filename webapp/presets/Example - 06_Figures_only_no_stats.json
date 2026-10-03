@@ -1,0 +1,255 @@
+{
+  "file_path": "Example Data/Example_Refractive_Dataset.xlsx",
+  "sheet_name": 1,
+  "guess_max": 120000,
+  "patient_id_raw": "PatientID",
+  "eye_id_raw": "EyeID",
+  "group_source_var": "Cohort",
+  "patient_level_params_raw": [
+    "Age_Years",
+    "Sex",
+    "Smoker"
+  ],
+  "exclude_params_raw": [],
+  "age_var": "Age_Years",
+  "fu_var": "FollowUp_Days",
+  "sex_var": "Sex",
+  "baseline": {
+    "continuous": [
+      "Age_Years",
+      "Preop_SEQ_D",
+      "Preop_Sphere_D",
+      "Preop_Cylinder_D",
+      "Preop_UDVA",
+      "Preop_CDVA",
+      "Preop_Pachymetry_um",
+      "Preop_Mean_K_D"
+    ],
+    "ordinal": [
+      "Preop_DryEye_Grade"
+    ],
+    "dichotomous": [
+      "Sex",
+      "Smoker"
+    ],
+    "categorical": [
+      "Surgeon"
+    ]
+  },
+  "preop": {
+    "continuous": [
+      "Optical_Zone_mm",
+      "Ablation_Depth_um"
+    ],
+    "ordinal": [],
+    "dichotomous": [],
+    "categorical": [
+      "Procedure"
+    ]
+  },
+  "outcome": {
+    "continuous": [
+      "FollowUp_Days",
+      "Postop_SEQ_D",
+      "Postop_Cylinder_D",
+      "Postop_UDVA",
+      "Postop_CDVA"
+    ],
+    "ordinal": [
+      "Postop_Haze_Grade",
+      "Patient_Satisfaction_1to5"
+    ],
+    "dichotomous": [
+      "DryEye_Symptoms",
+      "Retreatment_Required"
+    ],
+    "categorical": [
+      "Complication_Type"
+    ]
+  },
+  "within_group": {
+    "continuous": [],
+    "ordinal": [],
+    "dichotomous": [],
+    "categorical": []
+  },
+  "within_group_levels": {},
+  "filter_rules": [
+    {
+      "var": "Age_Years",
+      "op": ">=",
+      "value": [
+        18
+      ]
+    },
+    {
+      "var": "FollowUp_Days",
+      "op": ">=",
+      "value": [
+        90
+      ]
+    },
+    {
+      "var": "SurgeryNumber",
+      "op": "==",
+      "value": [
+        1
+      ]
+    },
+    {
+      "var": "Preop_Cylinder_D",
+      "op": "abs_le",
+      "value": [
+        5
+      ]
+    }
+  ],
+  "groups": {
+    "Control": [
+      "Control"
+    ],
+    "Diabetes": [
+      "Diabetes"
+    ]
+  },
+  "reference_group": "Control",
+  "group_colors": {
+    "Control": "#5B2C86",
+    "Diabetes": "#F26522",
+    "Autoimmune": "#1B9E4B"
+  },
+  "group_labels": {},
+  "do_matching": false,
+  "psm_covariates_raw": [],
+  "psm_method": "nearest",
+  "psm_distance": "logit",
+  "psm_ratio": 2,
+  "psm_replace": false,
+  "psm_caliper": 0.2,
+  "psm_std_caliper": true,
+  "psm_m_order": "largest",
+  "run_gee_stage": "none",
+  "run_main_gee": false,
+  "run_adjusted_gee": false,
+  "gee_adjust_covariates_raw": [],
+  "use_matching_weights_in_gee": true,
+  "add_gee_columns": true,
+  "gee_source_for_tables": "main",
+  "do_regression": false,
+  "regression_stage": "unmatched",
+  "regression_covariates_raw": [],
+  "subset_col_raw": "",
+  "subsets": {},
+  "subset_mode": "separate",
+  "do_standardize_minus_cyl": true,
+  "std_triples": [
+    {
+      "sph": "Preop_Sphere_D",
+      "cyl": "Preop_Cylinder_D",
+      "axis": "Preop_Axis_Deg"
+    },
+    {
+      "sph": "Postop_Sphere_D",
+      "cyl": "Postop_Cylinder_D",
+      "axis": "Postop_Axis_Deg"
+    }
+  ],
+  "std_sph_raw": "Preop_Sphere_D",
+  "std_cyl_raw": "Preop_Cylinder_D",
+  "std_axis_raw": "Preop_Axis_Deg",
+  "do_logmar": true,
+  "logmar_cols_raw": [
+    "Preop_UDVA",
+    "Preop_CDVA",
+    "Postop_UDVA",
+    "Postop_CDVA"
+  ],
+  "make_meyestro": true,
+  "make_alpins": true,
+  "make_pub_table": true,
+  "make_graphs": true,
+  "graph_set": "nine",
+  "graph_formats": [
+    "tiff"
+  ],
+  "graph_dpi": 300,
+  "astig_panels": false,
+  "double_angle_figs": false,
+  "semicircle_figs": false,
+  "astig_region": "polygon",
+  "astig_jcrs_standard": true,
+  "astig_test_method": "robust",
+  "cluster_by_patient": true,
+  "stability_figs": true,
+  "stability_visits": [
+    {
+      "label": "1",
+      "time": "Visit1_Days_PostOp",
+      "sph": "Visit1_Sphere_D",
+      "cyl": "Visit1_Cylinder_D",
+      "seq": "Visit1_SEQ_D"
+    },
+    {
+      "label": "3",
+      "time": "Visit2_Days_PostOp",
+      "sph": "Visit2_Sphere_D",
+      "cyl": "Visit2_Cylinder_D",
+      "seq": ""
+    },
+    {
+      "label": "6",
+      "time": "Visit3_Days_PostOp",
+      "sph": "Visit3_Sphere_D",
+      "cyl": "Visit3_Cylinder_D",
+      "seq": "Visit3_SEQ_D"
+    },
+    {
+      "label": "12",
+      "time": "Visit4_Days_PostOp",
+      "sph": "Visit4_Sphere_D",
+      "cyl": "Visit4_Cylinder_D",
+      "seq": ""
+    },
+    {
+      "label": "24",
+      "time": "Visit5_Days_PostOp",
+      "sph": "Visit5_Sphere_D",
+      "cyl": "Visit5_Cylinder_D",
+      "seq": ""
+    }
+  ],
+  "roles": {
+    "pre_ucva": "Preop_UDVA",
+    "pre_bcva": "Preop_CDVA",
+    "post_ucva": "Postop_UDVA",
+    "post_bcva": "Postop_CDVA",
+    "pre_sph": "Preop_Sphere_D",
+    "pre_cyl": "Preop_Cylinder_D",
+    "pre_axis": "Preop_Axis_Deg",
+    "post_sph": "Postop_Sphere_D",
+    "post_cyl": "Postop_Cylinder_D",
+    "post_axis": "Postop_Axis_Deg",
+    "pre_seq": "Preop_SEQ_D",
+    "post_seq": "Postop_SEQ_D",
+    "eye": "Eye"
+  },
+  "dichotomous_preferred_level": {
+    "Sex": "F",
+    "Smoker": "Yes",
+    "DryEye_Symptoms": "Yes",
+    "Retreatment_Required": "Yes"
+  },
+  "output_dir": "Example Output",
+  "export_filtered_csv": true,
+  "output_prefix": "Ex06_Figures",
+  "stability_include_preop": true,
+  "stability_change_from": "6",
+  "stability_change_to": "24",
+  "stability_change_threshold": 0.5,
+  "num_groups": 2,
+  "num_filters": 4,
+  "num_subsets": 0,
+  "_title": "Figure options",
+  "_description": "Figure switches: astigmatism panels and vector plots off, stability on.",
+  "_demonstrates": "Shows the combined figure adapting its section headers when the astigmatism panels are switched off. No matching, GEE or regression sheets."
+}

@@ -1,0 +1,41 @@
+WEBVTT
+
+00:00:00.688 --> 00:00:03.535
+Tutorial five. The StandardEyes figures.
+
+00:00:07.879 --> 00:00:14.488
+The standard refractive surgery figures are drawn from your data, with every group on each panel, in its own colour.
+
+00:00:14.761 --> 00:00:23.784
+For stability over time, map one row for each follow-up visit. The spherical equivalent is read from a column, or computed from sphere and cylinder.
+
+00:00:24.091 --> 00:00:28.006
+Choose the panel set: full, refractive, or cataract.
+
+00:00:28.415 --> 00:00:34.188
+The app tells you exactly which panels you will get, and the list updates as you change the options.
+
+00:00:34.480 --> 00:00:44.433
+Astigmatism follows the JCRS standard: double-angle plots with the centroid, a ninety-five percent region, and one test that compares the centroids.
+
+00:00:44.710 --> 00:00:50.901
+The P values on the figures are clustered by patient, and each figure prints the test that produced its numbers.
+
+00:00:51.173 --> 00:00:57.550
+Map the refraction and acuity columns once. The figures and the export tabs all read the same roles.
+
+00:00:57.794 --> 00:01:04.263
+Optional workbook tabs add a publication-style table, and tabs laid out for mEYEstro and AstigMATIC.
+
+00:01:05.107 --> 00:01:10.508
+This is what you get. The combined figure shows every panel, with every group on it.
+
+00:01:11.688 --> 00:01:19.597
+The double-angle plot shows each group's centroid and ninety-five percent region, with the centroid comparison printed on the figure.
+
+00:01:20.772 --> 00:01:27.938
+And stability over time shows the mean spherical equivalent at each visit, with the number of eyes behind every point.
+
+00:01:28.696 --> 00:01:33.168
+StandardEyes. For ophthalmologists, by ophthalmologists.
+

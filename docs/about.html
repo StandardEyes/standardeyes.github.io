@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>About and authors — StandardEyes</title>
+<meta name="description" content="Why StandardEyes was built, who wrote it, how to cite it, its licence, and how to report a problem or suggest a feature.">
+<link rel="canonical" href="https://standardeyes.github.io/about.html">
+<meta property="og:title" content="About and authors — StandardEyes">
+<meta property="og:description" content="Why StandardEyes was built, who wrote it, how to cite it, its licence, and how to report a problem or suggest a feature.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://standardeyes.github.io/about.html">
+<meta property="og:site_name" content="StandardEyes">
+<meta property="og:image" content="https://standardeyes.github.io/assets/og.jpg">
+<meta property="og:image:alt" content="StandardEyes: standardized comparative analysis for refractive surgery">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0f766e">
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="stylesheet" href="assets/site.css?v=a0e2d221">
+</head>
+<body class="page-about">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="StandardEyes home">
+      <svg class="logo" viewBox="0 0 232 172" aria-hidden="true">
+        <g fill="none" stroke="currentColor" stroke-width="8.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M7 86 C30 44 78 44 101 86 C78 128 30 128 7 86 Z"/>
+          <circle cx="54" cy="86" r="23"/><circle cx="54" cy="86" r="11"/><circle cx="45.5" cy="76" r="4.4"/>
+          <path d="M130 116 V94"/><path d="M148 116 V72"/><path d="M166 116 V84"/><path d="M184 116 V60"/>
+          <path d="M104 68 C138 32 174 16 208 14"/><path d="M194 3 L211 14 L196 28"/>
+          <path d="M104 104 C138 140 174 156 208 158"/><path d="M194 147 L211 158 L196 170"/>
+        </g>
+      </svg>
+      <span class="wm">Standard<b>Eyes</b></span>
+    </a>
+    <a class="btn sm hdr-dl" href="download.html">Download</a>
+    <button class="navtoggle" aria-expanded="false" aria-controls="sitenav" aria-label="Menu"><span></span><span></span><span></span></button>
+    <nav id="sitenav" aria-label="Main">
+      <a href="index.html">Home</a>
+      <a href="download.html">The app</a>
+      <a href="examples.html">Examples</a>
+      <a href="tutorials.html">Tutorials</a>
+      <a href="guide.html">How it works</a>
+      <a href="about.html" aria-current="page">About</a>
+      <a class="btn sm" href="download.html">Download</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="pagehead">
+  <div class="wrap">
+    <div class="kicker">About</div>
+    <h1>About StandardEyes</h1>
+    <p class="lead">Free software for standardized comparative analysis and outcomes reporting in refractive surgery.</p>
+  </div>
+</section>
+
+<section class="block" id="project">
+  <div class="wrap narrow prose">
+    <h2>Why we built it</h2>
+    <p>Refractive-surgery journals ask for outcomes in a standard set of graphs, and good free tools draw those graphs for a single group. Many studies, though, compare groups: one procedure against another, patients with a condition against controls, one nomogram against the next. For that the analyst is usually left alone with a statistics package, and has to rebuild the same steps for each paper: select the eyes, choose a test for each variable, deal with two eyes per patient, match the groups, and redraw every standard graph with all groups on it.</p>
+    <p>StandardEyes puts those steps in one place. You describe the study once, and it produces the comparative tables, the models and the figures in a single run that can be repeated exactly.</p>
+
+    <h2>What we wanted it to be</h2>
+    <ul>
+      <li><strong>Local.</strong> Patient data stays on the computer it is on. The app has no online server, no account and no telemetry. Its interface is served from your own computer (127.0.0.1) and nothing is sent anywhere.</li>
+      <li><strong>Transparent.</strong> Every P value in the summary sheets is printed with the test that produced it, every run writes a log of its decisions, and the statistical code is plain R that anyone can read.</li>
+      <li><strong>Reproducible.</strong> A preset holds every setting of a study, and each workbook carries a Manifest sheet with the software versions and the main settings of the run.</li>
+      <li><strong>Standard.</strong> The figures follow the standard graphs for reporting refractive-surgery outcomes and the JCRS standards for astigmatism analysis, extended to any number of groups.</li>
+      <li><strong>Free.</strong> No fee and no registration, under an open-source licence.</li>
+    </ul>
+
+    <h2>How it relates to other tools</h2>
+    <p>StandardEyes is complementary to the single-group tools mEYEstro and AstigMATIC. It can write worksheet tabs in the layouts those tools read, so the same eyes can be cross-checked there. It builds on the Alpins method of astigmatism vector analysis and on the standard-graph conventions published by the <i>Journal of Refractive Surgery</i> and the <i>Journal of Cataract &amp; Refractive Surgery</i>.</p>
+
+    <div class="callout warn">
+      <p><strong>Research software.</strong> StandardEyes is a tool for analysing research data. It is not a medical device and does not give medical advice. The authors of a study remain responsible for checking its results.</p>
+    </div>
+  </div>
+</section>
+
+<section class="block alt" id="authors">
+  <div class="wrap">
+    <div class="sechead">
+      <div class="kicker">The authors</div>
+      <h2>Who wrote StandardEyes</h2>
+    </div>
+    <div class="authors">
+<article class="card author"><div class="av" aria-hidden="true"><img src="assets/author_noyman.jpg" alt="" width="480" height="480"></div><h3>Dror Ben Ephraim Noyman, MD</h3><div class="role">Software and statistics · contact for StandardEyes</div><div class="aff"><div>Department of Ophthalmology, Rambam Health Care Campus, Haifa, Israel</div><div>Ruth and Bruce Rappaport Faculty of Medicine, Technion – Israel Institute of Technology, Haifa, Israel</div></div><div class="links"><a href="https://www.linkedin.com/in/dror-be-noyman-18242856/" rel="me noopener">LinkedIn</a><a href="mailto:dror.ben.ephraim@gmail.com">Email</a></div></article>
+<article class="card author"><div class="av" aria-hidden="true"><img src="assets/author_mimouni.jpg" alt="" width="480" height="480"></div><h3>Prof. Michael Mimouni, MD</h3><div class="role">Clinical adviser · Clinical Associate Professor, Director of the Cornea Unit</div><div class="aff"><div>Department of Ophthalmology, Rambam Health Care Campus, Haifa, Israel</div><div>Ruth and Bruce Rappaport Faculty of Medicine, Technion – Israel Institute of Technology, Haifa, Israel</div><div>Care Vision laser centres, Israel</div></div><p style="margin-top:12px">Cornea, cataract and refractive surgeon.</p><div class="links"><a href="https://mimouni.co.il/en/" rel="me noopener">Website</a></div></article>
+<article class="card author"><div class="av" aria-hidden="true"><img src="assets/author_safir.jpg" alt="" width="480" height="480"></div><h3>Margarita Safir, MD</h3><div class="role">Writing and mentoring</div><div class="aff"><div>Ophthalmology Department, Rabin Medical Center, Petah Tikva, Israel</div><div>Gray Faculty of Medical and Health Sciences, Tel Aviv University, Tel Aviv, Israel</div></div><div class="links"><a href="https://www.linkedin.com/in/margarita-safir-645429145/" rel="me noopener">LinkedIn</a></div></article>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="cite">
+  <div class="wrap">
+    <div class="grid g2" style="align-items:start">
+      <div>
+        <div class="kicker">Citing</div>
+        <h2 style="margin-bottom:14px">How to cite StandardEyes</h2>
+        <p>If StandardEyes contributes to a publication, please cite it. Give the version you used. The app shows it in its header and writes it into the Manifest sheet of every workbook it runs.</p>
+        <div class="card" style="margin-top:18px">
+          <p id="citation"><b>Noyman DBE, Mimouni M, Safir M.</b> StandardEyes: standardized comparative analysis and outcomes reporting for refractive surgery. Version 1.0.0; 2026. https://standardeyes.github.io</p>
+          <div class="acts" style="margin-top:14px"><button class="btn sm ghost" data-copy="#citation">Copy citation</button></div>
+        </div>
+        <p class="fine" style="margin-top:12px">A manuscript describing the software is in preparation. This page will carry the reference once it is published.</p>
+      </div>
+      <div>
+        <div class="kicker">BibTeX</div>
+        <pre id="bibtex" tabindex="0"><code>@software{standardeyes,
+  author  = {Noyman, Dror Ben Ephraim and
+             Mimouni, Michael and
+             Safir, Margarita},
+  title   = {StandardEyes: standardized comparative
+             analysis and outcomes reporting
+             for refractive surgery},
+  version = {1.0.0},
+  year    = {2026},
+  url     = {https://standardeyes.github.io}
+}</code></pre>
+        <button class="btn sm ghost" data-copy="#bibtex">Copy BibTeX</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block alt" id="licence">
+  <div class="wrap">
+    <div class="grid g3">
+      <div class="card">
+        <h3>Licence</h3>
+        <p>StandardEyes is released under the MIT License: you may use, copy, modify and redistribute it, including for commercial work, provided the copyright and permission notice are kept with it. It comes without warranty.</p>
+        <p>The bundled Python runtime, R packages and JavaScript library keep their own licences, which are listed in the download.</p>
+      </div>
+      <div class="card">
+        <h3>Report a problem</h3>
+        <p>Open an issue on GitHub, or write to us. Include the version from the app header and the run log. Please never send patient data. The example dataset and a preset file are usually enough.</p>
+        <p><a class="more" href="https://github.com/StandardEyes/standardeyes.github.io/issues">Open an issue</a></p>
+      </div>
+      <div class="card">
+        <h3>Contact</h3>
+        <p>Questions, suggestions and collaborations are welcome.</p>
+        <p><a href="mailto:dror.ben.ephraim@gmail.com">dror.ben.ephraim@gmail.com</a></p>
+        <p><a class="more" href="https://github.com/StandardEyes/standardeyes.github.io">Source code on GitHub</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="site">
+  <div class="wrap cols">
+    <div>
+      <div class="brand small"><span class="wm">Standard<b>Eyes</b></span></div>
+      <p>Standardized comparative analysis and outcomes reporting for refractive surgery. Free, local, reproducible.</p>
+      <p><b style="color:#fff">For Ophthalmologists, By Ophthalmologists.</b></p>
+      <p class="fine">Version 1.0.0 · MIT License · © 2026 Noyman DBE, Mimouni M, Safir M</p>
+    </div>
+    <div>
+      <h2 class="fh">The app</h2>
+      <a href="download.html">Download</a>
+      <a href="download.html#install">Install</a>
+      <a href="download.html#help">Troubleshooting</a>
+      <a href="https://github.com/StandardEyes/standardeyes.github.io/releases">Release notes</a>
+    </div>
+    <div>
+      <h2 class="fh">Learn</h2>
+      <a href="tutorials.html">Video tutorials</a>
+      <a href="guide.html">How it works</a>
+      <a href="examples.html">Example data and settings</a>
+      <a href="guide.html#faq">FAQ</a>
+    </div>
+    <div>
+      <h2 class="fh">Project</h2>
+      <a href="about.html">About</a>
+      <a href="about.html#authors">The authors</a>
+      <a href="about.html#cite">How to cite</a>
+      <a href="https://github.com/StandardEyes/standardeyes.github.io">Source code</a>
+    </div>
+  </div>
+  <div class="wrap"><div class="fine legal">StandardEyes is research software. It is not a medical device and does not give medical advice. Check every result before publication.</div></div>
+</footer>
+
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Enlarged figure" hidden>
+  <button class="close" aria-label="Close enlarged figure">×</button>
+  <figure><img alt=""><figcaption></figcaption></figure>
+</div>
+<script src="assets/site.js?v=a0e2d221" defer></script>
+</body>
+</html>

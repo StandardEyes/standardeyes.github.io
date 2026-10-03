@@ -1,0 +1,32 @@
+WEBVTT
+
+00:00:00.680 --> 00:00:04.410
+Tutorial one. Load your data and define the groups.
+
+00:00:05.468 --> 00:00:10.637
+Start by loading your Excel file. You can browse for it, or paste its full path.
+
+00:00:13.398 --> 00:00:19.636
+The file is read straight from your disk. Nothing is uploaded. The app runs entirely on this computer.
+
+00:00:19.906 --> 00:00:26.143
+This is the example dataset that comes with the app. It has one row for each eye and each surgery.
+
+00:00:26.407 --> 00:00:31.808
+An example study is one click away. A preset holds every setting of one study.
+
+00:00:34.555 --> 00:00:40.885
+Tell the app which columns identify the patient and the eye, and which column defines the groups you want to compare.
+
+00:00:41.125 --> 00:00:50.056
+Name each group, and tick the values that belong to it. You can define two groups or more. Every comparison is made against the reference group.
+
+00:00:50.312 --> 00:00:55.435
+Live counts update as you work: the rows in the analysis, and the rows in each group.
+
+00:00:55.763 --> 00:01:03.068
+Save your own study as a preset. Reload it later, or send it to a colleague, and the analysis is reproduced exactly.
+
+00:01:03.849 --> 00:01:08.322
+StandardEyes. For ophthalmologists, by ophthalmologists.
+

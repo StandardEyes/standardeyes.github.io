@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If StandardEyes contributes to a publication, please cite it as below."
+title: "StandardEyes: standardized comparative analysis and outcomes reporting for refractive surgery"
+type: software
+version: "1.0.0"
+date-released: "2026-10-03"
+repository-code: "https://github.com/StandardEyes/standardeyes.github.io"
+url: "https://standardeyes.github.io"
+license: MIT
+authors:
+  - family-names: "Noyman"
+    given-names: "Dror Ben Ephraim"
+    orcid: "https://orcid.org/0000-0002-3213-3524"
+    affiliation: "Department of Ophthalmology, Rambam Health Care Campus; Ruth and Bruce Rappaport Faculty of Medicine, Technion - Israel Institute of Technology, Haifa, Israel"
+  - family-names: "Mimouni"
+    given-names: "Michael"
+  - family-names: "Safir"
+    given-names: "Margarita"
+keywords:
+  - refractive surgery
+  - outcomes reporting
+  - standardized graphs
+  - astigmatism vector analysis
+  - propensity score matching
+  - generalized estimating equations

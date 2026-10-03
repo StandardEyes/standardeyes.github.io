@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://standardeyes.github.io/sitemap.xml

@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StandardEyes</title>
+<link rel="stylesheet" href="/styles.css">
+<script src="/app.js"></script>
+<script defer src="/vendor/alpine.min.js"></script>
+</head>
+<body x-data="builder()">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="se-logo" viewBox="0 0 232 168">
+    <g fill="none" stroke="currentColor" stroke-width="8.5"
+       stroke-linecap="round" stroke-linejoin="round">
+      <path d="M7 84 C30 42 78 42 101 84 C78 126 30 126 7 84 Z"/>
+      <circle cx="54" cy="84" r="23"/>
+      <circle cx="54" cy="84" r="11"/>
+      <circle cx="45.5" cy="74" r="4.4"/>
+      <path d="M130 114 V92"/><path d="M148 114 V70"/>
+      <path d="M166 114 V82"/><path d="M184 114 V58"/>
+      <path d="M104 66 C138 30 174 14 208 12"/>
+      <path d="M194 1 L211 12 L196 26"/>
+      <path d="M104 102 C138 138 174 154 208 156"/>
+      <path d="M194 145 L211 156 L196 170"/>
+    </g>
+  </symbol>
+</svg>
+
+<header class="app">
+  <svg class="logo" viewBox="0 0 232 168" role="img" aria-label="StandardEyes logo"><use href="#se-logo"/></svg>
+  <h1>Standard<span class="wm2">Eyes</span> <span class="h1sub">· refractive surgery analysis</span></h1>
+  <span class="sub">By Noyman DBE, Mimouni M, Safir M · <span x-text="versionLabel()"></span></span>
+  <span class="spacer"></span>
+  <button class="btn secondary" style="margin-right:10px" @click="loadRSetup(false); rSetupOpen=true">⚙ R setup</button>
+  <span class="statuslight" :title="appStatus().label">
+    <span class="dot" :class="appStatus().color"></span>
+    <span class="statustext" x-text="appStatus().label"></span>
+  </span>
+</header>
+
+<div class="stalebar" x-show="versionMismatch" x-cloak>
+  ⚠ The running app is out of date (server <span x-text="serverVersion"></span>, page needs <span x-text="UI_VERSION"></span>).
+  Close the app's black console window and double-click <b>Start StandardEyes.bat</b> again, then hard-refresh this page (Ctrl+F5).
+</div>
+
+<!-- ============ R SETUP ============ -->
+<div class="setupbar" x-show="rSetupOpen" x-cloak>
+  <div class="setupinner">
+    <h2 x-text="rInfo.rscript ? '✅ R is set up' : '⚙ One-time setup: where is R?'"></h2>
+
+    <template x-if="!rInfo.rscript">
+      <p>
+        This app does the statistics in <b>R</b>. Everything else — including all
+        R packages — is already bundled, so there is nothing else to install.
+        We could not find R automatically on this computer.
+      </p>
+    </template>
+
+    <template x-if="rInfo.rscript">
+      <p>
+        Using: <code x-text="rInfo.rscript"></code><br>
+        <span x-text="rInfo.info"></span>
+      </p>
+    </template>
+
+    <template x-if="rInfo.candidates && rInfo.candidates.length">
+      <div>
+        <label class="field">R installations found on this computer — pick one:</label>
+        <template x-for="c in rInfo.candidates" :key="c">
+          <button class="btn secondary block" style="text-align:left"
+                  @click="useRscript(c)" x-text="c"></button>
+        </template>
+      </div>
+    </template>
+
+    <label class="field" style="margin-top:12px">…or choose <b>Rscript.exe</b> yourself
+      (inside R's <code>bin</code> folder):</label>
+    <div class="setuprow">
+      <input type="text" x-model="rPathInput"
+             placeholder="C:\Program Files\R\R-4.5.2\bin\Rscript.exe"
+             @keydown.enter="useRscript(rPathInput)">
+      <button class="btn" @click="pickRscript()">Browse…</button>
+      <button class="btn" @click="useRscript(rPathInput)">Use this</button>
+    </div>
+
+    <p class="setupmsg" :class="rMsgOk ? 'ok' : 'bad'" x-show="rMsg" x-text="rMsg"></p>
+
+    <details style="margin-top:12px">
+      <summary>I don't have R installed</summary>
+      <p class="muted">
+        Install <b>R 4.5.x for Windows</b> (the bundled packages are built for 4.5.x;
+        R 4.6 or later may not load them), then click <b>Re-check</b>. If your network
+        blocks the download, ask IT to install R — no extra R packages are needed, this
+        app brings its own. R 4.5.2 is at <code>cran.r-project.org/bin/windows/base/old/4.5.2/</code>
+        (the main CRAN page offers a newer R).
+      </p>
+    </details>
+
+    <div class="setuprow" style="margin-top:14px">
+      <button class="btn secondary" @click="loadRSetup()">Re-check</button>
+      <button class="btn" @click="rSetupOpen=false" x-show="rInfo.rscript">Continue to the app →</button>
+    </div>
+    <p class="muted" style="margin-top:10px">StandardEyes — By Noyman DBE, Mimouni M, Safir M</p>
+  </div>
+</div>
+<div class="layout">
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="card">
+      <h3>1 · Data file</h3>
+      <button class="btn block" @click="pickFile()" title="Excel workbooks (.xlsx / .xlsm). Save an old .xls as .xlsx first.">📂 Browse &amp; load Excel (.xlsx)…</button>
+      <label class="field" title="Alternative to Browse: paste a full file path, then click the button below to load it">…or paste a full path, then:</label>
+      <input type="text" x-model="pathInput" placeholder="C:\path\to\data.xlsx" @keydown.enter="loadFile()">
+      <button class="btn secondary block" @click="loadFile()">Load the typed path</button>
+      <template x-if="sheets.length">
+        <div>
+          <label class="field">Sheet</label>
+          <select x-model="sheet" @change="pathInput=file; loadFile()">
+            <template x-for="sh in sheets" :key="sh"><option :value="sh" x-text="sh"></option></template>
+          </select>
+        </div>
+      </template>
+      <template x-if="file">
+        <p class="muted" style="margin-top:8px">
+          <span class="badge ok" x-text="nrows.toLocaleString()+' rows'"></span>
+          <span class="badge" x-text="ncols+' cols'"></span>
+        </p>
+      </template>
+      <template x-if="file && renamedHeaders.length">
+        <p class="small warnline" style="margin:6px 0 0">Blank or repeated headers in this sheet are shown as
+          <b x-text="renamedHeaders.join(', ')"></b>. The analysis uses the same names; renaming them in Excel gives clearer output.</p>
+      </template>
+      <template x-if="file && similarHeaders().length">
+        <p class="small warnline" style="margin:6px 0 0">Headers that differ only in case or punctuation:
+          <b x-text="similarHeaders().map(a=>a.join(' / ')).join('; ')"></b>. Pick them by their exact name; renaming one in Excel avoids mix-ups.</p>
+      </template>
+      <template x-if="unresolvedMappings().length">
+        <div class="small errline" style="margin:6px 0 0">
+          <span x-text="unresolvedMappings().length+' mapped column(s) are not in this file and will be ignored:'"></span>
+          <span style="font-weight:400" x-text="unresolvedMappings().join(', ')"></span>
+          <span style="font-weight:400">— re-map them (a preset from another study?) or clear them.</span>
+        </div>
+      </template>
+    </div>
+
+    <div class="card">
+      <h3>Live preview</h3>
+      <template x-if="!file"><p class="muted">Load a file to see counts.</p></template>
+      <template x-if="file && counts">
+        <div>
+          <div class="counts">
+            <div class="countbox"><div class="n" x-text="(counts.after_subsets ?? counts.after_filters).toLocaleString()"></div><div class="l">in analysis</div></div>
+            <div class="countbox"><div class="n" x-text="counts.total_rows.toLocaleString()"></div><div class="l">total rows</div></div>
+          </div>
+          <div style="margin-top:8px" class="small">
+            <template x-for="[g,n] in Object.entries(counts.groups)" :key="g">
+              <div><span class="badge" x-text="g"></span> <strong x-text="n.toLocaleString()"></strong></div>
+            </template>
+          </div>
+          <p class="small warnline" style="margin:6px 0 0" x-show="counts.patient_id_missing > 0"
+             x-text="(counts.patient_id_missing||0).toLocaleString()+' row(s) in the analysis have no patient ID — each is counted as its own patient.'"></p>
+          <p class="small warnline" style="margin:6px 0 0" x-show="counts.patient_id_unmapped === true">No patient ID column (or not in this file) — every eye is counted as its own patient, so two eyes of one person are not clustered.</p>
+        </div>
+      </template>
+      <p class="muted small" x-show="countsBusy">updating…</p>
+      <p class="small" style="color:var(--err)" x-show="countsError" x-text="'Preview error: '+countsError"></p>
+    </div>
+
+    <div class="card">
+      <h3>Output</h3>
+      <label class="field">Output folder <span class="muted small">(where spreadsheets &amp; graphs are saved)</span></label>
+      <div class="inline">
+        <input type="text" x-model="s.output_dir" placeholder="results folder">
+        <button class="btn secondary sm" @click="pickFolder()" title="browse for folder">📁</button>
+      </div>
+      <label class="field">File name prefix</label>
+      <input type="text" x-model="s.output_prefix">
+      <p class="small warnline" x-show="prefixOnDisk()" style="margin:3px 0 0"
+         x-text="'File names will start with “'+prefixOnDisk()+'” (characters Windows does not allow are replaced).'"></p>
+      <label class="switch"><input type="checkbox" x-model="s.export_filtered_csv"> Export filtered CSV</label>
+    </div>
+
+    <label class="switch" title="Results stay inside the app for preview; nothing is written to your output folder until you choose what to save.">
+      <input type="checkbox" x-model="previewOnly"> Preview only (don't save files)
+    </label>
+    <button class="btn run block" @click="run()" :disabled="running">
+      <span x-text="running ? 'Running…' : (previewOnly ? '▶ RUN (preview only)' : '▶ RUN & SAVE')"></span>
+    </button>
+    <button class="btn secondary block" x-show="running || serverBusy" x-cloak @click="cancelRun()" :disabled="cancelling"
+            title="Stops the R process; nothing from this run is kept">
+      <span x-text="cancelling ? 'Stopping…' : (running ? '■ Cancel the run' : '■ Stop the analysis still running')"></span>
+    </button>
+
+    <div class="card" style="margin-top:16px">
+      <h3>Study presets</h3>
+      <p class="muted small" style="margin:0 0 6px">A preset = <b>every setting of one study/project</b> (groups, filters, variables, matching…). Saved inside the app on this computer — click a name to load that study.</p>
+      <p class="small" x-show="activePreset" style="margin:0 0 6px">Working on: <span class="badge ok" x-text="activePreset"></span></p>
+      <div class="inline">
+        <input type="text" x-model="presetName" :placeholder="activePreset || 'name this study…'">
+        <button class="btn sm" @click="savePreset()" title="saves ALL current settings under this name">Save</button>
+      </div>
+      <template x-for="p in presets" :key="p">
+        <div class="inline" style="margin-top:6px">
+          <button class="btn ghost sm grow" style="text-align:left;flex:1" @click="loadPreset(p)" x-text="p"></button>
+          <button class="btn ghost sm danger" @click="deletePreset(p)" :title="'Delete preset '+p" :aria-label="'Delete preset '+p">✕</button>
+        </div>
+      </template>
+      <div class="divider"></div>
+      <button class="btn secondary sm block" @click="downloadCfg()">⭳ Download config JSON</button>
+      <label class="btn secondary sm block" style="text-align:center;cursor:pointer">⭱ Load config JSON
+        <input type="file" accept=".json" @change="uploadCfg($event)" style="display:none">
+      </label>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <main class="main">
+    <div class="tabbar" role="tablist">
+      <template x-for="[id,label] in tabs" :key="id">
+        <button type="button" role="tab" :aria-selected="tab===id" :class="tab===id && 'active'" @click="tab=id" x-text="label"></button>
+      </template>
+    </div>
+
+    <!-- ---------- DATA & GROUPS ---------- -->
+    <div x-show="tab==='data'" x-cloak>
+      <div class="card">
+        <h3>Identifiers & group source</h3>
+        <div class="grid3">
+          <template x-for="f in ID_FIELDS" :key="f.key">
+            <div>
+              <label class="field" x-text="f.label"></label>
+              <div class="combo" x-data="combo(()=>s[f.key], v=>s[f.key]=v, ()=>cols, true)">
+                <input type="text" :value="open?q:val()" :placeholder="val()||'search column…'"
+                       @focus="onFocus()" @input="q=$event.target.value;open=true;idx=0" @keydown="key($event)" @click.outside="open=false" role="combobox" aria-autocomplete="list" :aria-expanded="open">
+                <div class="combo-list" role="listbox" x-show="open">
+                  <div class="combo-item muted" role="option" :class="idx===-1 && 'active'" :aria-selected="idx===-1" @mousedown.prevent="choose('')">— none —</div>
+                  <template x-for="(c,ci) in list()" :key="c"><div class="combo-item" role="option" :class="ci===idx && 'active'" :aria-selected="ci===idx" @mousedown.prevent="choose(c)" x-text="c"></div></template>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Groups <span class="pill" x-text="groupNames().length + ' defined'"></span></h3>
+        <p class="hint">Each group = a set of exact values from the group-source column. The reference group is the comparator for matching &amp; GEE. More than 2 groups is supported.</p>
+        <template x-for="(g,i) in s.groups" :key="g._uid ?? i">
+          <div class="repeat-row">
+            <div style="width:190px">
+              <label class="field">Name
+                <span class="tag-ref" x-show="isRef(g)"> ★ reference</span>
+              </label>
+              <input type="text" :value="g.name" @input="renameGroup(g, $event.target.value)" aria-label="group name">
+              <p class="small errline" x-show="isDupGroup(g)" style="margin:2px 0 0">duplicate name — groups need unique names</p>
+              <label class="switch small"><input type="radio" name="refgroup" :checked="isRef(g)" @change="setReference(g)"> reference</label>
+              <label class="switch small" title="figure color for this group (used in all manuscript graphs)">
+                <input type="color" :value="groupColor(i)" @change="g.color=$event.target.value"
+                       style="width:38px;height:24px;padding:1px;border:1px solid var(--border);border-radius:5px">
+                figure color
+              </label>
+              <input type="text" x-model="g.fig_label" placeholder="figure label (optional)"
+                     title="how this group is written in the figures (legend, annotations); leave empty to use the group name"
+                     style="margin-top:4px">
+            </div>
+            <div class="grow">
+              <label class="field">Values in this group
+                <span class="badge" x-show="counts && counts.groups && counts.groups[g.name]!=null" x-text="(counts && counts.groups) ? ('n='+(counts.groups[g.name]??0)) : ''"></span>
+              </label>
+              <div class="ms" x-data="{q:''}">
+                <div class="chips"><template x-for="v in g.values" :key="v"><button type="button" class="chip" @click="toggle(g.values,v)" :aria-label="'remove '+v" :title="'remove '+v" x-text="v"></button></template></div>
+                <input class="ms-search" placeholder="filter values…" x-model="q" @input="searchDistinct(s.group_source_var,q)">
+                <p class="small warnline" x-show="truncNote(s.group_source_var)" x-text="truncNote(s.group_source_var)" style="margin:0 0 4px"></p>
+                <div class="ms-list">
+                  <template x-for="c in valueOpts(s.group_source_var,q,groupSourceValues)" :key="c">
+                    <label class="ms-item"><input type="checkbox" :checked="has(g.values,c)" @change="toggle(g.values,c)"><span x-text="c"></span></label>
+                  </template>
+                </div>
+              </div>
+            </div>
+            <button class="btn ghost danger" @click="removeGroup(i)" title="Remove group" aria-label="Remove group">✕</button>
+          </div>
+        </template>
+        <button class="btn secondary sm" @click="addGroup()">+ Add group</button>
+        <p class="small warnline" x-show="file && s.groups.some(g=>g.values.length) && referenceProblem()" x-text="'⚠ '+referenceProblem()" style="margin:8px 0 0"></p>
+      </div>
+
+      <div class="card">
+        <h3>Data preview <span class="muted small">— click a column header to sort (full dataset)</span>
+          <label class="switch small" style="display:inline-flex;margin-left:14px">
+            <input type="checkbox" x-model="relevantOnly"> relevant columns only
+            (<span x-text="relevantCols().length"></span> selected across the app)
+          </label>
+        </h3>
+        <div class="inline" x-show="file" style="margin-bottom:8px">
+          <button class="btn secondary sm" @click="exportFiltered()" :disabled="filteredExport.busy">
+            <span x-text="filteredExport.busy ? 'exporting…' : '⭳ Export filtered rows (CSV)'"></span>
+          </button>
+          <span class="muted small">writes the rows currently passing filters/subsets to the output folder — no analysis run needed</span>
+        </div>
+        <p class="small" style="color:var(--ok-tx)" x-show="filteredExport.path"
+           x-text="'Saved '+(filteredExport.rows!==null?filteredExport.rows.toLocaleString():'')+' rows to '+filteredExport.path"></p>
+        <p class="small" style="color:var(--err)" x-show="filteredExport.error" x-text="filteredExport.error"></p>
+        <template x-if="!file"><p class="muted">No file loaded.</p></template>
+        <template x-if="file">
+          <div class="tablewrap">
+            <table class="data">
+              <thead><tr><template x-for="c in displayTable(preview).columns" :key="c">
+                <th class="sortable" @click="sortBy(c)" x-text="c + sortMark(c)"></th>
+              </template></tr></thead>
+              <tbody><template x-for="(row,ri) in displayTable(preview).rows" :key="ri"><tr><template x-for="(cell,ci) in row" :key="ci"><td x-text="cell"></td></template></tr></template></tbody>
+            </table>
+          </div>
+        </template>
+      </div>
+
+      <div class="card" x-show="file">
+        <h3>Column distribution &amp; within-group analysis <span class="muted small">— live; scope it to one group and/or the matched cohort</span></h3>
+        <div class="grid3">
+          <div>
+            <label class="field">Column <span class="muted small">(or click a table header above)</span></label>
+            <div class="combo" x-data="combo(()=>hist.col, v=>showHist(v), ()=>cols)">
+              <input type="text" :value="open?q:val()" :placeholder="val()||'search column…'"
+                     @focus="onFocus()" @input="q=$event.target.value;open=true;idx=0" @keydown="key($event)" @click.outside="open=false" role="combobox" aria-autocomplete="list" :aria-expanded="open">
+              <div class="combo-list" role="listbox" x-show="open">
+                <template x-for="(c,ci) in list()" :key="c"><div class="combo-item" role="option" :class="ci===idx && 'active'" :aria-selected="ci===idx" @mousedown.prevent="choose(c)" x-text="c"></div></template>
+              </div>
+            </div>
+          </div>
+          <div>
+            <label class="field">Stage</label>
+            <select :value="hist.stage" @change="setHistStage($event.target.value)">
+              <option value="filtered">After filters / subsets (live)</option>
+              <option value="matched" :disabled="!matchedAvailable()"
+                x-text="matchedAvailable() ? 'After matching (last run)' : 'After matching — run the analysis first'"></option>
+            </select>
+          </div>
+          <div>
+            <label class="field">Group</label>
+            <select x-model="hist.group" @change="showHist()">
+              <option value="">— whole cohort —</option>
+              <template x-for="g in groupNames()" :key="g"><option :value="g" x-text="g+' only'"></option></template>
+            </select>
+          </div>
+        </div>
+        <template x-if="hist.stage==='matched' && matchedPaths().length>1">
+          <div style="margin-top:8px; max-width:420px">
+            <label class="field">Matched output (subset run)</label>
+            <select x-model="hist.mfile" @change="showHist()">
+              <template x-for="f in results.matched_files" :key="f.path"><option :value="f.path" x-text="f.name"></option></template>
+            </select>
+          </div>
+        </template>
+        <p class="muted small" x-show="hist.busy">computing…</p>
+        <p class="small" style="color:var(--err)" x-show="hist.error" x-text="hist.error"></p>
+        <template x-if="hist.data && hist.data.stats && hist.data.stats.all">
+          <p class="small" style="margin:8px 0 2px">
+            <span class="badge" x-text="histAllLabel()"></span>
+            n <strong x-text="hist.data.stats.all.n.toLocaleString()"></strong> ·
+            mean <strong x-text="fmtStat(hist.data.stats.all.mean)"></strong> ± <span x-text="fmtStat(hist.data.stats.all.sd)"></span> ·
+            median <strong x-text="fmtStat(hist.data.stats.all.median)"></strong> ·
+            range <span x-text="fmtStat(hist.data.stats.all.min)+' – '+fmtStat(hist.data.stats.all.max)"></span> ·
+            missing <span x-text="hist.data.na_all.toLocaleString()"></span>
+            <template x-if="hist.data.stats.kept">
+              <span> &nbsp;|&nbsp; <span class="badge ok" x-text="histKeptLabel()"></span>
+              n <strong x-text="hist.data.stats.kept.n.toLocaleString()"></strong> ·
+              mean <strong x-text="fmtStat(hist.data.stats.kept.mean)"></strong> ± <span x-text="fmtStat(hist.data.stats.kept.sd)"></span> ·
+              median <strong x-text="fmtStat(hist.data.stats.kept.median)"></strong></span>
+            </template>
+          </p>
+        </template>
+        <template x-if="hist.data && hist.data.type==='categorical'">
+          <p class="small muted" style="margin:8px 0 2px">
+            <span x-text="hist.data.n_levels"></span> distinct values
+            <template x-if="hist.data.other_all"><span> (top shown; <span x-text="hist.data.other_all.toLocaleString()"></span> rows in other values)</span></template>
+            · missing <span x-text="hist.data.na_all.toLocaleString()"></span>
+          </p>
+        </template>
+        <template x-if="hist.data && hist.data.bins.length">
+          <div class="hist">
+            <template x-for="(b,i) in hist.data.bins" :key="i">
+              <div class="hist-row">
+                <div class="hist-label" x-text="b.label" :title="b.label"></div>
+                <div class="hist-track">
+                  <div class="hist-bar all" :style="'width:'+barW(b.all)"></div>
+                  <template x-if="b.kept!=null"><div class="hist-bar kept" :style="'width:'+barW(b.kept)"></div></template>
+                </div>
+                <div class="hist-n">
+                  <span x-text="b.all.toLocaleString()"></span><template x-if="b.kept!=null"><span class="kept-n" x-text="' / '+b.kept.toLocaleString()"></span></template>
+                </div>
+              </div>
+            </template>
+            <p class="muted small" style="margin:6px 0 0">
+              bar = <span x-text="histAllLabel()"></span> · green = <span x-text="histKeptLabel()"></span> · counts shown side by side
+              <template x-if="hist.data && hist.data.pairings && hist.data.pairings.length>1">
+                <span> · matched data spans pairings: <span x-text="hist.data.pairings.join(', ')"></span> — distinct eyes: an eye matched in several pairings is counted once</span>
+              </template>
+            </p>
+          </div>
+        </template>
+        <template x-if="hist.data && !hist.data.bins.length">
+          <p class="muted">No plottable values in this column.</p>
+        </template>
+      </div>
+    </div>
+
+    <!-- ---------- VARIABLES & TYPES ---------- -->
+    <div x-show="tab==='vars'" x-cloak>
+      <div class="card">
+        <h3>Refraction standardization</h3>
+        <label class="switch"><input type="checkbox" x-model="s.do_standardize_minus_cyl"> Convert plus-cylinder to minus-cylinder</label>
+        <p class="hint">Applied to <b>every</b> sphere/cylinder/axis set below (pre-op, intra-op treatment parameters, post-op). Nothing is guessed from column names: once the <b>Pre</b> and <b>Post Sphere / Cylinder / Axis</b> roles are all mapped (<i>Column roles</i>, Special outputs tab) and no set exists yet, those two sets are filled in here. Add any other set (e.g. intra-op treatment parameters) by hand, or remove sets as needed. <b>This conversion runs first, before anything else</b> — filters, matching, GEE, regression and every figure all use the converted values, and the live row counts below reflect them.</p>
+        <div x-show="s.do_standardize_minus_cyl">
+          <template x-for="(t,i) in s.std_triples" :key="t._uid ?? i">
+            <div class="repeat-row">
+              <template x-for="part in ['sph','cyl','axis']" :key="part">
+                <div class="grow">
+                  <label class="field" x-text="{sph:'Sphere',cyl:'Cylinder',axis:'Axis'}[part]"></label>
+                  <div class="combo" x-data="combo(()=>t[part], v=>t[part]=v, ()=>cols, true)">
+                    <input type="text" :value="open?q:val()" :placeholder="val()||'search column…'"
+                           @focus="onFocus()" @input="q=$event.target.value;open=true;idx=0" @keydown="key($event)" @click.outside="open=false" role="combobox" aria-autocomplete="list" :aria-expanded="open">
+                    <div class="combo-list" role="listbox" x-show="open">
+                      <div class="combo-item muted" role="option" :class="idx===-1 && 'active'" :aria-selected="idx===-1" @mousedown.prevent="choose('')">— none —</div>
+                      <template x-for="(c,ci) in list()" :key="c"><div class="combo-item" role="option" :class="ci===idx && 'active'" :aria-selected="ci===idx" @mousedown.prevent="choose(c)" x-text="c"></div></template>
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <button class="btn ghost danger" @click="removeStdTriple(i)" title="Remove this row" aria-label="Remove this row">✕</button>
+            </div>
+          </template>
+          <p class="small warnline" x-show="!s.std_triples.some(t=>t.cyl)" style="margin:3px 0 6px">No set with a cylinder column yet — nothing will be converted until one is added (or the Pre and Post Sphere / Cylinder / Axis roles are mapped).</p>
+          <button class="btn secondary sm" @click="addStdTriple()">+ Add sphere/cyl/axis set</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Visual acuity</h3>
+        <div class="grid2">
+          <div>
+            <label class="field" for="va-format">VA notation in your file</label>
+            <select id="va-format" x-model="s.va_format">
+              <template x-for="f in VA_FORMATS" :key="f[0]"><option :value="f[0]" x-text="f[1]"></option></template>
+            </select>
+          </div>
+        </div>
+        <p class="opt-hint" style="margin-left:0">Applies to every column mapped to a VA role (Pre/Post UCVA and BCVA, Special outputs tab) and to the LogMAR columns below. Snellen may be written 20/x or 6/x, with letter suffixes such as 20/25-2. Off-chart entries (CF, HM, LP, NLP) become missing and are counted in the run log; they are never given an invented acuity. The run stops if most of a column cannot be read in the chosen notation, and when a column declared as ETDRS letters looks like decimal acuity (more than half of its numbers are not whole numbers, or its largest value is below 5). Excel turns a typed 6/12 into a date, so keep Snellen columns formatted as text.</p>
+        <template x-if="vaMismatch().length">
+          <p class="opt-hint warnline" style="margin-left:0"><b>Check the notation:</b>
+            <template x-for="m in vaMismatch()" :key="m.col">
+              <span><span x-text="m.col"></span> looks like <b x-text="vaFormatLabel(m.guess)"></b>; </span>
+            </template>
+            the selection above is <b x-text="vaFormatLabel(s.va_format)"></b>.</p>
+        </template>
+        <template x-for="(w,wi) in vaWarn" :key="wi">
+          <p class="opt-hint warnline" role="alert" style="margin-left:0" x-text="'⚠ '+w"></p>
+        </template>
+        <label class="switch"><input type="checkbox" x-model="s.do_logmar"> Analyse visual-acuity columns in LogMAR</label>
+        <p class="opt-hint">LogMAR = −log10(decimal VA). Pick the VA columns to analyse in LogMAR; summaries, tests and GEE then run on the LogMAR values (lower = better vision, 0 = 20/20). <b>Filter rules and exclusions always use the values as recorded in your file</b>, so a filter typed in your own units means what it says.
+          <template x-if="s.va_format==='logmar'"><span><br>Your file is already in LogMAR: the VA columns are analysed as recorded and never converted a second time, so this switch changes nothing.</span></template></p>
+        <div x-show="s.do_logmar">
+          <label class="field">Columns to analyse in LogMAR</label>
+          <div class="ms" x-data="{q:''}">
+            <div class="chips"><template x-for="v in s.logmar_cols_raw" :key="v"><button type="button" class="chip" @click="toggle(s.logmar_cols_raw,v)" :aria-label="'remove '+v" :title="'remove '+v" x-text="v"></button></template></div>
+            <input class="ms-search" placeholder="filter…" x-model="q">
+            <div class="ms-list"><template x-for="c in filterOpts(cols,q)" :key="c">
+              <label class="ms-item"><input type="checkbox" :checked="has(s.logmar_cols_raw,c)" @change="toggle(s.logmar_cols_raw,c)"><span x-text="c"></span></label>
+            </template></div>
+          </div>
+          <p class="opt-hint" style="margin-left:0">The figures and the mEYEstro / Alpins export tabs always read acuity as decimal (converted from the notation above) — you can convert any column freely; only the statistical analysis switches to LogMAR.</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Variable roles &amp; statistical types</h3>
+        <p class="hint">Assign each variable to a section (Baseline / Preop-Intraop / Outcome) and a type. Type controls the summary style and test (t-test/ANOVA, Wilcoxon/Kruskal, χ²/Fisher).</p>
+        <div class="grid4">
+          <template x-for="f in typingFields()" :key="f.key">
+            <div class="col">
+              <label class="field" x-text="f.label"></label>
+              <div class="ms" x-data="{q:''}">
+                <div class="chips"><template x-for="v in f.arr" :key="v"><button type="button" class="chip" @click="toggle(f.arr,v)" :aria-label="'remove '+v" :title="'remove '+v" x-text="v"></button></template></div>
+                <input class="ms-search" placeholder="filter…" x-model="q">
+                <div class="ms-list">
+                  <template x-for="c in filterOpts(cols,q)" :key="c">
+                    <label class="ms-item"><input type="checkbox" :checked="has(f.arr,c)" @change="toggleType(f.sec,f.ty,c)"><span x-text="c"></span></label>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+        <p class="opt-hint" style="margin-left:0">A variable has one type per section: ticking it under another type moves it there.</p>
+        <template x-if="typeConflicts().length">
+          <p class="small errline" style="margin:4px 0 0">Listed under more than one type (from a loaded config) —
+            <template x-for="t in typeConflicts()" :key="t.sec+'|'+t.v">
+              <span><span x-text="t.v+' ('+(SECTION_TITLES[t.sec]||'Within-group')+': '+t.types.join(' + ')+')'"></span>; </span>
+            </template>
+            untick all but one.</p>
+        </template>
+      </div>
+
+      <div class="card">
+        <h3>Within-group parameters <span class="muted small">— distribution only, summarized inside each group separately (no between-group test)</span></h3>
+        <p class="hint">Use for variables that are meaningful only in one group (e.g. a medication recorded only for the treated group). Their per-group distribution tables appear on the "Baseline &amp; Preop Summary" sheet — <b>both before matching and after</b> (on each matched pairing's BasePreop sheet). A group with no data for the variable simply shows blank.</p>
+        <div class="grid4">
+          <template x-for="ty in TYPES" :key="'wg'+ty">
+            <div class="col">
+              <label class="field" x-text="ty[0].toUpperCase()+ty.slice(1)"></label>
+              <div class="ms" x-data="{q:''}">
+                <div class="chips"><template x-for="v in s.within_group[ty]" :key="v"><button type="button" class="chip" @click="toggle(s.within_group[ty],v)" :aria-label="'remove '+v" :title="'remove '+v" x-text="v"></button></template></div>
+                <input class="ms-search" placeholder="filter…" x-model="q">
+                <div class="ms-list">
+                  <template x-for="c in filterOpts(cols,q)" :key="c">
+                    <label class="ms-item"><input type="checkbox" :checked="has(s.within_group[ty],c)" @change="toggleType('within_group',ty,c)"><span x-text="c"></span></label>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <template x-if="withinVars().length">
+          <div style="margin-top:12px">
+            <label class="field">Unit of analysis <span class="muted small">— per variable, any type</span></label>
+            <p class="opt-hint" style="margin-left:0">These tables count <b>eyes</b> by default, so a patient who contributed both eyes is counted twice. Switch a variable to <b>per patient</b> when that would double-count — typically anything recorded once per person (medication, diagnosis, smoking). The first non-missing value per patient is used, matching how patient-level variables are handled in the between-group tables.<template x-if="!s.patient_id_raw"><span style="color:#b45309"><br><b>Set the patient / cluster ID column</b> (Data &amp; Groups tab) first — without it every variable stays per eye.</span></template></p>
+            <div class="grid3">
+              <template x-for="v in withinVars()" :key="'wl'+v">
+                <div>
+                  <label class="field" x-text="v"></label>
+                  <select :value="s.within_levels[v]||'eye'" @change="s.within_levels[v]=$event.target.value">
+                    <option value="eye">per eye (each row)</option>
+                    <option value="patient">per patient (one row per patient)</option>
+                  </select>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <div class="card">
+        <h3>Output order <span class="muted small">— drag a row (or use the arrows); this is the row order in the output tables</span></h3>
+        <p class="hint">Laid out the way the tables will read in the manuscript — one block of rows per section.</p>
+        <template x-for="sec in SECTIONS" :key="sec">
+          <div class="jtable">
+            <div class="jtable-title" x-text="SECTION_TITLES[sec]"></div>
+            <template x-if="s[sec].order.length===0"><div class="jtable-empty muted small">no variables selected yet</div></template>
+            <template x-if="s[sec].order.length">
+              <table class="jtable-t">
+                <thead><tr><th></th><th>#</th><th>Parameter</th><th style="width:110px">Type</th><th></th></tr></thead>
+                <tbody>
+                  <template x-for="(v,i) in s[sec].order" :key="v">
+                    <tr draggable="true"
+                        @dragstart="startDrag($event,sec,i,v)"
+                        @dragend="endDrag()"
+                        @dragover.prevent
+                        @drop.prevent="dropChip(sec,i)"
+                        :class="drag.sec===sec && drag.i===i && 'dragging'">
+                      <td class="grip">⋮⋮</td>
+                      <td class="rownum" x-text="i+1"></td>
+                      <td class="pname" x-text="v"></td>
+                      <td><span class="typetag" x-text="varType(sec,v)"></span></td>
+                      <td class="rowbtns">
+                        <button class="btn ghost sm" @click="moveVar(sec,i,-1)" :disabled="i===0" title="move up">↑</button>
+                        <button class="btn ghost sm" @click="moveVar(sec,i,1)" :disabled="i===s[sec].order.length-1" title="move down">↓</button>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </template>
+          </div>
+        </template>
+      </div>
+
+      <div class="card">
+        <div class="grid2">
+          <template x-for="m in colMultis()" :key="m.key">
+            <div>
+              <label class="field" x-text="m.label"></label>
+              <div class="ms" x-data="{q:''}">
+                <div class="chips"><template x-for="v in m.arr" :key="v"><button type="button" class="chip" @click="toggle(m.arr,v)" :aria-label="'remove '+v" :title="'remove '+v" x-text="v"></button></template></div>
+                <input class="ms-search" placeholder="filter…" x-model="q">
+                <div class="ms-list">
+                  <template x-for="c in filterOpts(cols,q)" :key="c">
+                    <label class="ms-item"><input type="checkbox" :checked="has(m.arr,c)" @change="toggle(m.arr,c)"><span x-text="c"></span></label>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+        <div class="divider"></div>
+        <h3>Key columns for the Initial Summary</h3>
+        <div class="grid3">
+          <template x-for="f in SUMMARY_FIELDS" :key="f.key">
+            <div>
+              <label class="field"><span x-text="f.label"></span>
+                <span class="badge warn" x-show="s[f.key] && !colResolves(s[f.key])" title="this column is not in the loaded file — the row stays blank">not found</span>
+                <span class="muted small" x-show="!s[f.key]">(not mapped — row left blank)</span>
+              </label>
+              <div class="combo" x-data="combo(()=>s[f.key], v=>s[f.key]=v, ()=>cols, true)">
+                <input type="text" :value="open?q:val()" :placeholder="val()||'search column…'"
+                       @focus="onFocus()" @input="q=$event.target.value;open=true;idx=0" @keydown="key($event)" @click.outside="open=false" role="combobox" aria-autocomplete="list" :aria-expanded="open">
+                <div class="combo-list" role="listbox" x-show="open">
+                  <div class="combo-item muted" role="option" :class="idx===-1 && 'active'" :aria-selected="idx===-1" @mousedown.prevent="choose('')">— none —</div>
+                  <template x-for="(c,ci) in list()" :key="c"><div class="combo-item" role="option" :class="ci===idx && 'active'" :aria-selected="ci===idx" @mousedown.prevent="choose(c)" x-text="c"></div></template>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- FILTERS & SUBSETS ---------- -->
+    <div x-show="tab==='filters'" x-cloak>
+      <div class="card">
+        <h3>Filter rules <span class="pill" x-text="s.filters.length"></span></h3>
+        <p class="hint">Rows are kept when they satisfy the rule (NA values are kept, matching the R engine). Type in the column box to search; for <b>in / notin</b> pick values from the list; <b>between</b> has separate lower / upper cells. Rules always compare the values <b>as recorded in your file</b> (e.g. decimal acuity), even for columns analysed in LogMAR.</p>
+        <template x-for="(f,i) in s.filters" :key="f._uid ?? i">
+         <div class="filter-block">
+          <div class="repeat-row">
+            <div style="flex:2">
+              <label class="field">Column</label>
+              <div class="combo" x-data="combo(()=>f.var, v=>setFilterVar(f,v), ()=>cols)">
+                <input type="text" :value="open?q:val()" :placeholder="val()||'search column…'"
+                       @focus="onFocus()" @input="q=$event.target.value;open=true;idx=0" @keydown="key($event)" @click.outside="open=false" role="combobox" aria-autocomplete="list" :aria-expanded="open">
+                <div class="combo-list" role="listbox" x-show="open">
+                  <template x-for="(c,ci) in list()" :key="c"><div class="combo-item" role="option" :class="ci===idx && 'active'" :aria-selected="ci===idx" @mousedown.prevent="choose(c)" x-text="c"></div></template>
+                </div>
+              </div>
+            </div>
+            <div style="width:130px"><label class="field">Operator</label>
+              <select x-model="f.op" @change="coerceFilterValue(f)">
+                <template x-for="o in OPS" :key="o"><option :value="o" x-text="o" :selected="o===f.op"></option></template>
+              </select></div>
+            <div class="grow">
+              <label class="field">Value(s)</label>
+              <template x-if="opKind(f.op)==='none'">
+                <span class="muted small">no value needed</span>
+              </template>
+              <template x-if="opKind(f.op)==='range'">
+                <div class="inline">
+                  <input type="number" step="any" x-model="f.value[0]" placeholder="lower limit">
+                  <span class="muted">to</span>
+                  <input type="number" step="any" x-model="f.value[1]" placeholder="upper limit">
+                </div>
+              </template>
+              <template x-if="opKind(f.op)==='multi'">
+                <div class="ms" x-data="{q:''}">
+                  <div class="chips"><template x-for="v in f.value" :key="v"><button type="button" class="chip" @click="toggle(f.value,v)" :aria-label="'remove '+v" :title="'remove '+v" x-text="v"></button></template></div>
+                  <input class="ms-search" placeholder="search values…" x-model="q" @input="searchDistinct(f.var,q)">
+                  <p class="small warnline" x-show="truncNote(f.var)" x-text="truncNote(f.var)" style="margin:0 0 4px"></p>
+                  <div class="ms-list">
+                    <template x-if="f.var && !(distinctCache[f.var]||[]).length"><div class="muted small" style="padding:3px 5px">no values loaded — pick the column first</div></template>
+                    <template x-for="c in valueOpts(f.var,q)" :key="c">
+                      <label class="ms-item"><input type="checkbox" :checked="has(f.value,c)" @change="toggle(f.value,c)"><span x-text="c"></span></label>
+                    </template>
+                  </div>
+                </div>
+              </template>
+              <template x-if="opKind(f.op)==='text'">
+                <input type="text" x-model="f.value" :placeholder="filterPlaceholder(f)">
+              </template>
+            </div>
+            <div style="width:90px;text-align:center">
+              <label class="field">→ rows</label>
+              <template x-if="filterStep(i) && !filterStep(i).skipped">
+                <span class="badge ok" x-text="filterStep(i).remaining.toLocaleString()"></span>
+              </template>
+              <template x-if="filterStep(i) && filterStep(i).skipped">
+                <span class="badge warn" :title="stepSkipTitle(filterStep(i))" x-text="stepSkipLabel(filterStep(i))"></span>
+              </template>
+              <template x-if="!filterStep(i)"><span class="badge">—</span></template>
+            </div>
+            <button class="btn ghost danger" @click="removeFilter(i)" title="Remove this row" aria-label="Remove this row">✕</button>
+          </div>
+          <p class="small warnline" x-show="filterValueProblem(f)" style="margin:2px 0 0 4px" x-text="'⚠ '+filterValueProblem(f)"></p>
+          <p class="small grouploss" x-show="groupLoss(i).length" style="margin:2px 0 0 4px">
+            <span class="muted">excluded by this rule → </span>
+            <template x-for="gl in groupLoss(i)" :key="gl.g">
+              <span style="margin-right:14px">
+                <span class="badge" x-text="gl.g"></span>
+                <span :style="gl.excluded>0 ? 'color:var(--err);font-weight:700' : 'color:var(--muted)'"
+                      x-text="gl.excluded>0 ? ('−'+gl.excluded.toLocaleString()) : '−0'"></span>
+                <span class="muted">left</span> <strong x-text="gl.remaining.toLocaleString()"></strong>
+              </span>
+            </template>
+          </p>
+         </div>
+        </template>
+        <button class="btn secondary sm" @click="addFilter()">+ Add filter rule</button>
+        <template x-if="counts">
+          <div style="margin-top:10px" class="small">
+            <p class="muted">
+              Total <strong x-text="counts.total_rows.toLocaleString()"></strong>
+              → after exclude <strong x-text="counts.after_exclude.toLocaleString()"></strong>
+              → after filters <strong x-text="counts.after_filters.toLocaleString()"></strong>
+              <template x-if="counts.after_subsets!=null">
+                <span>→ within subsets <strong x-text="counts.after_subsets.toLocaleString()"></strong></span>
+              </template>
+              <em> (live estimate; the R run is authoritative)</em>
+            </p>
+          </div>
+        </template>
+      </div>
+
+      <div class="card">
+        <h3>Subsets (e.g. PRK / LASIK) <span class="pill" x-text="s.subsets.filter(g=>g.enabled!==false && g.values.length).length + ' active'"></span></h3>
+        <p class="hint">Each <b>enabled</b> subset produces its own full output workbook (rows outside every enabled subset are excluded). Defaults for LASIK &amp; PRK are pre-filled from your treatment-type column — untick a value to change what counts as each.
+          <b>Comparing PRK vs LASIK as the groups instead?</b> Set the treatment-type column as the <i>group source</i> on Data &amp; Groups and disable the subsets here.</p>
+        <div class="grid2">
+          <div><label class="field">Subset column</label>
+            <div class="combo" x-data="combo(()=>s.subset_col_raw, v=>setSubsetCol(v), ()=>cols, true)">
+              <input type="text" :value="open?q:val()" :placeholder="val()||'search column…'"
+                     @focus="onFocus()" @input="q=$event.target.value;open=true;idx=0" @keydown="key($event)" @click.outside="open=false" role="combobox" aria-autocomplete="list" :aria-expanded="open">
+              <div class="combo-list" role="listbox" x-show="open">
+                <div class="combo-item muted" role="option" :class="idx===-1 && 'active'" :aria-selected="idx===-1" @mousedown.prevent="choose('')">— none —</div>
+                <template x-for="(c,ci) in list()" :key="c"><div class="combo-item" role="option" :class="ci===idx && 'active'" :aria-selected="ci===idx" @mousedown.prevent="choose(c)" x-text="c"></div></template>
+              </div>
+            </div>
+          </div>
+          <div><label class="field" for="subset-mode">Workbooks</label>
+            <select id="subset-mode" x-model="s.subset_mode">
+              <option value="separate">One workbook per enabled subset</option>
+              <option value="both">Per subset + all enabled subsets pooled (extra combined workbook)</option>
+              <option value="pooled">Pooled only (one workbook of all enabled subsets)</option>
+            </select>
+          </div>
+        </div>
+        <p class="small errline" x-show="subsetColMissing()" style="margin:6px 0 0"
+           x-text="'The subset column “'+s.subset_col_raw+'” is not in this file — re-map it or clear it (choose “— none —”) to analyse all rows.'"></p>
+        <template x-for="(g,i) in s.subsets" :key="g._uid ?? i">
+          <div class="repeat-row" style="margin-top:10px" :style="g.enabled===false ? 'opacity:.55' : ''">
+            <div style="width:190px">
+              <label class="switch" style="margin:0 0 6px"><input type="checkbox" :checked="g.enabled!==false" @change="g.enabled=$event.target.checked"> <b x-text="g.name||('Subset '+(i+1))"></b></label>
+              <input type="text" x-model="g.name" placeholder="subset name">
+              <span class="badge" x-show="counts && counts.subsets && counts.subsets[g.name]" x-text="(counts&&counts.subsets&&counts.subsets[g.name]) ? ('n='+counts.subsets[g.name].total.toLocaleString()) : ''"></span></div>
+            <div class="grow"><label class="field">Treatment-type values in this subset</label>
+              <div class="ms" x-data="{q:''}">
+                <div class="chips"><template x-for="v in g.values" :key="v"><button type="button" class="chip" @click="toggle(g.values,v)" :aria-label="'remove '+v" :title="'remove '+v" x-text="v"></button></template></div>
+                <input class="ms-search" placeholder="filter values…" x-model="q" @input="searchDistinct(s.subset_col_raw,q)">
+                <p class="small warnline" x-show="truncNote(s.subset_col_raw)" x-text="truncNote(s.subset_col_raw)" style="margin:0 0 4px"></p>
+                <div class="ms-list"><template x-for="c in valueOpts(s.subset_col_raw,q,subsetColValues)" :key="c">
+                  <label class="ms-item"><input type="checkbox" :checked="has(g.values,c)" @change="toggle(g.values,c)"><span x-text="c"></span></label>
+                </template></div>
+              </div>
+            </div>
+            <button class="btn ghost danger" @click="removeSubset(i)" title="Remove subset" aria-label="Remove subset">✕</button>
+          </div>
+        </template>
+        <button class="btn secondary sm" @click="addSubset()">+ Add subset</button>
+        <p class="small errline" x-show="subsetNameProblems().length" style="margin:6px 0 0"
+           x-text="'Subset names: '+subsetNameProblems().join('; ')+'. Each subset names its own workbook and figure folder, so the run is blocked until this is fixed.'"></p>
+      </div>
+
+      <div class="card" x-show="file">
+        <h3>Filtered data preview <span class="muted small">— live: the rows that will actually be analyzed (after exclude, filters &amp; subsets) · click a header to sort</span>
+          <label class="switch small" style="display:inline-flex;margin-left:14px">
+            <input type="checkbox" x-model="relevantOnly"> relevant columns only
+          </label>
+          <span class="muted small" x-show="fprev.busy"> updating…</span>
+        </h3>
+        <p class="small" style="color:var(--err)" x-show="fprev.error" x-text="fprev.error"></p>
+        <template x-if="fprev.data">
+          <div>
+            <p class="muted small" style="margin:4px 0">
+              Showing first <span x-text="Math.min(50, fprev.data.rows.length)"></span> of
+              <strong x-text="fprev.data.total.toLocaleString()"></strong> filtered rows
+            </p>
+            <div class="tablewrap">
+              <table class="data">
+                <thead><tr><template x-for="c in displayTable(fprev.data).columns" :key="c">
+                  <th class="sortable" @click="sortFiltered(c)" x-text="c + fSortMark(c)"></th>
+                </template></tr></thead>
+                <tbody><template x-for="(row,ri) in displayTable(fprev.data).rows" :key="ri"><tr><template x-for="(cell,ci) in row" :key="ci"><td x-text="cell"></td></template></tr></template></tbody>
+              </table>
+            </div>
+          </div>
+        </template>
+        <template x-if="!fprev.data && !fprev.busy"><p class="muted">The filtered rows appear here.</p></template>
+      </div>
+    </div>
+
+    <!-- ---------- MATCHING ---------- -->
+    <div x-show="tab==='match'" x-cloak>
+      <div class="card">
+        <h3>Propensity-score matching</h3>
+        <label class="switch"><input type="checkbox" x-model="s.do_matching"> Enable matching</label>
+        <p class="hint">With &gt;2 groups, each non-reference group is matched to the reference group separately (reference-group pairwise).</p>
+        <label class="field">Matching covariates</label>
+        <div class="ms" x-data="{q:''}">
+          <div class="chips"><template x-for="v in s.psm_covariates_raw" :key="v"><button type="button" class="chip" @click="toggle(s.psm_covariates_raw,v)" :aria-label="'remove '+v" :title="'remove '+v" x-text="v"></button></template></div>
+          <input class="ms-search" placeholder="filter…" x-model="q">
+          <div class="ms-list"><template x-for="c in filterOpts(cols,q)" :key="c">
+            <label class="ms-item"><input type="checkbox" :checked="has(s.psm_covariates_raw,c)" @change="toggle(s.psm_covariates_raw,c)"><span x-text="c"></span></label>
+          </template></div>
+        </div>
+        <div class="grid4" style="margin-top:12px">
+          <div><label class="field" for="psm-method">Method</label><select id="psm-method" x-model="s.psm_method" @change="psmMethodNote=fitPsmToDistance()"><template x-for="o in PSM_METHODS" :key="o[0]"><option :value="o[0]" x-text="o[1]"></option></template></select></div>
+          <div><label class="field">Distance</label><select x-model="s.psm_distance" :disabled="!psmUses('distance')" @change="psmMethodNote=fitPsmToDistance()"><template x-for="o in ['logit','glm','mahalanobis','robust_mahalanobis']" :key="o"><option :value="o" x-text="o" :disabled="!psmDistanceOk(o)"></option></template></select></div>
+          <div><label class="field">Ratio</label><input type="number" x-model.number="s.psm_ratio" min="1" max="20" :disabled="!psmUses('ratio')"></div>
+          <div><label class="field">Match order</label><select x-model="s.psm_m_order" :disabled="!psmUses('order')"><template x-for="o in ['largest','smallest','random','data','closest','farthest']" :key="o"><option :value="o" x-text="o" :disabled="!psmOrderOk(o)"></option></template></select></div>
+        </div>
+        <p class="small warnline" role="alert" x-show="psmMethodNote" x-text="psmMethodNote"></p>
+        <p class="hint" x-show="psmMethodHint(s.psm_method)" x-text="psmMethodHint(s.psm_method)"></p>
+        <div class="grid3" style="margin-top:12px">
+          <label class="switch"><input type="checkbox" x-model="s.psm_replace" :disabled="!psmUses('replace')"> Replacement</label>
+          <div><label class="field" for="psm-caliper">Caliper <span class="muted small">(empty = no caliper)</span></label><input id="psm-caliper" type="number" step="0.05" min="0" x-model.number="s.psm_caliper" placeholder="none" :disabled="!psmUses('caliper')"></div>
+          <label class="switch"><input type="checkbox" x-model="s.psm_std_caliper" :disabled="!psmUses('std_caliper')"> Standardized caliper</label>
+        </div>
+        <div class="grid3" style="margin-top:4px">
+          <div><label class="field" for="psm-seed">Random seed <span class="muted small">(random match order and ties)</span></label>
+            <input id="psm-seed" type="number" step="1" x-model.number="s.psm_seed" :disabled="!psmUses('seed')"></div>
+        </div>
+        <p class="opt-hint" style="margin-left:0">With <b>Standardized</b> on, the caliper is in SDs of the propensity score; 0.2 is a common choice. A <b>mahalanobis</b> distance is not a propensity score: it takes no caliper and no largest / smallest match order (both are adjusted when you pick it), and subclassification cannot use it. A ratio above 1 or <b>Replacement</b> on give the matched controls unequal weights: the matched tables, figure P values and GEE then use those weights, and the workbook notes it above the matched tables. The <b>random seed</b> is fixed, so the same settings give the same matched cohort every run (and in the preview below). The four methods offered here run with the R packages bundled with the app; the live matched-count preview covers <b>nearest</b> only.</p>
+      </div>
+
+      <div class="card" x-show="s.do_matching">
+        <h3>Live matched-count preview
+          <button class="btn secondary sm" style="margin-left:10px" @click="updateMatchPreview()" :disabled="matchprev.busy">↻ Refresh</button>
+          <span class="muted small" x-show="matchprev.busy"> running MatchIt…</span>
+          <span class="badge warn" x-show="matchprev.stale && matchprev.data && !matchprev.busy">settings changed — refreshing…</span>
+        </h3>
+        <p class="hint">Runs the <b>real MatchIt</b> (your exact settings) on the current cohort and shows how many rows survive each step: group → complete covariates → matched. Updates automatically ~1s after you change a setting.</p>
+        <p class="small" style="color:var(--err)" x-show="matchprev.error" x-text="matchprev.error"></p>
+        <template x-if="matchprev.data && matchprev.data.unsupported">
+          <p class="muted" x-text="matchprev.data.message"></p>
+        </template>
+        <template x-if="matchprev.data && matchprev.data.runs">
+          <div>
+            <template x-for="run in matchprev.data.runs" :key="run.label">
+              <div style="margin-bottom:12px">
+                <strong x-text="run.label"></strong>
+                <table class="data" style="margin-top:4px">
+                  <thead><tr>
+                    <th>Pairing</th><th>Group rows</th><th>Complete covariates</th>
+                    <th>Matched</th><th>Reference pool (complete)</th><th>Controls used</th>
+                  </tr></thead>
+                  <tbody>
+                    <template x-for="p in run.pairings" :key="p.treated">
+                      <tr>
+                        <td x-text="p.treated+' vs '+p.reference"></td>
+                        <td x-text="p.treated_total.toLocaleString()"></td>
+                        <td>
+                          <span x-text="p.treated_cc.toLocaleString()"></span>
+                          <span class="badge warn" x-show="p.treated_cc<p.treated_total"
+                                x-text="'-'+(p.treated_total-p.treated_cc)+' missing data'"></span>
+                        </td>
+                        <td>
+                          <template x-if="p.error"><span class="badge warn" :title="p.error">failed</span></template>
+                          <template x-if="!p.error">
+                            <span>
+                              <strong x-text="p.matched_treated===null?'—':p.matched_treated.toLocaleString()"></strong>
+                              <span class="badge warn" x-show="p.matched_treated!==null && p.matched_treated<p.treated_cc"
+                                    x-text="'-'+(p.treated_cc-p.matched_treated)+' no match in caliper'"></span>
+                            </span>
+                          </template>
+                        </td>
+                        <td x-text="p.ref_cc.toLocaleString()+' / '+p.ref_total.toLocaleString()"></td>
+                        <td x-text="p.controls_used===null?'—':p.controls_used.toLocaleString()"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+                <template x-for="p in run.pairings" :key="'m'+p.treated">
+                  <p class="small muted" x-show="missingList(run.label,p.treated).length" style="margin:4px 0 0">
+                    <b x-text="p.treated"></b> rows lost to missing covariates —
+                    <template x-for="[cov,n] in missingList(run.label,p.treated)" :key="cov">
+                      <span style="margin-right:10px"><span x-text="cov"></span>: <strong x-text="n"></strong></span>
+                    </template>
+                  </p>
+                </template>
+                <template x-for="p in run.pairings" :key="'u'+p.treated">
+                  <div class="unmatched" x-show="!p.error && (p.unmatched_treated_n>0 || p.unmatched_control_n>0)">
+                    <div class="grid2">
+                      <div x-show="p.unmatched_treated_n>0">
+                        <div class="small"><span class="badge warn" x-text="p.treated+' (test)'"></span>
+                          <strong x-text="p.unmatched_treated_n.toLocaleString()"></strong> unmatched eye(s)<span x-show="p.unmatched_treated_ids_total"> — <span x-text="p.unmatched_treated_ids_total.toLocaleString()"></span> distinct patient(s)</span></div>
+                        <div class="idlist" x-text="p.unmatched_treated_ids.join(', ') + (p.unmatched_treated_ids_total>p.unmatched_treated_ids.length ? (' … +'+(p.unmatched_treated_ids_total-p.unmatched_treated_ids.length)+' more') : '')"></div>
+                      </div>
+                      <div x-show="p.unmatched_control_n>0">
+                        <div class="small"><span class="badge" x-text="p.reference+' (control)'"></span>
+                          <strong x-text="p.unmatched_control_n.toLocaleString()"></strong> unused eye(s)<span x-show="p.unmatched_control_ids_total"> — <span x-text="p.unmatched_control_ids_total.toLocaleString()"></span> distinct patient(s)</span></div>
+                        <div class="idlist" x-text="p.unmatched_control_ids.join(', ') + (p.unmatched_control_ids_total>p.unmatched_control_ids.length ? (' … +'+(p.unmatched_control_ids_total-p.unmatched_control_ids.length)+' more') : '')"></div>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <p class="muted small">A row needs <b>every</b> matching covariate present to enter matching; "no match in caliper" = no reference row close enough in propensity score. Loosen by removing sparse covariates, widening the caliper, or disabling the caliper (empty = none). Unmatched patient IDs are listed above (capped at 300 per side).</p>
+          </div>
+        </template>
+        <template x-if="!matchprev.data && !matchprev.busy && !matchprev.error">
+          <p class="muted" x-text="matchprev.reason || 'Load a file, define groups and covariates — the preview appears here.'"></p>
+        </template>
+      </div>
+
+      <div class="card" x-show="s.do_matching && matchedRuns().length">
+        <h3>Matched data preview <span class="muted small">— live: rows of the matched cohort from the preview above (with weight &amp; propensity score)</span>
+          <label class="switch small" style="display:inline-flex;margin-left:14px">
+            <input type="checkbox" x-model="relevantOnly"> relevant columns only
+          </label>
+        </h3>
+        <div class="inline" x-show="matchedRuns().length>1" style="max-width:320px">
+          <label class="field" style="margin:0 8px 0 0">Run</label>
+          <select x-model="matchprev.run">
+            <template x-for="r in matchedRuns()" :key="r"><option :value="r" x-text="r"></option></template>
+          </select>
+        </div>
+        <template x-if="matchedTable()">
+          <div>
+            <p class="muted small" style="margin:4px 0">
+              Showing first <span x-text="matchedTable().shown"></span> of
+              <strong x-text="matchedTable().total.toLocaleString()"></strong> matched rows
+              <em>(refreshes with the matching preview; the exported Matched-Only workbook is authoritative)</em>
+            </p>
+            <div class="tablewrap">
+              <table class="data">
+                <thead><tr><template x-for="c in displayTable(matchedTable()).columns" :key="c"><th x-text="c"></th></template></tr></thead>
+                <tbody><template x-for="(row,ri) in displayTable(matchedTable()).rows" :key="ri"><tr><template x-for="(cell,ci) in row" :key="ci"><td x-text="cell"></td></template></tr></template></tbody>
+              </table>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ---------- REGRESSION ---------- -->
+    <div x-show="tab==='regress'" x-cloak>
+      <div class="card">
+        <h3>Multivariable regression (adjusted analysis)</h3>
+        <p class="hint">For studies where matching isn't feasible (very small groups, no good matches) or to adjust
+          <b>residual</b> differences after matching. One model per outcome: <b>outcome ~ Group + covariates</b>,
+          fitted as clustered GEE (eyes nested in patients) — continuous outcomes give adjusted β, complications give
+          adjusted OR; categorical covariates are handled automatically. With more than 2 groups, each group is
+          compared to the reference. Results go to a publish-ready <b>"Regression (adjusted)"</b> sheet plus a
+          full-model appendix, with bold small-sample warnings when a model is asked to do too much.</p>
+        <label class="switch"><input type="checkbox" x-model="s.do_regression"> Run the adjusted regression</label>
+        <div x-show="s.do_regression">
+          <div class="grid2">
+            <div><label class="field">Run on</label>
+              <select x-model="s.regression_stage">
+                <option value="unmatched">Unmatched cohort (adjustment instead of matching)</option>
+                <option value="matched">Matched cohort (mop up residual imbalance)</option>
+                <option value="both">Both (primary + sensitivity analysis)</option>
+              </select></div>
+            <div style="display:flex;align-items:flex-end;gap:8px">
+              <button class="btn secondary sm" @click="suggestCovariates()" :disabled="regsuggest.busy">
+                <span x-text="regsuggest.busy ? 'computing imbalance…' : '✨ Suggest covariates'"></span>
+              </button>
+              <button class="btn sm" x-show="regsuggest.list" @click="useSuggested()">Use suggested</button>
+            </div>
+          </div>
+          <p class="small" style="color:var(--err)" x-show="regsuggest.error" x-text="regsuggest.error"></p>
+          <template x-if="regsuggest.list">
+            <div class="small" style="margin:8px 0">
+              <span class="muted">Baseline imbalance vs reference (standardized mean difference; ≥0.10 = suggested):</span><br>
+              <template x-for="c in regsuggest.list" :key="c.var">
+                <button type="button" class="chip add" :style="c.suggested ? 'background:#dcfce7;color:#166534' : ''"
+                      @click="toggle(s.regression_covariates_raw, c.var)"
+                      :aria-pressed="has(s.regression_covariates_raw, c.var)"
+                      :title="'click to add/remove · SMD '+c.smd"
+                      x-text="c.var+' ('+c.smd+')'"></button>
+              </template>
+            </div>
+          </template>
+          <label class="field">Covariates in the model (the Group term is always included)</label>
+          <div class="ms" x-data="{q:''}">
+            <div class="chips"><template x-for="v in s.regression_covariates_raw" :key="v"><button type="button" class="chip" @click="toggle(s.regression_covariates_raw,v)" :aria-label="'remove '+v" :title="'remove '+v" x-text="v"></button></template></div>
+            <input class="ms-search" placeholder="filter…" x-model="q">
+            <div class="ms-list"><template x-for="c in filterOpts(cols,q)" :key="c">
+              <label class="ms-item"><input type="checkbox" :checked="has(s.regression_covariates_raw,c)" @change="toggle(s.regression_covariates_raw,c)"><span x-text="c"></span></label>
+            </template></div>
+          </div>
+          <p class="opt-hint" style="margin-left:0">Outcomes analyzed = the variables in your <b>Outcome</b> section
+            (Variables &amp; Types). Rule of thumb enforced with warnings: ≥10 events per covariate for complications,
+            ≥10 eyes per covariate for continuous outcomes — with few events, keep this list to 2–3 covariates.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- GEE ---------- -->
+    <div x-show="tab==='gee'" x-cloak>
+      <div class="card">
+        <h3>Clustered GEE (eye-level, cluster = patient)</h3>
+        <p class="hint">GEE gives correct p-values when both eyes of a patient are analyzed: it accounts for the correlation between fellow eyes. Continuous outcomes → linear GEE (β); dichotomous outcomes → logistic GEE (OR).</p>
+        <div class="grid2">
+          <div><label class="field">Run GEE on</label>
+            <select x-model="s.run_gee_stage"><template x-for="o in ['none','unmatched','matched','both']" :key="o"><option :value="o" x-text="o"></option></template></select>
+            <p class="opt-hint">Which cohort the models are fitted on. <b>matched</b> (usual choice) = after PSM; <b>unmatched</b> = the full filtered cohort; <b>both</b> = both sets of sheets; <b>none</b> = skip GEE.</p></div>
+          <div><label class="field">GEE source shown in summary tables</label>
+            <select x-model="s.gee_source_for_tables"><template x-for="o in ['main','adjusted']" :key="o"><option :value="o" x-text="o"></option></template></select>
+            <p class="opt-hint">Which model's effect &amp; p go into the added columns of the summary tables (unmatched and matched, for each cohort GEE is run on).</p></div>
+        </div>
+        <label class="switch"><input type="checkbox" x-model="s.run_main_gee"> Main GEE (outcome ~ Group)</label>
+        <p class="opt-hint">Group effect only. Use after matching, where covariates are already balanced — this is the primary comparison.</p>
+        <label class="switch"><input type="checkbox" x-model="s.run_adjusted_gee"> Adjusted GEE (outcome ~ Group + covariates)</label>
+        <p class="opt-hint">Adds the covariates below to the model. Use on unmatched data, or as a sensitivity analysis when residual imbalance remains after matching.</p>
+        <label class="switch"><input type="checkbox" x-model="s.use_matching_weights_in_gee"> Use matching weights in matched GEE</label>
+        <p class="opt-hint">Recommended whenever matching uses replacement or ratio &gt; 1, so each control counts according to how often it was matched. A weighted model uses an <b>independence</b> working correlation with robust standard errors clustered on the patient (the estimator MatchIt recommends), so its effect reproduces the weighted means and proportions printed in the same row; unweighted GEE keeps the exchangeable working correlation. Figure P values on a matched cohort always use matching weights that are not all 1, whatever this switch says — with it off, the matched GEE columns and the figures can show different p-values.</p>
+        <label class="switch"><input type="checkbox" x-model="s.add_gee_columns"> Add GEE effect + p columns into the summary tables (unmatched and matched)</label>
+        <p class="opt-hint">Copies the group effect (β or OR with 95% CI, and p) into the Baseline / Preop / Outcome tables of every cohort GEE is run on (see <b>Run GEE on</b>), so one table holds everything. The other columns of a summary table use eye-level tests (t-test / Welch, Wilcoxon / Kruskal-Wallis, χ² / Fisher). The figures print the same clustered GEE p-value as the GEE columns only when a <b>patient-ID column is mapped</b>, <b>Cluster p-values by patient</b> is on (Special outputs), the GEE source shown in summary tables is <b>main</b>, and — on a matched cohort whose matching weights are not all 1 — <b>Use matching weights in matched GEE</b> is on. Otherwise a table's GEE column and a figure can show different p-values for the same comparison: without a patient ID (or with clustering off) the figures use the eye-level tests, like the other columns of the table (and without a patient ID the GEE treats each eye as its own cluster). Even when all of this holds, the match is exact for two groups; with more than two, a figure's main p-value is one overall GEE test (its “vs reference” lines are Holm-adjusted), while the GEE columns give one unadjusted p-value per group-vs-reference comparison.</p>
+        <label class="field" style="margin-top:10px">Adjusted-GEE covariates</label>
+        <div class="ms" x-data="{q:''}">
+          <div class="chips"><template x-for="v in s.gee_adjust_covariates_raw" :key="v"><button type="button" class="chip" @click="toggle(s.gee_adjust_covariates_raw,v)" :aria-label="'remove '+v" :title="'remove '+v" x-text="v"></button></template></div>
+          <input class="ms-search" placeholder="filter…" x-model="q">
+          <div class="ms-list"><template x-for="c in filterOpts(cols,q)" :key="c">
+            <label class="ms-item"><input type="checkbox" :checked="has(s.gee_adjust_covariates_raw,c)" @change="toggle(s.gee_adjust_covariates_raw,c)"><span x-text="c"></span></label>
+          </template></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- SPECIAL ---------- -->
+    <div x-show="tab==='special'" x-cloak>
+      <div class="card">
+        <h3>Dichotomous "positive" level</h3>
+        <p class="hint">For every variable you marked <b>dichotomous</b> (Variables &amp; Types tab), choose which value is reported and modelled as the event (e.g. Sex = F, a complication Status = 1). Defaults are guessed from the data; a guess that is only alphabetical is flagged for you to check.</p>
+        <template x-if="dichoVars().length===0"><p class="muted">No dichotomous variables selected yet.</p></template>
+        <div class="grid3">
+          <template x-for="v in dichoVars()" :key="v">
+            <div>
+              <label class="field" x-text="v"></label>
+              <div class="combo" x-data="combo(()=>s.dicho_map[v]??'', val=>setDichoLevel(v,val), ()=>dichoOptions(v))">
+                <input type="text" :value="open?q:val()" :placeholder="val()||'choose value…'"
+                       @focus="onFocus()" @input="q=$event.target.value;open=true;idx=0" @keydown="key($event)" @click.outside="open=false" role="combobox" aria-autocomplete="list" :aria-expanded="open">
+                <div class="combo-list" role="listbox" x-show="open">
+                  <template x-for="(c,ci) in list()" :key="c"><div class="combo-item" role="option" :class="ci===idx && 'active'" :aria-selected="ci===idx" @mousedown.prevent="choose(c)" x-text="c"></div></template>
+                </div>
+              </div>
+              <p class="small warnline" x-show="dichoFallback(v)" style="margin:3px 0 0">Check: guessed alphabetically — pick the value that means the event.</p>
+              <p class="small warnline" x-show="dichoReplaced[v]!==undefined" style="margin:3px 0 0"
+                 x-text="'The loaded config named “'+dichoReplaced[v]+'”, which is not a value of this column — check the level shown.'"></p>
+              <p class="small errline" x-show="dichoLevelCount(v)>2" style="margin:3px 0 0"
+                 x-text="dichoLevelCount(v)+' levels: the % counts the chosen level against all others; GEE / adjusted models are skipped (they need exactly 2 levels).'"></p>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>StandardEyes figures &amp; astigmatism vector plots</h3>
+        <label class="switch"><input type="checkbox" x-model="s.make_graphs"> Produce the StandardEyes figures for every run</label>
+        <p class="opt-hint">Rendered natively from your data (same bins &amp; conventions as your Excel templates — no macros needed): cumulative Snellen VA, change in CDVA lines, UDVA vs CDVA, attempted-vs-achieved SEQ with ±0.50/±1.00 D bands, SEQ accuracy, refractive astigmatism, TIA vs SIA, angle of error, plus JCRS-standard double-angle plots (TIA/SIA/DV with centroid). Every group is superimposed on the same chart in its own colour, before matching and for each matched pairing. The stability-over-time graph is produced when you map your follow-up visits below. Uses the column roles below (Pre/Post SEQ, VA, cylinder &amp; axis).</p>
+        <div x-show="s.make_graphs">
+          <div class="grid2">
+            <div><label class="field">Formats <span class="muted small">(TIFF always included — journal standard)</span></label>
+              <div class="inline" style="gap:12px">
+                <label class="switch" style="margin:0"><input type="checkbox" checked disabled> TIFF</label>
+                <template x-for="fm in ['png','jpeg','pdf']" :key="fm">
+                  <label class="switch" style="margin:0"><input type="checkbox" :checked="s.graph_formats.includes(fm)" @change="toggleFormat(fm)"> <span x-text="fm.toUpperCase()"></span></label>
+                </template>
+              </div></div>
+            <div><label class="field">Resolution (DPI)</label>
+              <input type="number" x-model.number="s.graph_dpi" min="50" max="1200" step="50"></div>
+          </div>
+          <label class="field" style="margin-top:10px">Applies to every figure below</label>
+          <label class="switch desc"><input type="checkbox" x-model="s.stability_figs"> <span><b>Stability over time</b> — mean ± SD spherical equivalent across your follow-up visits, with the number of eyes at each time point and the percentage that changed by more than a chosen amount</span></label>
+          <div x-show="s.stability_figs" style="margin:4px 0 6px 26px">
+            <p class="opt-hint" style="margin-left:0">Your file keeps <b>one row per eye</b>, so each visit is a separate set of columns. Add one row below per follow-up time point and pick its columns — nothing is filled in automatically; <i>Suggest visits</i> only proposes rows from the column names for you to check. For each visit either pick a ready <b>SEQ</b> column, or leave it blank and give <b>sphere + cylinder</b> and the app computes SEQ as sphere + cylinder/2. A visit is used only if it has a time column plus one of those. The curve joins the composite as its <b>own extra panel</b> — nothing is displaced. It belongs to the <b>Full</b> panel set; the Refractive and Cataract sets have no stability slot.</p>
+
+            <template x-for="(v,i) in s.stability_visits" :key="v._uid ?? i">
+              <div class="repeat-row">
+                <div style="flex:0 0 92px">
+                  <label class="field">Label</label>
+                  <input type="text" x-model="v.label" placeholder="e.g. 3">
+                </div>
+                <template x-for="part in ['time','seq','sph','cyl']" :key="part">
+                  <div class="grow">
+                    <label class="field" x-text="{time:'Days after surgery',seq:'SEQ (optional)',sph:'Sphere',cyl:'Cylinder'}[part]"></label>
+                    <div class="combo" x-data="combo(()=>v[part], val=>v[part]=val, ()=>cols, true)">
+                      <input type="text" :value="open?q:val()" :placeholder="val()||'search column…'"
+                             @focus="onFocus()" @input="q=$event.target.value;open=true;idx=0" @keydown="key($event)" @click.outside="open=false" role="combobox" aria-autocomplete="list" :aria-expanded="open">
+                      <div class="combo-list" role="listbox" x-show="open">
+                        <div class="combo-item muted" role="option" :class="idx===-1 && 'active'" :aria-selected="idx===-1" @mousedown.prevent="choose('')">— none —</div>
+                        <template x-for="(c,ci) in list()" :key="c"><div class="combo-item" role="option" :class="ci===idx && 'active'" :aria-selected="ci===idx" @mousedown.prevent="choose(c)" x-text="c"></div></template>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <button class="btn ghost danger" @click="removeStabilityVisit(i)" title="Remove this row" aria-label="Remove this row">✕</button>
+              </div>
+            </template>
+            <div class="inline" style="gap:8px">
+              <button class="btn secondary sm" @click="addStabilityVisit()">+ Add visit</button>
+              <button class="btn ghost sm" @click="suggestStabilityVisits()" title="propose rows from column names — you can edit or remove them">Suggest visits from column names</button>
+            </div>
+            <template x-if="stabilityMsg">
+              <p class="opt-hint warnline" style="margin-left:0" x-text="stabilityMsg"></p>
+            </template>
+            <template x-if="stabilityDupes().length">
+              <p class="opt-hint warnline" style="margin-left:0"><b>Note:</b> the same column is mapped in more than one visit (<span x-text="stabilityDupes().join(', ')"></span>). If two rows point at the same measurement it will be plotted twice.</p>
+            </template>
+            <template x-if="stabilityLabelDupes().length">
+              <p class="opt-hint errline" style="margin-left:0"><b>Duplicate visit label</b> (<span x-text="stabilityLabelDupes().join(', ')"></span>): each visit needs its own label, otherwise a change pair naming that label cannot tell which of the visits is meant. The run is blocked until the labels differ.</p>
+            </template>
+
+            <label class="switch" style="margin-top:8px"><input type="checkbox" x-model="s.stability_include_preop"> Start the curve at the pre-operative refraction <span class="muted small">(uses the Pre SEQ role, or pre sphere + cylinder)</span></label>
+            <div class="grid3" style="margin-top:6px">
+              <div><label class="field">% changed between — from</label>
+                <select x-model="s.stability_change_from">
+                  <option value="">— none —</option>
+                  <template x-for="(l,li) in stabilityLabels()" :key="li"><option :value="l" x-text="l"></option></template>
+                </select></div>
+              <div><label class="field">to</label>
+                <select x-model="s.stability_change_to">
+                  <option value="">— none —</option>
+                  <template x-for="(l,li) in stabilityLabels()" :key="li"><option :value="l" x-text="l"></option></template>
+                </select></div>
+              <div><label class="field">Threshold (D)</label>
+                <input type="number" x-model.number="s.stability_change_threshold" min="0.05" max="5" step="0.05"></div>
+            </div>
+            <p class="opt-hint" style="margin-left:0">The percentage is <b>paired</b> — only eyes measured at <i>both</i> chosen visits count. Points with fewer than 3 eyes are dropped, and each visit is plotted at its <b>median</b> day, so the n row is the honest record of who actually returned.</p>
+          </div>
+
+          <label class="field" style="margin-top:10px">The StandardEyes figures</label>
+          <p class="opt-hint" style="margin-left:0">The published Reinstein/JRS metrics with <i>every</i> group on one chart in its own colour, for any number of groups, plus JCRS-standard double-angle astigmatism plots. Nothing is split into pairs or drawn per group alone; the stat line is an omnibus test plus each group against the reference. Where a panel header prints <code>d =</code>, it is Cohen's d with the pooled SD, computed per eye and unweighted, whichever test (classical, GEE or weighted) gave the P value. Files are written as <code>StandardEyes_*</code>. (mEYEstro/AstigMATIC-format <b>Excel tabs</b> for external tools are still available under Optional analysis tabs.)</p>
+          <div style="max-width:420px; margin-bottom:6px">
+            <label class="field">Panel set</label>
+            <select x-model="s.graph_set">
+              <option value="nine">Full — every panel</option>
+              <option value="six">Refractive — drops DEQ, stability and the vector panels</option>
+              <option value="four">Cataract — also drops safety &amp; attempted-vs-achieved</option>
+            </select>
+          </div>
+          <label class="switch"><input type="checkbox" x-model="s.astig_panels"> Include astigmatism panels <span class="muted small">(composite only: refractive-astigmatism bar + TIA/SIA, correction index, angle of error — the double-angle and semicircle plots below have their own switches)</span></label>
+          <p class="opt-hint" style="margin-left:0"><b>You will get:</b> <span x-text="panelNote()"></span></p>
+          <div class="inline" style="gap:12px; margin-bottom:6px">
+            <label class="switch" style="margin:0"><input type="checkbox" x-model="s.double_angle_figs"> double-angle plots <span class="muted small">(JCRS standard)</span></label>
+            <label class="switch" style="margin:0"><input type="checkbox" x-model="s.semicircle_figs"> semicircle plots <span class="muted small">(grey background, groups in colour)</span></label>
+          </div>
+          <div class="grid3">
+            <div><label class="field">Centroid comparison test</label>
+              <select x-model="s.astig_test_method">
+                <option value="robust">Robust trimmed T&sup2; + bootstrap (default)</option>
+                <option value="gee">Clustered GEE Wald (more power)</option>
+                <option value="classic">Hotelling T&sup2; / MANOVA (eyes independent)</option>
+              </select></div>
+            <div><label class="field">95% region around each group</label>
+              <select x-model="s.astig_region">
+                <option value="polygon">Convex polygon — nonparametric ✔ JCRS</option>
+                <option value="normal">Ellipse — bivariate normal (assumes Gaussian)</option>
+                <option value="both">Both</option>
+              </select></div>
+          </div>
+          <label class="switch" style="margin-top:6px"><input type="checkbox" x-model="s.astig_jcrs_standard"> Follow the <b>JCRS 2025 astigmatism standard</b> <span class="muted small">(Koch et al., J Cataract Refract Surg 2025;51:447–455)</span></label>
+          <p class="opt-hint" style="margin-left:0"><b>What this changes.</b> On: each group reports its <b>total SD</b> (&radic;(var x + var y), rotation-invariant), centroids are compared with the <b>bivariate</b> test chosen under <i>Centroid comparison test</i> (by default the robust trimmed T&sup2; with a bootstrap; the classical option is Hotelling T&sup2; for 2 groups, Pillai MANOVA for more), and with two or more group-vs-reference comparisons their p-values are <b>Holm-adjusted</b>. Off: two separate univariate tests on x and y, unadjusted — the app's older behaviour. Every figure prints which of the two was used.</p>
+          <p class="opt-hint" style="margin-left:0"><b>Per JCRS 2025 Part II:</b> double-angle plots (the journal's stated standard), the centroid, total SD, the 95% <i>nonparametric convex polygon</i> (hull peeling — the paper notes astigmatism data are usually not Gaussian), the dioptric intervals &le;0.25/0.50/0.75/1.00 D, and a bivariate centroid comparison.<br>
+          <b>NOT per the standard:</b> the normal-ellipse option, the semicircle plot (kept for familiarity), and the exact form of the default centroid test: the robust test (20%-trimmed mean vectors, pooled winsorized covariance, 999 bootstrap resamples of patients — of eyes when p-values are not clustered) is robust and cluster-aware but is not the exact trimmed-Hotelling variant of Part II (see the Statistical Reference). Everything else follows Part II, including the scalar summaries (median, range, RMS).</p>
+          <label class="switch" style="margin-top:6px"><input type="checkbox" x-model="s.cluster_by_patient"> Cluster p-values <b>by patient</b> <span class="muted small">(GEE, robust SE — needs the patient/cluster ID column)</span></label>
+          <p class="opt-hint" style="margin-left:0">Two eyes of one person are not independent. With this on, every figure p-value comes from a GEE with robust standard errors clustered on the patient (exchangeable working correlation; independence when matching weights that are not all 1 are applied, as in the weighted GEE sheets), so a patient contributing both eyes counts once. Leaving it off inflates significance: in simulation with no true group difference, unclustered tests fired at <b>15%</b> against a nominal 5%, versus <b>6%</b> clustered. Each figure prints which inference it used.</p>
+          <p class="opt-hint" style="margin-left:0">The <b>double-angle</b> plot doubles every meridian, so with-the-rule and against-the-rule eyes group on opposite sides instead of splitting across the horizontal — this is what <i>JCRS 2025 Standards for analyzing astigmatic outcomes (Part II)</i> requires, and it is what makes the vector arithmetic valid. Each group gets its centroid, a 95% region and a dashed 95% CI of the centroid. The <b>normal ellipse</b> assumes the cloud is bivariate normal; the <b>distribution-free hull</b> assumes nothing and is the safer choice for skewed data.</p>
+          <div>
+
+            <label class="field" style="margin-top:10px">Astigmatism vectors <span class="muted small">— optional; leave blank and the app computes them</span></label>
+            <p class="opt-hint" style="margin-left:0">By default TIA / SIA / DV are <b>computed</b> from the four columns you mapped as <b>Pre Cylinder, Pre Axis, Post Cylinder and Post Axis</b> under <i>Column roles</i> (bottom of this tab), assuming the target was zero astigmatism. <b>Nothing is guessed from column names or order</b> — if those four roles are not mapped, no vector figure is produced and the run log says so. Map a magnitude <i>and</i> an axis column below to use your own pre-calculated vector instead — each vector is resolved independently, and the run log reports which were supplied, which were computed, and the largest disagreement between the two.</p>
+            <template x-for="v in [['tia','TIA'],['sia','SIA'],['dv','DV']]" :key="v[0]">
+              <div class="repeat-row">
+                <div style="flex:0 0 60px"><label class="field" x-text="v[1]"></label></div>
+                <template x-for="part in ['_mag','_axis']" :key="part">
+                  <div class="grow">
+                    <label class="field" x-text="(part==='_mag'?'Magnitude (D)':'Axis (deg)')"></label>
+                    <div class="combo" x-data="combo(()=>s.astig_vector_cols[v[0]+part], val=>s.astig_vector_cols[v[0]+part]=val, ()=>cols, true)">
+                      <input type="text" :value="open?q:val()" :placeholder="val()||'search column…'"
+                             @focus="onFocus()" @input="q=$event.target.value;open=true;idx=0" @keydown="key($event)" @click.outside="open=false" role="combobox" aria-autocomplete="list" :aria-expanded="open">
+                      <div class="combo-list" role="listbox" x-show="open">
+                        <div class="combo-item muted" role="option" :class="idx===-1 && 'active'" :aria-selected="idx===-1" @mousedown.prevent="choose('')">— none —</div>
+                        <template x-for="(c,ci) in list()" :key="c"><div class="combo-item" role="option" :class="ci===idx && 'active'" :aria-selected="ci===idx" @mousedown.prevent="choose(c)" x-text="c"></div></template>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
+
+            <label class="field" style="margin-top:8px">Target refraction <span class="muted small">— optional; both columns needed</span></label>
+            <div class="repeat-row">
+              <template x-for="part in ['cyl','axis']" :key="part">
+                <div class="grow">
+                  <label class="field" x-text="(part==='cyl'?'Target cylinder (D)':'Target axis (deg)')"></label>
+                  <div class="combo" x-data="combo(()=>s.astig_target[part], val=>s.astig_target[part]=val, ()=>cols, true)">
+                    <input type="text" :value="open?q:val()" :placeholder="val()||'search column…'"
+                           @focus="onFocus()" @input="q=$event.target.value;open=true;idx=0" @keydown="key($event)" @click.outside="open=false" role="combobox" aria-autocomplete="list" :aria-expanded="open">
+                    <div class="combo-list" role="listbox" x-show="open">
+                      <div class="combo-item muted" role="option" :class="idx===-1 && 'active'" :aria-selected="idx===-1" @mousedown.prevent="choose('')">— none —</div>
+                      <template x-for="(c,ci) in list()" :key="c"><div class="combo-item" role="option" :class="ci===idx && 'active'" :aria-selected="ci===idx" @mousedown.prevent="choose(c)" x-text="c"></div></template>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+            <p class="opt-hint" style="margin-left:0"><b>Only set a target if you did not aim for zero astigmatism.</b> With a target mapped, TIA becomes the intended <i>change</i> rather than the pre-operative astigmatism, so the numbers will not match a target-of-zero run of the same data. The run log says so explicitly whenever a target is in use.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Optional analysis tabs</h3>
+        <label class="switch"><input type="checkbox" x-model="s.make_pub_table"> Publication-style table (Word-like combined table)</label>
+        <p class="opt-hint">One manuscript-ready sheet: Baseline / Preop / Outcomes stacked with section headers, group columns, and p-values (with <b>Add GEE effect + p columns</b> on, the GEE columns are included for every cohort GEE is run on — unmatched and/or matched).</p>
+        <label class="switch"><input type="checkbox" x-model="s.make_meyestro"> mEYEstro tabs</label>
+        <label class="switch"><input type="checkbox" x-model="s.make_alpins"> Alpins / AstigMATIC tabs</label>
+        <p class="hint"><b>Column roles.</b> Map the columns these tabs need (leave blank to skip). The <b>standard graphs above also read these roles</b> — Pre/Post Cylinder and Axis drive every astigmatism figure, Pre/Post SEQ drive the accuracy and stability figures. Nothing is inferred from column names or column order, so a differently named or differently ordered file works as long as the roles are mapped. The four <b>VA</b> roles are read in the notation chosen under <i>Visual acuity</i> (Variables &amp; Types tab), currently <b x-text="vaFormatLabel(s.va_format)"></b>. <b>Target SEQ</b> is optional: the intended postoperative spherical equivalent of each eye (monovision, a myopic cataract target). Leave it blank when every eye was aimed at plano; when mapped, SEQ accuracy is postop SEQ minus target and the attempted correction is preop SEQ minus target.</p>
+        <div class="grid4">
+          <template x-for="[k,label] in Object.entries(ROLE_LABELS)" :key="k">
+            <div><label class="field"><span x-text="label"></span>
+                <span class="badge warn" x-show="roleMissing(k)" title="this column is not in the loaded file — the role is ignored">not in this file</span></label>
+              <div class="combo" x-data="combo(()=>s.roles[k], v=>s.roles[k]=v, ()=>cols, true)">
+                <input type="text" :value="open?q:val()" :placeholder="val()||'search…'"
+                       @focus="onFocus()" @input="q=$event.target.value;open=true;idx=0" @keydown="key($event)" @click.outside="open=false" role="combobox" aria-autocomplete="list" :aria-expanded="open">
+                <div class="combo-list" role="listbox" x-show="open">
+                  <div class="combo-item muted" role="option" :class="idx===-1 && 'active'" :aria-selected="idx===-1" @mousedown.prevent="choose('')">— none —</div>
+                  <template x-for="(c,ci) in list()" :key="c"><div class="combo-item" role="option" :class="ci===idx && 'active'" :aria-selected="ci===idx" @mousedown.prevent="choose(c)" x-text="c"></div></template>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- RUN & RESULTS ---------- -->
+    <div x-show="tab==='run'" x-cloak>
+      <div class="card">
+        <h3>Run</h3>
+        <div class="runbar">
+          <div class="progress"><div :style="'width:'+(progress*100)+'%'"></div></div>
+          <button class="btn secondary sm" x-show="running || serverBusy" x-cloak @click="cancelRun()" :disabled="cancelling"
+                  x-text="cancelling ? 'Stopping…' : (running ? '■ Cancel' : '■ Stop the earlier run')"></button>
+        </div>
+        <p class="muted" x-text="progressMsg"></p>
+        <p class="small warnline" x-show="serverBusy && !running" x-cloak>An analysis started earlier (for example before this page was reloaded) is still running. Wait for it, or stop it, before starting a new one.</p>
+        <template x-if="runError"><p style="color:var(--err); white-space:pre-wrap"><strong>Error:</strong> <span x-text="runError"></span></p></template>
+        <template x-if="runNotes().length">
+          <div class="small warnline" style="margin:0 0 6px"><b>Check before using the results:</b>
+            <ul style="margin:2px 0 0 18px; padding:0"><template x-for="(n,ni) in runNotes()" :key="ni"><li x-text="n"></li></template></ul>
+          </div>
+        </template>
+        <div id="logbox" class="statusbox"><template x-for="(l,i) in log" :key="i"><div x-text="l"></div></template></div>
+      </div>
+
+      <template x-if="results && ((results.files||[]).length || (results.matched_files||[]).length || (results.graph_dirs||[]).length)">
+        <div class="card">
+          <h3>Output files
+            <template x-if="results.preview_only"><span class="badge warn">preview only — not in your output folder yet</span></template>
+          </h3>
+          <template x-if="!results.preview_only"><p class="muted">Saved in: <span x-text="results.output_dir"></span></p></template>
+          <template x-if="results.preview_only">
+            <div style="margin-bottom:8px">
+              <button class="btn sm" @click="exportAll()" :disabled="exporting">💾 Save ALL to output folder (incl. love plots + filtered CSV)</button>
+              <span class="muted small" x-show="exporting"> saving…</span>
+            </div>
+          </template>
+          <p class="small" :style="exportOk ? 'color:var(--ok-tx)' : 'color:var(--err)'" x-show="exportMsg" x-text="exportMsg"></p>
+          <template x-if="results.graph_dirs && results.graph_dirs.length">
+            <div style="margin-bottom:8px">
+              <template x-for="gd in results.graph_dirs" :key="gd.path">
+                <div class="figdir">
+                  <p class="small" style="margin:3px 0">📊 <strong x-text="gd.name"></strong>
+                    — <span x-text="gd.n_files"></span> graph file(s) in <span class="muted" x-text="gd.path"></span></p>
+                  <template x-if="figurePreviews(gd).length">
+                    <div class="figgrid">
+                      <template x-for="fp in figurePreviews(gd)" :key="fp.url">
+                        <a class="figthumb" :href="fp.url" target="_blank" rel="noopener" :title="'Open '+fp.name+' full size'">
+                          <img loading="lazy" :src="fp.url" :alt="fp.name">
+                          <span x-text="fp.name"></span>
+                        </a>
+                      </template>
+                    </div>
+                  </template>
+                  <template x-if="!figurePreviews(gd).length && !figures.busy">
+                    <p class="muted small" style="margin:2px 0 6px">No preview images for this folder — open the files from the folder above.</p>
+                  </template>
+                </div>
+              </template>
+              <p class="muted small" x-show="figures.busy">loading figure previews…</p>
+              <p class="small" style="color:var(--err)" x-show="figures.error" x-text="'Figure previews: '+figures.error"></p>
+              <p class="muted small" x-show="figures.dirs.length">Previews are low-resolution PNG copies; the files in the folder are at the resolution and formats you chose.</p>
+            </div>
+          </template>
+          <div class="filelist">
+            <template x-for="f in (results.files||[]).concat(results.matched_files||[])" :key="f.path">
+              <div style="margin:6px 0">
+                <strong x-text="f.name"></strong>
+                <a :href="downloadUrl(f.path)" class="pill">⭳ download</a>
+                <template x-if="results.preview_only">
+                  <button class="btn ghost sm" @click="exportFiles([f.path])" :disabled="exporting"
+                          x-text="savedFiles[f.path] ? '✓ saved' : '💾 save this one'"></button>
+                </template>
+                <div style="margin-top:4px">
+                  <template x-for="sh in f.sheets" :key="sh">
+                    <button class="btn ghost sm" @click="viewSheet(f.path,sh)" x-text="sh"></button>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+
+      <template x-if="resultSheet.error">
+        <p class="small" style="color:var(--err)" x-text="'Could not show '+resultSheet.sheet+': '+resultSheet.error"></p>
+      </template>
+      <template x-if="resultSheet.data">
+        <div class="card">
+          <h3>Preview: <span x-text="resultSheet.sheet"></span></h3>
+          <div class="tablewrap">
+            <table class="data">
+              <thead><tr><template x-for="c in resultSheet.data.columns" :key="c"><th x-text="c"></th></template></tr></thead>
+              <tbody><template x-for="(row,ri) in resultSheet.data.rows" :key="ri"><tr><template x-for="(cell,ci) in row" :key="ci"><td x-text="cell"></td></template></tr></template></tbody>
+            </table>
+          </div>
+        </div>
+      </template>
+    </div>
+  </main>
+</div>
+</body>
+</html>

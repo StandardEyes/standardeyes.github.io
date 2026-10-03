@@ -1,0 +1,22 @@
+# bundled runtime ships only inside the release ZIP (229 MB)
+runtime/
+
+# per-machine state and run artifacts
+config/settings.json
+webapp/.runs/
+webapp/presets/*.json
+!webapp/presets/Example - *.json
+Example Output/
+Rplots.pdf
+*.log
+
+# python / editor noise
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# built release archives
+Releases/

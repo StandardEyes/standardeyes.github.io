@@ -1,0 +1,38 @@
+WEBVTT
+
+00:00:00.705 --> 00:00:03.877
+Tutorial six. Run, preview and save.
+
+00:00:04.942 --> 00:00:09.508
+Tick Preview only, if you want to look at the results before anything is saved.
+
+00:00:12.291 --> 00:00:19.179
+Press Run. The log lists every step as it happens: filters, conversions, tests and figures.
+
+00:00:19.434 --> 00:00:23.674
+A full run takes a minute or two. It is shown here speeded up.
+
+00:00:30.767 --> 00:00:33.475
+Done. The workbook and the figures are ready.
+
+00:00:33.746 --> 00:00:39.380
+Previews of the figures appear in the app. Each panel is also written as its own file.
+
+00:00:40.196 --> 00:00:44.111
+Here is the combined figure, with every panel and every group.
+
+00:00:45.288 --> 00:00:47.856
+And the double-angle astigmatism plots.
+
+00:00:48.731 --> 00:00:52.228
+You can open any sheet of the workbook without leaving the app.
+
+00:00:54.815 --> 00:01:03.188
+This is the outcome table, exactly as it is written to Excel: a column for each group, the P value, and the test that was used.
+
+00:01:03.471 --> 00:01:09.523
+When you are happy with the results, save everything to your output folder, or only the files you want.
+
+00:01:10.361 --> 00:01:14.834
+StandardEyes. For ophthalmologists, by ophthalmologists.
+

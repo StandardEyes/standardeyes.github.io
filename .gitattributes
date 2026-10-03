@@ -1,0 +1,3 @@
+# Files are stored exactly as they are: no line-ending conversion
+# (the Windows launcher needs CRLF, and the release ZIP is built from these files).
+* -text

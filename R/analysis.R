@@ -38,7 +38,7 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
   conf <- unique(out$.id[out$n_vals > 1])
   if (length(conf))
     log_once(logger, sprintf(
-      "'%s' is summarised per patient, but %d patient(s) have conflicting values across their eyes (e.g. %s); the first recorded value is used.",
+      "'%s' is summarized per patient, but %d patient(s) have conflicting values across their eyes (e.g. %s); the first recorded value is used.",
       disp_name(pn, display_names), length(conf), paste(utils::head(conf, 5), collapse = ", ")))
   out$n_vals <- NULL
   names(out)[names(out) == ".id"]  <- patient_id_clean
@@ -502,7 +502,7 @@ table_tests_text <- function(cfg, has_pid = TRUE) {
     return(paste0("classical (", classical, ") - no patient ID is mapped, so eyes are treated as independent"))
   paste0("auto - patient-clustered GEE (continuous: Gaussian; ordinal: on ranks; dichotomous: ",
          "binomial; categorical: stacked level indicators; more than two groups: joint test) for ",
-         "every per-eye row in which a patient has two analysed eyes; classical (", classical,
+         "every per-eye row in which a patient has two analyzed eyes; classical (", classical,
          ") for one eye per patient and for per-patient rows")
 }
 
@@ -536,7 +536,7 @@ make_initial_summary <- function(df, patient_id_clean, age_clean, fu_clean, sex_
       age_unit <- "per patient"
     } else {
       log_once(logger, sprintf(
-        "Initial Summary: age differs between the eyes of %d patient(s) (e.g. %s); age is summarised per eye.",
+        "Initial Summary: age differs between the eyes of %d patient(s) (e.g. %s); age is summarized per eye.",
         sum(n_vals > 1), paste(utils::head(names(per_pt)[n_vals > 1], 5), collapse = ", ")))
     }
   }
@@ -788,10 +788,18 @@ gee_corstr_label <- function(df, use_weights = FALSE, matched = FALSE) {
   else if (isTRUE(matched)) "independence (matched cohort)"
   else "exchangeable"
 }
-# The output-note sentence of decision D18.
-MATCHED_ANALYSIS_NOTE <- paste0(
-  "Matched analyses use an independence working correlation with robust standard errors ",
-  "clustered by patient; matched sets (pairs) are not used as clusters.")
+# The output-note sentence of decision D18. It says "clustered by patient" only
+# when a patient identifier is mapped; without one each eye is its own cluster
+# (decision R2-7). The pipeline records the run's case once
+# (set_matched_note_pid); the notes, sheets and legends read it.
+.matched_note <- new.env(parent = emptyenv())
+.matched_note$has_pid <- TRUE
+set_matched_note_pid <- function(has_pid) .matched_note$has_pid <- isTRUE(has_pid)
+matched_analysis_note <- function(clustered = .matched_note$has_pid) paste0(
+  "Matched analyses use an independence working correlation with robust standard errors",
+  if (isTRUE(clustered)) " clustered by patient" else ", each eye its own cluster (no patient ID mapped)",
+  "; matched sets (pairs) are not used as clusters.")
+MATCHED_ANALYSIS_NOTE <- matched_analysis_note(TRUE)
 
 # The reference (baseline) level the model of a group factor uses.
 .ref_level <- function(g) {

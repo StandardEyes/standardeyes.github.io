@@ -42,21 +42,21 @@ group_palette <- function(glv, cfg) {
 
 gr_theme <- function() {
   # MATLAB-like: full black panel box, inward ticks, bold text, light y-grid
-  th <- ggplot2::theme_bw(base_size = 12.5) +
+  th <- ggplot2::theme_bw(base_size = gr_pt(12.5)) +
     ggplot2::theme(
-      plot.title = ggplot2::element_text(face = "bold", hjust = .5, size = 13),
-      axis.title = ggplot2::element_text(face = "bold", size = 11),
-      axis.text = ggplot2::element_text(face = "bold", colour = "black", size = 9.5),
+      plot.title = ggplot2::element_text(face = "bold", hjust = .5, size = gr_pt(13)),
+      axis.title = ggplot2::element_text(face = "bold", size = gr_pt(11)),
+      axis.text = ggplot2::element_text(face = "bold", colour = "black", size = gr_pt(9.5)),
       axis.ticks = ggplot2::element_line(colour = "black", linewidth = .5),
       panel.border = ggplot2::element_rect(colour = "black", linewidth = .8, fill = NA),
       panel.grid.major.x = ggplot2::element_blank(),
       panel.grid.minor = ggplot2::element_blank(),
       panel.grid.major.y = ggplot2::element_line(colour = "grey88", linewidth = .3),
       legend.position = "top", legend.title = ggplot2::element_blank(),
-      legend.text = ggplot2::element_text(size = 9.5, face = "bold"),
+      legend.text = ggplot2::element_text(size = gr_pt(9.5), face = "bold"),
       legend.background = ggplot2::element_rect(colour = "grey20", linewidth = .4),
       plot.background = ggplot2::element_rect(fill = "white", colour = NA),
-      plot.margin = ggplot2::margin(6, 10, 4, 6))
+      plot.margin = ggplot2::margin(gr_sp(6), gr_sp(10), gr_sp(4), gr_sp(6)))
   # journal style (D20): no box around the plotting area, open L-shaped axes
   # as on the bar panels
   if (isTRUE(.gr_opts$journal)) th + gr_journal_axes() else th
@@ -152,8 +152,10 @@ gr_figure_settings_text <- function(fs) {
   paste0(if (fs$journal) "journal style (no frames, section bands, captions or shaded wedges; titles, method text and abbreviations in <figure>_legend.txt)"
          else "annotated style (the v1.0.0 look)",
          "; width ", if (is.finite(fs$width_cm))
-           paste0(format(fs$width_cm), " cm (laid out at that width; a combined figure taller than ",
-                  GR_PAGE_MAX_H_CM, " cm is split into pages _1, _2 ...)") else "as designed",
+           paste0(format(fs$width_cm), " cm (laid out at that width; combined figures ",
+                  if (fs$width_cm < 12) "one panel" else "two panels", " per row, a combined figure taller than ",
+                  GR_PAGE_MAX_H_CM, " cm split into pages _p1, _p2 ... with the panel letters continuing)")
+         else "as designed",
          "; ", paste(toupper(fs$formats), collapse = ", "), " at ", format(fs$dpi), " dpi",
          if ("eps" %in% fs$formats)
            paste0(" (EPS vector; its semi-transparent points and regions are embedded as images at ",
@@ -203,7 +205,7 @@ GR_SYMBOLS <- c("●" = "eyes of a group (and its color key)", "◆" = "centroid
 GR_PANEL_NOTES <- list(
   scatter = paste0("Solid blue line, y = x (attempted equals achieved); green lines, ±0.50 D; ",
                    "magenta lines, ±1.00 D; dotted line, the least-squares regression line of each group."),
-  "10_CIhist" = paste0("Correction index bins are closed on the right: a bin labelled 0.16 to 0.30 holds ",
+  "10_CIhist" = paste0("Correction index bins are closed on the right: a bin labeled 0.16 to 0.30 holds ",
                        "0.15 < CI ≤ 0.30, so a ratio of 0.153 is in it."),
   "11_AEhist" = paste0("Angle-of-error bins include the edge nearer zero: 5° and -5° are in -5 to 5, ",
                        "15° is in 5 to 15 and -15° in -15 to -5; the angle is positive when the SIA lies counterclockwise of the TIA."))
@@ -308,8 +310,10 @@ gr_gee_legend_lines <- function(texts) {
     out <- paste0("GEE P values: ", if (eye) "each eye its own cluster (no patient ID)" else "clustered by patient",
                   "; ", gee_inference_text(unit = if (eye) "eye" else "patient"), ".")
   }
-  if (isTRUE(.gr_opts$matched))
-    out <- c(out, get0("MATCHED_ANALYSIS_NOTE", ifnotfound = character(0)))
+  # "clustered by patient" only when the figure's tests have patient ids
+  # (decision R2-7); otherwise each eye is its own cluster
+  if (isTRUE(.gr_opts$matched) && exists("matched_analysis_note", mode = "function"))
+    out <- c(out, matched_analysis_note(clustered = !is.null(.gr_opts$cluster_id)))
   out
 }
 
@@ -536,6 +540,45 @@ gr_pct <- function(cond, d = 1) {
 # ============================================================
 MHDR_FS <- 8.5      # header font size (pt)
 MHDR_LS <- 11.5     # line skip (pt)
+
+# Statistics lines a panel leaves out of its cell in a combined figure at a
+# journal width (decision R2-2): .gr_opts$short_hdr asks the panel being built
+# for its short header, gr_moved() records each line (or part) left out, and
+# the combined figure's legend file lists them under the panel's letter.
+.gr_opts$short_hdr <- FALSE
+.gr_opts$moved <- character(0)
+gr_moved <- function(txt) {
+  txt <- trimws(as.character(unlist(txt)))
+  txt <- txt[!is.na(txt) & nzchar(txt)]
+  if (length(txt)) .gr_opts$moved <- c(.gr_opts$moved, txt)
+  invisible(NULL)
+}
+# the text of one header line (its segments joined)
+gr_line_text <- function(line) paste(vapply(line, function(s) as.character(s$text %||% ""), character(1)), collapse = "")
+
+# ------------------------------------------------------------
+# Text scale of the panels being built (decision R2-2). 1 = the designed
+# sizes. A combined figure laid out at a journal width (figure_width_cm) builds
+# its bar, scatter and stability panels again for their cells with every font
+# size times .gr_opts$tscale - never below GR_MIN_TEXT_PT - and every spacing in
+# points times the same factor, so a two-panel row at 17.77 cm is about 7.6 cm
+# high; the panels' own files keep the designed sizes. A grob that is drawn
+# later (a header, the stability axis and labels) keeps the size it was built
+# with.
+# ------------------------------------------------------------
+.gr_opts$tscale <- 1
+gr_ts <- function() min(1, .gr_opts$tscale %||% 1)
+gr_pt <- function(pt) if (gr_ts() >= 1) pt else max(GR_MIN_TEXT_PT, pt * gr_ts())   # a font size (pt)
+GR_PT_PER_MM <- 72.27 / 25.4                                     # ggplot2's .pt
+gr_mm <- function(mm) gr_pt(mm * GR_PT_PER_MM) / GR_PT_PER_MM    # a ggplot text size (mm)
+gr_sp <- function(pt) pt * gr_ts()                               # a spacing (pt)
+# n text lines of the default 12-pt context as a unit, at the text scale - and
+# never less than the lines of the header-size text they hold (fonts stop at
+# GR_MIN_TEXT_PT while the scale goes on)
+gr_lines <- function(n) if (gr_ts() >= 1) grid::unit(n, "lines") else
+  grid::unit(n * max(14.4 * gr_ts(), 1.45 * hdr_fs()), "pt")
+hdr_fs <- function() gr_pt(MHDR_FS)                              # header font size now
+hdr_ls <- function() if (gr_ts() >= 1) MHDR_LS else 1.22 * hdr_fs()   # header line skip now
 
 seg <- function(text, col = "black") list(text = text, col = col)
 
@@ -876,9 +919,11 @@ hdr_groups <- function(glv, pal, line_fn, foot = NULL, x = 0.01, split_at = 5,
 wrap_vs <- function(prefix, parts, per = 3) {
   if (!length(parts)) return(character(0))
   ch <- split(parts, ceiling(seq_along(parts) / per))
+  # a continuation line is indented like a wrapped header line (hdr_wrap_text):
+  # spaces as wide as the prefix do not line up in a proportional font
   vapply(seq_along(ch), function(i)
-    paste0(if (i == 1) prefix else strrep(" ", nchar(prefix)),
-           paste(ch[[i]], collapse = ", ")), character(1))
+    paste0(if (i == 1) prefix else "   ", paste(ch[[i]], collapse = ", "),
+           if (i < length(ch)) "," else ""), character(1))
 }
 
 # "Welch ANOVA: P < 0.0001"
@@ -944,7 +989,7 @@ hdr_pieces <- function(txt) {
 
 # rendered width (pt) of a header text at font size fs on the current device,
 # markers counted at their drawn advance
-hdr_text_pt <- function(txt, fs = MHDR_FS) {
+hdr_text_pt <- function(txt, fs = hdr_fs()) {
   sum(vapply(hdr_pieces(txt), function(p)
     if (!is.na(HDR_MARKS[p])) hdr_mark_w(fs)
     else grid::convertWidth(grid::grobWidth(grid::textGrob(p,
@@ -954,14 +999,15 @@ hdr_text_pt <- function(txt, fs = MHDR_FS) {
 # draw one line of segments starting at unit x0; return the grobs and the
 # line's right-edge unit (so the next column can be positioned after it).
 # A segment with $sw draws a small filled swatch (legend key) before its text.
-header_line_grob <- function(segs, y_pt, x0, fs = MHDR_FS) {
+header_line_grob <- function(segs, y_pt, x0, fs = hdr_fs()) {
   gl <- grid::gList(); xpos <- x0
+  sw <- 8 * fs / MHDR_FS                       # the swatch scales with the text
   for (s in segs) {
     if (!is.null(s$sw)) {
-      gl <- grid::gList(gl, grid::rectGrob(x = xpos, y = grid::unit(y_pt + 1, "pt"),
-        width = grid::unit(8, "pt"), height = grid::unit(8, "pt"), just = c("left", "bottom"),
+      gl <- grid::gList(gl, grid::rectGrob(x = xpos, y = grid::unit(y_pt + sw / 8, "pt"),
+        width = grid::unit(sw, "pt"), height = grid::unit(sw, "pt"), just = c("left", "bottom"),
         gp = grid::gpar(fill = s$sw, col = "grey20", lwd = .5)))
-      xpos <- xpos + grid::unit(10, "pt")
+      xpos <- xpos + grid::unit(sw * 1.25, "pt")
     }
     for (pc in hdr_pieces(s$text)) {
       pch <- HDR_MARKS[pc]
@@ -991,20 +1037,20 @@ header_line_grob <- function(segs, y_pt, x0, fs = MHDR_FS) {
 
 # scales: optional list (one numeric vector per column, one value per line) of
 # font-size factors, see hdr_fit_scales
-build_header_children <- function(spec, scales = NULL) {
+build_header_children <- function(spec, scales = NULL, fs = hdr_fs(), ls = hdr_ls()) {
   maxL <- max(vapply(spec, function(c) length(c$lines), integer(1)))
-  ytop <- 3 + (maxL - 1) * MHDR_LS
+  ytop <- 3 * ls / MHDR_LS + (maxL - 1) * ls
   gl <- grid::gList()
   prev_right <- grid::unit(0, "npc")
   for (k in seq_along(spec)) {
     col <- spec[[k]]
     # x = "auto" places this column just after the previous column's widest line
-    x0 <- if (identical(col$x, "auto")) prev_right + grid::unit(12, "pt")
+    x0 <- if (identical(col$x, "auto")) prev_right + grid::unit(12 * fs / MHDR_FS, "pt")
           else grid::unit(col$x, "npc")
     col_right <- x0
     for (j in seq_along(col$lines)) {
       f <- if (is.null(scales)) 1 else scales[[k]][j]
-      lg <- header_line_grob(col$lines[[j]], ytop - (j - 1) * MHDR_LS, x0, fs = MHDR_FS * f)
+      lg <- header_line_grob(col$lines[[j]], ytop - (j - 1) * ls, x0, fs = fs * f)
       gl <- grid::gList(gl, lg$grobs)
       col_right <- grid::unit.pmax(col_right, lg$right)
     }
@@ -1018,18 +1064,32 @@ build_header_children <- function(spec, scales = NULL) {
 # smaller font (see hdr_fit_scales). Wrapping happens earlier, at build time
 # (hdr_fit_spec), because the extra lines need margin reserved in the layout.
 build_header_grob <- function(spec, fit = FALSE, slack = 4) {
+  # the font size and line skip of the panel being built, kept for draw time
   if (isTRUE(fit))
-    return(grid::gTree(spec = spec, slack = slack, cl = "mheader_fit"))
+    return(grid::gTree(spec = spec, slack = slack, fs = hdr_fs(), ls = hdr_ls(), cl = "mheader_fit"))
   grid::gTree(children = build_header_children(spec))
 }
 
-# convert a ggplot to a gtable with the colored header drawn in its top margin
-attach_header <- function(p, spec, fit = FALSE) {
+# convert a ggplot to a gtable with the colored header drawn in its top margin;
+# span "panel": the header runs across the plotting panel (from the y axis),
+# "all": across the whole figure (a horizontal bar panel, whose category
+# labels take the left of the figure, or a square scatter narrower than it)
+# own_row: the header in a row of its own at the very top, above a key placed
+# on top of the plot (a panel built at a reduced text scale, R2-2); otherwise
+# it is drawn in the plot's top margin, which the caller reserves for it
+attach_header <- function(p, spec, fit = FALSE, span = "panel", own_row = FALSE) {
   gt <- ggplot2::ggplotGrob(p)
+  if (isTRUE(own_row))
+    gt <- gtable::gtable_add_rows(gt, grid::unit(gr_sp(8) + hdr_ls() * hdr_nlines(spec), "pt"), pos = 0)
   pan <- gt$layout[gt$layout$name == "panel", ]
+  whole <- identical(span, "all")
+  if (isTRUE(own_row))
+    return(gr_widen_legend(gtable::gtable_add_grob(gt, build_header_grob(spec, fit = fit), t = 1, b = 1,
+                                                   l = if (whole) 1 else min(pan$l), r = if (whole) ncol(gt) else max(pan$r),
+                                                   clip = "off", name = "mheader", z = Inf)))
   gr_widen_legend(gtable::gtable_add_grob(gt, build_header_grob(spec, fit = fit), t = 1, b = min(pan$t) - 1,
-                                          l = min(pan$l), r = max(pan$r), clip = "off",
-                                          name = "mheader", z = Inf))
+                                          l = if (whole) 1 else min(pan$l), r = if (whole) ncol(gt) else max(pan$r),
+                                          clip = "off", name = "mheader", z = Inf))
 }
 
 # A group key above or below the plot is centred on the WHOLE figure, not on
@@ -1057,11 +1117,16 @@ HDR_FIT_SEPS <- c("\\s+\u00b7\\s+", ",\\s+", "(?<=\\S)\\s{2,}(?=\\S)")
 HDR_POLAR_SEPS <- c(HDR_FIT_SEPS, ":\\s+")
 HDR_FIT_MIN <- 0.6     # smallest font factor a too-wide line is drawn at
 # ... in the journal style never below GR_MIN_TEXT_PT (decision D20)
-gr_fit_min <- function() if (isTRUE(.gr_opts$journal)) max(HDR_FIT_MIN, GR_MIN_TEXT_PT / MHDR_FS) else HDR_FIT_MIN
+gr_fit_min <- function(fs = hdr_fs()) {
+  # a header at a reduced text scale (R2-2) is already at or near 6 pt: no
+  # smaller in any style
+  lo <- if (isTRUE(.gr_opts$journal) || fs < MHDR_FS) GR_MIN_TEXT_PT / fs else 0
+  min(1, max(HDR_FIT_MIN, lo))
+}
 
 # rendered width (pt) of one header line at font size fs, on the current device
-hdr_line_pt <- function(segs, fs = MHDR_FS) {
-  sum(vapply(segs, function(s) (if (!is.null(s$sw)) 10 else 0) + hdr_text_pt(s$text, fs),
+hdr_line_pt <- function(segs, fs = hdr_fs()) {
+  sum(vapply(segs, function(s) (if (!is.null(s$sw)) 10 * fs / MHDR_FS else 0) + hdr_text_pt(s$text, fs),
              numeric(1)))
 }
 
@@ -1134,19 +1199,22 @@ hdr_fit_spec <- function(spec, width_pt, slack = 4) {
   spec
 }
 
-# font factor per line so that every line fits its room (1 = as designed)
-hdr_fit_scales <- function(spec, width_pt, slack = 4) {
+# font factor per line so that every line fits its room (1 = as designed);
+# fs: the header's font size
+hdr_fit_scales <- function(spec, width_pt, slack = 4, fs = hdr_fs()) {
   lapply(seq_along(spec), function(k) vapply(seq_along(spec[[k]]$lines), function(j) {
     av <- hdr_line_avail(spec, k, j, width_pt, slack)
     if (is.na(av)) return(1)
-    w <- hdr_line_pt(spec[[k]]$lines[[j]])
-    if (w <= av || w <= 0) 1 else max(gr_fit_min(), av / w)
+    w <- hdr_line_pt(spec[[k]]$lines[[j]], fs)
+    if (w <= av || w <= 0) 1 else max(gr_fit_min(fs), av / w)
   }, numeric(1)))
 }
 
+# drawn at the font size and line skip the header was built with
 makeContent.mheader_fit <- function(x) {
   w <- grid::convertWidth(grid::unit(1, "npc"), "pt", valueOnly = TRUE)
-  grid::setChildren(x, build_header_children(x$spec, hdr_fit_scales(x$spec, w, x$slack)))
+  fs <- x$fs %||% MHDR_FS; ls <- x$ls %||% MHDR_LS
+  grid::setChildren(x, build_header_children(x$spec, hdr_fit_scales(x$spec, w, x$slack, fs), fs, ls))
 }
 # registered with grid so the method is found however this file was sourced
 registerS3method("makeContent", "mheader_fit", makeContent.mheader_fit,
@@ -1154,11 +1222,14 @@ registerS3method("makeContent", "mheader_fit", makeContent.mheader_fit,
 
 # Run fun() with a measuring device open: the device family the PNG / TIFF / JPEG
 # writers use, `w` x `h` inches, on a temporary file. The previous current
-# device is restored afterwards.
+# device is restored afterwards. Measured at GR_MEASURE_DPI: at 100 dpi the
+# hinted 6-pt bold text of a figure at a journal width measured up to 2%
+# narrower than in the 300-dpi file, and a fitted line ran past the frame.
+GR_MEASURE_DPI <- 300
 gr_with_measure_device <- function(w, h, fun) {
   old <- grDevices::dev.cur()
   tf <- tempfile(fileext = ".png")
-  ok <- tryCatch({ grDevices::png(tf, width = w, height = h, units = "in", res = 100,
+  ok <- tryCatch({ grDevices::png(tf, width = w, height = h, units = "in", res = GR_MEASURE_DPI,
                                   bg = "white"); TRUE },
                  error = function(e) FALSE)
   if (!ok) grDevices::pdf(NULL, width = w, height = h)
@@ -1189,8 +1260,8 @@ GR_POLAR_MIN_PLOT_IN <- 3.0     # the least width (inches) of the drawn diagram
 gr_polar_finish <- function(p, hs, xlim, ylim, fig_w, fig_h) {
   build <- function(spec, xl) p +
     ggplot2::coord_fixed(xlim = xl, ylim = ylim, clip = "off") +
-    ggplot2::theme(plot.margin = ggplot2::margin(t = 10 + MHDR_LS * hdr_nlines(spec),
-                                                 r = 8, b = 6, l = 8))
+    ggplot2::theme(plot.margin = ggplot2::margin(t = gr_sp(10) + hdr_ls() * hdr_nlines(spec),
+                                                 r = gr_sp(8), b = gr_sp(6), l = gr_sp(8)))
   fixed_pt <- function(u, conv) {
     nn <- grid::unitType(u) != "null"
     if (!any(nn)) 0 else sum(conv(u[nn], "pt", valueOnly = TRUE))
@@ -1203,7 +1274,8 @@ gr_polar_finish <- function(p, hs, xlim, ylim, fig_w, fig_h) {
     fh <- fixed_pt(gt$heights, grid::convertHeight)
     ph <- fig_h * 72.27 - fh
     # the diagram's least width, and the panel height that gives it
-    min_ph <- min(0.9 * pw, GR_POLAR_MIN_PLOT_IN * 72.27) * diff(ylim) / diff(xlim)
+    # (at a reduced text scale, R2-2, the diagram may be as much smaller)
+    min_ph <- min(0.9 * pw, GR_POLAR_MIN_PLOT_IN * gr_ts() * 72.27) * diff(ylim) / diff(xlim)
     h_out <- fig_h
     if (pw > 0 && ph < min_ph) { ph <- min_ph; h_out <- (fh + min_ph) / 72.27 }
     xl <- xlim
@@ -1221,7 +1293,7 @@ hdr_nlines <- function(spec) if (is.null(spec)) 0 else
 # rotated (90°) inline-colored stat line, centered in its cell (bottom-to-top)
 rot_line_grob <- function(segs) {
   tgs <- lapply(segs, function(s) grid::textGrob(s$text, rot = 90, just = c("centre", "centre"),
-    gp = grid::gpar(col = s$col, fontface = "bold", fontsize = MHDR_FS)))
+    gp = grid::gpar(col = s$col, fontface = "bold", fontsize = hdr_fs())))
   hts <- lapply(tgs, grid::grobHeight)
   totalH <- Reduce(`+`, hts)
   gl <- grid::gList(); yrun <- grid::unit(0.5, "npc") - 0.5 * totalH
@@ -1243,7 +1315,7 @@ nbox_stack_grob <- function(nbox) {
                      width = grid::unit(0.99, "npc"),
                      gp = grid::gpar(fill = "white", col = unname(nbox[i]), lwd = 1)),
       grid::textGrob(names(nbox)[i], y = grid::unit(yc, "npc"),
-                     gp = grid::gpar(col = unname(nbox[i]), fontface = "bold", fontsize = MHDR_FS)))
+                     gp = grid::gpar(col = unname(nbox[i]), fontface = "bold", fontsize = hdr_fs())))
   }
   grid::gTree(children = gl)
 }
@@ -1261,21 +1333,21 @@ attach_hbar <- function(p, left_segs, right_text, nbox, caution = character(0)) 
   pan <- gt$layout[gt$layout$name == "panel", ]
   left_lines <- if (length(left_segs) && is.null(left_segs[[1]]$text)) left_segs else list(left_segs)
   for (ln in rev(left_lines)) {
-    gt <- gtable::gtable_add_cols(gt, grid::unit(1.5, "lines"), pos = 0)
+    gt <- gtable::gtable_add_cols(gt, gr_lines(1.5), pos = 0)
     gt <- gtable::gtable_add_grob(gt, rot_line_grob(ln), t = pan$t, b = pan$b,
                                   l = 1, r = 1, clip = "off", name = "hstat", z = Inf)
   }
   pan <- gt$layout[gt$layout$name == "panel", ]
-  gt <- gtable::gtable_add_cols(gt, grid::unit(1.3, "lines"), pos = ncol(gt))
+  gt <- gtable::gtable_add_cols(gt, gr_lines(1.3), pos = ncol(gt))
   gt <- gtable::gtable_add_grob(gt, grid::textGrob(right_text, rot = 90,
-    gp = grid::gpar(fontface = "bold", fontsize = MHDR_FS)),
+    gp = grid::gpar(fontface = "bold", fontsize = hdr_fs())),
     t = pan$t, b = pan$b, l = ncol(gt), r = ncol(gt), clip = "off", name = "pstat", z = Inf)
   if (!is.null(nbox) && length(nbox)) {
     pan <- gt$layout[gt$layout$name == "panel", ]
-    gt <- gtable::gtable_add_rows(gt, grid::unit(2.1, "lines"), pos = nrow(gt))
+    gt <- gtable::gtable_add_rows(gt, gr_lines(2.1), pos = nrow(gt))
     # under the panel; across the whole figure when the panel is narrow (a
     # journal column width), so the "N = ... of ... eyes" text stays in its box
-    wide <- (.gr_opts$cell_w %||% GR_BAR_MIN_W) < GR_HDR_STACK_W
+    wide <- gr_narrow()
     gt <- gtable::gtable_add_grob(gt, nbox_stack_grob(nbox), t = nrow(gt), b = nrow(gt),
                                   l = if (wide) 1 else pan$l, r = if (wide) ncol(gt) else pan$r,
                                   clip = "off", name = "nbox", z = Inf)
@@ -1284,11 +1356,11 @@ attach_hbar <- function(p, left_segs, right_text, nbox, caution = character(0)) 
   caution <- caution[!is.na(caution) & nzchar(caution)]
   if (length(caution)) {
     nl <- length(caution)
-    gt <- gtable::gtable_add_rows(gt, grid::unit(5 + MHDR_LS * nl, "pt"), pos = nrow(gt))
+    gt <- gtable::gtable_add_rows(gt, grid::unit(gr_sp(5) + hdr_ls() * nl, "pt"), pos = nrow(gt))
     gt <- gtable::gtable_add_grob(gt, grid::textGrob(caution,
       x = grid::unit(GR_HBAR_CAU_PAD, "pt"),
-      y = grid::unit(1, "npc") - grid::unit(3 + MHDR_LS * (seq_len(nl) - 1), "pt"),
-      just = c("left", "top"), gp = grid::gpar(fontface = "bold", fontsize = MHDR_FS)),
+      y = grid::unit(1, "npc") - grid::unit(gr_sp(3) + hdr_ls() * (seq_len(nl) - 1), "pt"),
+      just = c("left", "top"), gp = grid::gpar(fontface = "bold", fontsize = hdr_fs())),
       t = nrow(gt), b = nrow(gt), l = 1, r = ncol(gt), clip = "off", name = "hcaution", z = Inf)
   }
   gr_widen_legend(gt)
@@ -1304,10 +1376,10 @@ gr_hbar_caution <- function(caution, fig_w = .gr_opts$cell_w %||% GR_BAR_MIN_W) 
   if (is.na(caution) || !nzchar(caution)) return(character(0))
   avail <- fig_w * 72.27 - 2 * GR_HBAR_CAU_PAD
   out <- tryCatch(gr_with_measure_device(fig_w, 4.9, function()
-           hdr_wrap_text(caution, avail, function(t) hdr_text_pt(t, MHDR_FS), seps = GR_BAR_SEPS)),
+           hdr_wrap_text(caution, avail, function(t) hdr_text_pt(t, hdr_fs()), seps = GR_BAR_SEPS)),
          error = function(e) NULL)
   if (is.null(out) || !length(out))
-    out <- strwrap(caution, width = max(20L, floor(avail / (0.6 * MHDR_FS))), exdent = 3)
+    out <- strwrap(caution, width = max(20L, floor(avail / (0.6 * hdr_fs()))), exdent = 3)
   out
 }
 
@@ -1323,6 +1395,10 @@ GR_BAR_MIN_W <- 5.6 * 3 / 4
 # stacked into one column, and a scatter's per-group header columns into one
 # line per group (gr_bars, scatter_ind)
 GR_HDR_STACK_W <- 4.0
+# TRUE when a panel `w` inches wide is that narrow for its text: the width is
+# compared at the panel's text scale (a panel built at a reduced scale, R2-2,
+# has smaller text and room for more)
+gr_narrow <- function(w = .gr_opts$cell_w %||% GR_BAR_MIN_W) w < GR_HDR_STACK_W * hdr_fs() / MHDR_FS
 
 # fun(<width of the plotting panel in pt>) for ggplot `p` drawn `w` inches wide,
 # run on a measuring device like the polar headers (gr_with_measure_device), so
@@ -1405,10 +1481,11 @@ gr_bars <- function(dfb, pal, xlab, ylab, title, ann = list(), horizontal = FALS
                     box_right = .gr_opts$box_right,
                     label_angle = .gr_opts$label_angle, x_angle = 0, nbox = NULL,
                     header_spec = NULL, legend_pos = "inside",
-                    hbar_left = NULL, hbar_right = NULL, caution = "") {
+                    hbar_left = NULL, hbar_right = NULL, caution = "", short_spec = NULL) {
   # StandardEyes panels leave the corner boxes NULL, which selects the mEYEstro
   # look the builders reproduce: OPEN (no full box) + N-boxes off the right edge.
   is_meyestro <- is.null(box_left) && is.null(box_right)
+  key_top <- FALSE                              # the key above the plot (R2-2)
   meyestro_v <- is_meyestro && !horizontal      # vertical mEYEstro bar panel
   # The N-boxes are rotated labels stacked down the right edge; past four groups
   # they overprint each other into an unreadable smear. Drop the boxes and fold
@@ -1417,23 +1494,68 @@ gr_bars <- function(dfb, pal, xlab, ylab, title, ann = list(), horizontal = FALS
   if (!horizontal && !is.null(nbox) && length(nbox) > 4) {
     cnt <- if (!is.null(attr(nbox, "n"))) as.character(attr(nbox, "n"))
            else sub("^N = ([0-9]+).*$", "\\1", names(nbox))
-    ann <- c(ann, list(list(col = "black",
+    ann <- c(ann, list(list(col = "black", role = "n",
       text = paste0("n per group, in the order above: ", paste(cnt, collapse = ", ")))))
     nbox <- NULL
+  }
+  # Journal style, the correction-index and angle-of-error histograms (decision
+  # R2-3): no title in the panel (the axis title names the measure) and their
+  # statistics lines in a grid header above the plot area, like every other
+  # panel's - never over the bars; the two-group form's rotated side lines
+  # become header lines too. The header runs across the whole figure, since
+  # the category labels take its left part.
+  jh <- horizontal && is_meyestro && isTRUE(.gr_opts$journal)
+  if (jh && !is.null(hbar_left)) {
+    hl <- if (length(hbar_left) && is.null(hbar_left[[1]]$text)) hbar_left else list(hbar_left)
+    pl <- if (length(hbar_right) && nzchar(hbar_right[1])) list(list(seg(hbar_right[1]))) else list()
+    header_spec <- list(list(x = 0.01, lines = c(hl, pl)))
+    # short form (R2-2): the first line and the test line
+    if (is.null(short_spec) && length(hl) > 1) short_spec <- list(list(x = 0.01, lines = c(hl[1], pl)))
+    hbar_left <- NULL
+  }
+  # A combined figure at a journal width asks for the short form of the stat
+  # lines when the full form does not fit its row (decision R2-2): the first
+  # line per cohort and the test lines stay, the rest goes to the figure's
+  # legend file (gr_moved). With 3+ groups a cohort's line keeps its first
+  # measure (up to the first " · "); a two-group header is replaced by its
+  # builder's short form (short_spec) when it has one.
+  if (isTRUE(.gr_opts$short_hdr)) {
+    if (is.null(header_spec) && length(ann)) {
+      keep <- list()
+      for (a in ann) {
+        if (!identical(a$col, "black")) {
+          i <- regexpr(" · ", a$text, fixed = TRUE)
+          if (i > 0) {
+            lead <- sub("^([^:]*: ).*$", "\\1", a$text)
+            gr_moved(paste0(if (grepl(": ", a$text, fixed = TRUE)) lead else "",
+                            substring(a$text, i + 3)))
+            a$text <- substr(a$text, 1, i - 1)
+          }
+          keep <- c(keep, list(a))
+        } else if (identical(a$role, "n")) gr_moved(a$text)
+        else keep <- c(keep, list(a))
+      }
+      ann <- keep
+    } else if (!is.null(header_spec) && !is.null(short_spec)) {
+      txt <- function(sp) unlist(lapply(sp, function(cl) vapply(cl$lines, gr_line_text, character(1))))
+      gr_moved(setdiff(txt(header_spec), txt(short_spec)))
+      header_spec <- short_spec
+    }
+    if (nzchar(as.character(caution %||% "")[1])) { gr_moved(caution); caution <- "" }
   }
   # Three or more groups: the stat lines (`ann`) go through the same grid
   # header as the two-group panels - one line each, spaced in points
   # (MHDR_LS) in the margin reserved above the panel - so they never overprint
   # however short the panel is drawn (decision D20); never at data-unit heights.
-  if (meyestro_v && is.null(header_spec) && length(ann))
+  if ((meyestro_v || jh) && is.null(header_spec) && length(ann))
     header_spec <- list(list(x = 0.01, lines = lapply(ann, function(a) list(seg(a$text, a$col)))))
-  use_hdr <- meyestro_v && !is.null(header_spec)  # grid inline-colored header
+  use_hdr <- (meyestro_v || jh) && !is.null(header_spec)  # grid inline-colored header
   use_hbar <- is_meyestro && horizontal && !is.null(hbar_left)  # rotated side stats
   if (use_hbar) xlab <- ""                       # rotated stat replaces the category title
   cell_w <- .gr_opts$cell_w %||% GR_BAR_MIN_W    # the narrowest width this panel is drawn at
   # a header of side-by-side columns needs a wide panel: in a narrow one (a
   # figure laid out at a journal column width) its columns are stacked into one
-  if (use_hdr && cell_w < GR_HDR_STACK_W && length(header_spec) > 1) {
+  if (use_hdr && gr_narrow(cell_w) && length(header_spec) > 1) {
     lines <- unlist(lapply(header_spec, function(cl) cl$lines), recursive = FALSE)
     header_spec <- list(list(x = 0.01, lines = lines))
   }
@@ -1442,7 +1564,12 @@ gr_bars <- function(dfb, pal, xlab, ylab, title, ann = list(), horizontal = FALS
   ymax <- max(dfb$pct, na.rm = TRUE)
   # mEYEstro puts the stat text ABOVE the panel and the legend INSIDE, so the
   # interior only needs room for the legend (not the annotation lines).
-  headroom <- if (meyestro_v) 1.30 else 1 + 0.09 * (length(ann) + 1)
+  # (a journal-style histogram has its lines above the plot: room for the
+  # value labels right of the bars only)
+  # (a key above the plot at a reduced text scale, R2-2: room for the value
+  # labels only - a 6-pt "100%" upright is about a quarter of the short plot)
+  key_top <- meyestro_v && use_hdr && gr_ts() < 1 && identical(legend_pos, "inside") && !gr_narrow(cell_w)
+  headroom <- if (key_top) 1.25 else if (meyestro_v) 1.30 else if (jh) 1.16 else 1 + 0.09 * (length(ann) + 1)
   # Each value label takes its FONT HEIGHT of the bar's slot (across the bars
   # when rotated 90 deg; along the categories on a horizontal panel). The slot
   # shrinks as 1/(categories x series), measured at the width (height) the
@@ -1455,12 +1582,17 @@ gr_bars <- function(dfb, pal, xlab, ylab, title, ann = list(), horizontal = FALS
   # bars of a horizontal one); a bar gets 0.8 / series of a category, and a
   # label needs about 0.75 of its font size across (the height of its digits).
   nlev0 <- length(unique(dfb$label)); nser0 <- length(unique(dfb$series))
-  span_pt <- if (horizontal) (.gr_opts$cell_h %||% 4.9) * 72 * 0.62 else (cell_w - 0.75) * 72
-  n_cat <- nlev0 + if (horizontal) 0.6 + (if (is_meyestro && !use_hbar) 0.9 + 0.85 * length(ann) else 0)
+  # (the axis room and the header lines above a horizontal plot at the panel's
+  # text scale, R2-2)
+  n_hdr <- if (use_hdr) sum(vapply(header_spec, function(cl) length(cl$lines), integer(1))) else 0
+  span_pt <- if (horizontal) max((.gr_opts$cell_h %||% 4.9) * 72 * 0.3,
+                                 (.gr_opts$cell_h %||% 4.9) * 72 * 0.62 - (if (jh) hdr_ls() * n_hdr else 0))
+             else (cell_w - 0.75 * gr_ts()) * 72
+  n_cat <- nlev0 + if (horizontal) 0.6 + (if (is_meyestro && !use_hbar && !jh) 0.9 + 0.85 * length(ann) else 0)
                    else 0.6 + (if (!is.null(nbox) && length(nbox) && length(nbox) <= 4) 1.7 else 0)
   slot_pt <- span_pt / max(1, n_cat) * 0.8 / max(1, nser0)
   PT_PER_MM <- 72.27 / 25.4          # ggplot2's .pt, which is not exported
-  val_size <- min(label_size + 0.3, (slot_pt - 1) / 0.75 / PT_PER_MM)
+  val_size <- min(gr_mm(label_size + 0.3), (slot_pt - 1) / 0.75 / PT_PER_MM)
   # Value labels are chosen BAR BY BAR (decision D22: labels never overlap,
   # but a panel does not lose them all): every non-zero bar when its slot holds
   # a label of at least GR_MIN_TEXT_PT; otherwise labels of GR_MIN_TEXT_PT,
@@ -1494,19 +1626,19 @@ gr_bars <- function(dfb, pal, xlab, ylab, title, ann = list(), horizontal = FALS
     show_val <- any(keep)
   }
   # a long axis title is wrapped in a narrow panel instead of running off it
-  if (cell_w < GR_HDR_STACK_W && nchar(xlab) > 30) xlab <- paste(strwrap(xlab, 30), collapse = "\n")
+  if (gr_narrow(cell_w) && nchar(xlab) > 30) xlab <- paste(strwrap(xlab, 30), collapse = "\n")
   # Category labels that would run into each other at this width (a panel laid
   # out at a journal column width) are turned: 45 degrees, on one line each,
   # or upright (90) when even that is too tight for their line height.
   if (!horizontal) {
     cat_pt <- span_pt / max(1, n_cat)
-    labw <- max(nchar(unlist(strsplit(levels(dfb$label), "\n", fixed = TRUE)))) * 0.52 * 9.5
+    labw <- max(nchar(unlist(strsplit(levels(dfb$label), "\n", fixed = TRUE)))) * 0.52 * gr_pt(9.5)
     if (x_angle == 0 && labw > cat_pt) {
       lv <- gsub("\n", " ", levels(dfb$label), fixed = TRUE)
       dfb$label <- factor(gsub("\n", " ", as.character(dfb$label), fixed = TRUE), levels = unique(lv))
       x_angle <- 45
     }
-    if (x_angle > 0 && x_angle < 90 && 11 / sin(x_angle * pi / 180) > cat_pt) x_angle <- 90
+    if (x_angle > 0 && x_angle < 90 && 11 * gr_pt(9.5) / 9.5 / sin(x_angle * pi / 180) > cat_pt) x_angle <- 90
   }
   p <- ggplot2::ggplot(dfb, ggplot2::aes(x = label, y = pct, fill = series)) +
     ggplot2::geom_col(position = ggplot2::position_dodge(width = .8), colour = "grey20",
@@ -1520,18 +1652,22 @@ gr_bars <- function(dfb, pal, xlab, ylab, title, ann = list(), horizontal = FALS
                        size = val_size, fontface = "bold")
   p <- p +
     ggplot2::scale_fill_manual(values = pal) +
-    ggplot2::labs(x = xlab, y = ylab, title = if (meyestro_v || use_hbar) NULL else title) + gr_theme()
+    ggplot2::labs(x = xlab, y = ylab, title = if (meyestro_v || use_hbar || jh) NULL else title) + gr_theme()
   if (x_angle != 0)
     p <- p + ggplot2::theme(axis.text.x = ggplot2::element_text(
-      angle = x_angle, hjust = 1, vjust = if (x_angle == 90) 0.5 else 1, face = "bold", size = 8.5))
+      angle = x_angle, hjust = 1, vjust = if (x_angle == 90) 0.5 else 1, face = "bold", size = gr_pt(8.5)))
   caution <- as.character(caution %||% "")[1]
   has_caution <- !is.na(caution) && nzchar(caution)
   if (is_meyestro && !use_hbar && (use_hdr || length(ann) || has_caution)) {
     # header lines are MHDR_FS pt; the annotate() stat lines 2.9 mm (2.8 mm on
     # the horizontal panels). A header line runs from its column's x to the
-    # panel's right edge; an annotated line from the panel's left edge.
-    fitted <- gr_on_panel(if (horizontal) p + ggplot2::coord_flip() else p,
-                          .gr_opts$cell_w %||% GR_BAR_MIN_W, function(pw) {
+    # panel's right edge; an annotated line from the panel's left edge. A
+    # journal-style histogram's header runs across the whole figure (jh).
+    fit_w <- .gr_opts$cell_w %||% GR_BAR_MIN_W
+    on_fig <- function(q, w, fun) tryCatch(gr_with_measure_device(w, 4.9, function()
+      fun(w * 72.27 - gr_sp(16))), error = function(e) NULL)
+    fitted <- (if (jh) on_fig else gr_on_panel)(if (horizontal) p + ggplot2::coord_flip() else p,
+                                                fit_w, function(pw) {
       if (use_hdr) {
         hs <- gr_fit_bar_header(header_spec, pw)
         if (has_caution) {
@@ -1543,7 +1679,7 @@ gr_bars <- function(dfb, pal, xlab, ylab, title, ann = list(), horizontal = FALS
         }
         return(hs)
       }
-      fs <- (if (horizontal) 2.8 else 2.9) * 72.27 / 25.4
+      fs <- gr_mm(if (horizontal) 2.8 else 2.9) * 72.27 / 25.4
       a2 <- c(ann, if (has_caution) list(list(col = "black", text = caution)))
       unlist(lapply(a2, function(a) lapply(
         hdr_wrap_text(a$text, pw, function(t) hdr_text_pt(t, fs), seps = GR_BAR_SEPS),
@@ -1570,22 +1706,30 @@ gr_bars <- function(dfb, pal, xlab, ylab, title, ann = list(), horizontal = FALS
     # Two or more boxes stand side by side (decision D22: stacked one above
     # the other they ran into each other in a short panel), each a box height
     # (~14 pt) apart, so the room on the right grows with their number.
-    nb_sp <- if (has_nbox) 14 / max(1, span_pt / max(1, n_cat)) else 0
+    nb_sp <- if (has_nbox) 14 * gr_mm(2.7) / 2.7 / max(1, span_pt / max(1, n_cat)) else 0
     if (has_nbox)
       p <- p + ggplot2::scale_x_discrete(expand = ggplot2::expansion(
         add = c(0.6, max(1.7, 0.75 + length(nbox) * nb_sp))))
-    if (meyestro_v) {
+    if (meyestro_v || jh) {
       # legend INSIDE the plot (upper-left) + tall top margin for the stat text.
       # top margin reserves room for the grid header (or the annotate fallback)
       nlh <- if (use_hdr) hdr_nlines(header_spec) else length(ann)
+      # a narrow panel has no room for the key over the bars: below them; a
+      # journal-style histogram's key goes below too (its header is above)
+      if (identical(legend_pos, "inside") && (gr_narrow(cell_w) || jh)) legend_pos <- "bottom"
+      # a panel at a reduced text scale (R2-2) is too short for a key over the
+      # bars - it would cover the value labels: the key goes on top of the
+      # plot, under the header, which gets a row of its own above it
+      key_top <- key_top && identical(legend_pos, "inside")
+      if (key_top) legend_pos <- "top"
       p <- p + ggplot2::theme(
-        legend.text = ggplot2::element_text(size = 8, face = "bold"),
+        legend.text = ggplot2::element_text(size = gr_pt(8), face = "bold"),
         legend.background = ggplot2::element_rect(fill = "white", colour = "grey45", linewidth = .3),
-        legend.key.size = grid::unit(10, "pt"),
-        legend.margin = ggplot2::margin(1, 4, 1, 4),
-        plot.margin = ggplot2::margin(t = 8 + MHDR_LS * nlh, r = if (has_nbox) 8 else 10, b = 4, l = 6))
-      # a narrow panel has no room for the key over the bars: below them
-      if (identical(legend_pos, "inside") && cell_w < GR_HDR_STACK_W) legend_pos <- "bottom"
+        legend.key.size = grid::unit(gr_pt(10), "pt"),
+        legend.margin = ggplot2::margin(gr_sp(1), gr_sp(4), gr_sp(1), gr_sp(4)),
+        legend.box.spacing = if (key_top) grid::unit(gr_sp(4), "pt") else NULL,
+        plot.margin = ggplot2::margin(t = if (key_top) gr_sp(2) else gr_sp(8) + hdr_ls() * nlh,
+                                      r = gr_sp(if (has_nbox) 8 else 10), b = gr_sp(4), l = gr_sp(6)))
       if (identical(legend_pos, "inside"))
         p <- p + ggplot2::theme(legend.position = "inside",
           legend.position.inside = c(0.005, 0.99), legend.justification = c(0, 1))
@@ -1603,10 +1747,12 @@ gr_bars <- function(dfb, pal, xlab, ylab, title, ann = list(), horizontal = FALS
   if (horizontal) {
     # the horizontal panels need room (and unclipped drawing) above the top
     # category for the stat lines
-    cmp_h <- is_meyestro && !use_hbar && length(ann) > 0
+    cmp_h <- is_meyestro && !use_hbar && !jh && length(ann) > 0
     if (cmp_h)
       p <- p + ggplot2::scale_x_discrete(
         expand = ggplot2::expansion(add = c(0.6, 0.9 + 0.85 * length(ann))))
+    # (a journal-style histogram: its value labels stay inside the headroom of
+    # the value axis, so nothing reaches past the panel's right edge)
     p <- p + ggplot2::coord_flip(ylim = c(0, ylim_top),
                                  clip = if (cmp_h) "off" else "on")
   } else {
@@ -1621,39 +1767,40 @@ gr_bars <- function(dfb, pal, xlab, ylab, title, ann = list(), horizontal = FALS
       # colour per group so the reader can tell which N is which (matches ref)
       p <- p + ggplot2::annotate("label", x = xs[i], y = 0.55 * ylim_top,
                                  label = names(nbox)[i], colour = unname(nbox[i]),
-                                 fill = "white", angle = 90, size = 2.7,
+                                 fill = "white", angle = 90, size = gr_mm(2.7),
                                  fontface = "bold", linewidth = .5)
   }
   if (length(ann)) {
     n_ann <- length(ann)
     for (i in seq_along(ann)) {
-      if (horizontal && use_hbar) {
-        # rotated stat/P + bottom N-boxes handled by attach_hbar; skip ann
+      if (horizontal && (use_hbar || jh)) {
+        # rotated stat/P + bottom N-boxes handled by attach_hbar; a journal
+        # histogram's lines by its grid header; skip ann
       } else if (horizontal && is_meyestro) {
         # comparative horizontal panel: with one line per group the old inward
         # stack ran over the top categories, so put the lines ABOVE the bars
         p <- p + ggplot2::annotate("text", x = nlev + 0.75 + (n_ann - i) * 0.85, y = 0,
                                    label = ann[[i]]$text, colour = ann[[i]]$col,
-                                   hjust = 0, vjust = 0.5, size = 2.8, fontface = "bold")
+                                   hjust = 0, vjust = 0.5, size = gr_mm(2.8), fontface = "bold")
       } else if (horizontal) {
         # after coord_flip: x = category axis (vertical), y = value axis; stack
         # the annotation lines down the category axis, right-aligned
         p <- p + ggplot2::annotate("text", x = nlev + 0.2 - (i - 1) * 0.75, y = ylim_top,
                                    label = ann[[i]]$text, colour = ann[[i]]$col,
-                                   hjust = 1, vjust = 1, size = 2.8, fontface = "bold")
+                                   hjust = 1, vjust = 1, size = gr_mm(2.8), fontface = "bold")
       } else if (meyestro_v && !use_hdr) {
         # fallback (no header_spec): stat lines above the panel via annotate
         yy <- ylim_top * (1.05 + 0.055 * (n_ann - i))
         p <- p + ggplot2::annotate("text", x = 0.35, y = yy, label = ann[[i]]$text,
                                    colour = ann[[i]]$col, hjust = 0, vjust = 0,
-                                   size = 2.9, fontface = "bold")
+                                   size = gr_mm(2.9), fontface = "bold")
       } else if (meyestro_v) {
         # header handled by the grid overlay; skip the annotate lines
       } else {
         y0 <- if (!is.null(box_left) || !is.null(box_right)) 0.915 else 0.985
         p <- p + ggplot2::annotate("text", x = 0.55, y = ylim_top * (1 - 0.055 * (i - 1)) * y0,
                                    label = ann[[i]]$text, colour = ann[[i]]$col,
-                                   hjust = 0, vjust = 1, size = 2.9, fontface = "bold")
+                                   hjust = 0, vjust = 1, size = gr_mm(2.9), fontface = "bold")
       }
     }
   }
@@ -1674,17 +1821,27 @@ gr_bars <- function(dfb, pal, xlab, ylab, title, ann = list(), horizontal = FALS
   # D21): measured, and laid out in fewer columns - down to one, left-aligned -
   # until it does; on a rotated two-group panel it goes under the plot
   if (is_meyestro && !identical(legend_pos, "none")) {
-    if (use_hbar && cell_w < GR_HDR_STACK_W) p <- p + ggplot2::theme(legend.position = "bottom")
+    if (use_hbar && gr_narrow(cell_w)) p <- p + ggplot2::theme(legend.position = "bottom")
     p <- gr_fit_legend(p, ns, cell_w, inside = meyestro_v && identical(legend_pos, "inside"),
-                       ncol0 = if (ns > 2) 2 else ns)
+                       ncol0 = if (key_top) ns else if (ns > 2) 2 else ns)
   }
   # (fit = TRUE: a line that would still run past the panel at draw time is
   # drawn smaller, never below GR_MIN_TEXT_PT in the journal style)
-  if (use_hdr) attach_header(p, header_spec, fit = TRUE)
+  if (use_hdr && jh) gr_add_nbox_rows(attach_header(p, header_spec, fit = TRUE, span = "all"), nbox)
+  else if (use_hdr) attach_header(p, header_spec, fit = TRUE, own_row = key_top)
   else if (use_hbar) attach_hbar(p, hbar_left, hbar_right, nbox,
                                  caution = if (has_caution) gr_hbar_caution(caution) else character(0))
   else if (is_meyestro && !identical(legend_pos, "none")) gr_widen_legend(ggplot2::ggplotGrob(p))
   else p
+}
+
+# The colored "N = ..." boxes of a horizontal panel, stacked in rows added
+# under figure `gt` (a gtable) across its whole width; gt unchanged without them
+gr_add_nbox_rows <- function(gt, nbox) {
+  if (is.null(nbox) || !length(nbox) || !inherits(gt, "gtable")) return(gt)
+  gt <- gtable::gtable_add_rows(gt, gr_lines(1.05 * length(nbox) + 0.2), pos = nrow(gt))
+  gtable::gtable_add_grob(gt, nbox_stack_grob(nbox), t = nrow(gt), b = nrow(gt), l = 1, r = ncol(gt),
+                          clip = "off", name = "nbox", z = Inf)
 }
 
 # "N = x eyes" box per group, counting the eyes in `gl` (NA = an eye the panel
@@ -1885,7 +2042,7 @@ resolve_astig_vectors <- function(df, pre_cyl, pre_ax, post_cyl, post_ax,
   inrun <- if ("GroupLabel" %in% names(df)) !is.na(df$GroupLabel) else TRUE
   n_pre_na <- sum(av$pre_noaxis & inrun); n_post_na <- sum(av$post_noaxis & inrun)
   if (n_pre_na + n_post_na > 0)
-    say(sprintf(paste0("Astigmatism: %d analysed eye(s) have a preoperative and %d a postoperative cylinder without an axis - ",
+    say(sprintf(paste0("Astigmatism: %d analyzed eye(s) have a preoperative and %d a postoperative cylinder without an axis - ",
                        "no vector for that refraction, so those eyes are left out of PRE, SIA and TIA (preoperative) or of ",
                        "POST, SIA, PE and DV (postoperative) and of their tests."), n_pre_na, n_post_na))
 
@@ -2082,7 +2239,16 @@ g_udva_vs_cdva <- function(pu, pv, gl, glv, pal, eff_num, eff_den, nb = TRUE,
   }
   gr_bars(dfb, pal[glv], sprintf("Postop UDVA vs %s (Snellen lines)", cdva_lab), "% of eyes",
           "Uncorrected vs Corrected Distance Visual Acuity", ann, nbox = nb, header_spec = hs,
-          caution = gr_caution(pp))
+          caution = gr_caution(pp), short_spec = gr_short_head(hs))
+}
+
+# The short form of a two-group header (decision R2-2): its first line (the
+# panel's index, both cohorts) and the test line under it, when there is one
+gr_short_head <- function(hs) {
+  if (is.null(hs) || !length(hs)) return(NULL)
+  ln <- hs[[1]]$lines
+  k <- if (length(ln) >= 2 && length(ln[[2]]) == 1 && grepl("P [=<>]|P not computed", ln[[2]][[1]]$text)) 2L else 1L
+  list(list(x = 0.01, lines = ln[seq_len(min(k, length(ln)))]))
 }
 
 g_cdva_change <- function(pv_pre, pv_post, gl, glv, pal, saf_num, saf_den, nb = TRUE) {
@@ -2113,7 +2279,7 @@ g_cdva_change <- function(pv_pre, pv_post, gl, glv, pal, saf_num, saf_den, nb = 
   }
   gr_bars(dfb, pal[glv], "Change in Snellen lines of CDVA", "% of eyes",
           "Change in Corrected Distance Visual Acuity", ann, nbox = nb, header_spec = hs,
-          caution = gr_caution(pp))
+          caution = gr_caution(pp), short_spec = gr_short_head(hs))
 }
 
 # `poseq` is the SEQ error to bin: postop SEQ minus the intended target (the
@@ -2146,10 +2312,16 @@ g_seq_accuracy <- function(poseq, gl, glv, pal, nb = TRUE, has_target = FALSE) {
       vs_line("", paste0(sq[1], " D"), paste0(sq[2], " D"), cols)),
       p_d_lines(err, gl, glv, pp))
     hs <- list(list(x = 0.01, lines = leftlines), list(x = "auto", lines = rightlines))
+    # short form (R2-2): the mean of each cohort and the test
+    pdl <- p_d_text(err, gl, glv, pp)
+    hs_short <- list(list(x = 0.01, lines = c(list(
+      vs_line(if (has_target) "Postop SEQ - target: " else "Postop SEQ: ", paste0(sq[1], " D"), paste0(sq[2], " D"), cols)),
+      if (nzchar(pdl)) list(list(seg(pdl))) else list())))
   }
   gr_bars(dfb, pal[glv], "Accuracy of SEQ to intended target (D)", "% of eyes",
           "Spherical Equivalent Refraction Accuracy", ann, label_size = 2.2,
-          x_angle = 32, nbox = nb, header_spec = hs, caution = gr_caution(pp))
+          x_angle = 32, nbox = nb, header_spec = hs, caution = gr_caution(pp),
+          short_spec = if (!is.null(hs)) hs_short)
 }
 
 # indicator-line scatter core (attempted/achieved + TIA/SIA), styled to match
@@ -2196,18 +2368,47 @@ scatter_ind <- function(d, pal, xlab, ylab, title, from_zero = FALSE,
     list(col = pal[[g]], lines = ls, short = short, short2 = short2)
   })
   blocks <- Filter(Negate(is.null), blocks)
+  # A panel built at a reduced text scale (a combined figure at a journal
+  # width, decision R2-2): one line per group in a grid header spaced in
+  # points above the plot - wrapped at " · " to the figure's width - instead of
+  # lines placed at data heights, which assume the designed panel size; the
+  # short form keeps each group's equation and R² and moves the rest to the
+  # legend file.
+  if (gr_ts() < 1) {
+    lines <- lapply(blocks, function(b) {
+      txt <- b$short
+      if (isTRUE(.gr_opts$short_hdr)) {
+        i <- regexpr(" · ", txt, fixed = TRUE)
+        j <- if (i > 0) regexpr(" · ", substring(txt, i + 3), fixed = TRUE) else -1
+        if (j > 0) {
+          cut <- i + 3 + j - 1
+          gr_moved(paste0(sub("^● ([^:]*: ).*$", "\\1", txt), substring(txt, cut + 3)))
+          txt <- substr(txt, 1, cut - 1)
+        }
+      }
+      list(seg(txt, b$col))
+    })
+    hs <- list(list(x = 0.01, lines = lines))
+    fig_w <- .gr_opts$cell_w %||% GR_BAR_MIN_W
+    hs <- tryCatch(gr_with_measure_device(fig_w, 4.9, function()
+      gr_fit_bar_header(hs, fig_w * 72.27 - gr_sp(16))), error = function(e) hs)
+    nlines <- hdr_nlines(hs)
+    blocks <- list()
+  }
   # 1-2 groups: classic side-by-side stat columns. 3+ groups: one FULL-WIDTH
   # line per group instead, because thirds of a composite cell are too narrow
   # and the columns collide. In a panel narrower than GR_HDR_STACK_W (laid out
   # at a journal column width) every group gets two full-width lines.
-  narrow <- (.gr_opts$cell_w %||% GR_BAR_MIN_W) < GR_HDR_STACK_W
+  narrow <- gr_narrow()
   stacked <- length(blocks) > 2 || (narrow && length(blocks) > 1)
   if (stacked)
     blocks <- if (narrow) unlist(lapply(blocks, function(b)
                 lapply(b$short2, function(t) list(col = b$col, lines = t))), recursive = FALSE)
               else lapply(blocks, function(b) list(col = b$col, lines = b$short))
-  nlines <- if (stacked) length(blocks)
-            else if (length(blocks)) length(blocks[[1]]$lines) else 0
+  compact <- gr_ts() < 1
+  if (!compact)
+    nlines <- if (stacked) length(blocks)
+              else if (length(blocks)) length(blocks[[1]]$lines) else 0
   # the per-group least-squares line whose equation the header prints: same
   # n >= 2 rule as the header blocks (and >= 2 distinct x, else no slope), drawn
   # only across the group's own x range so it never extrapolates
@@ -2228,7 +2429,9 @@ scatter_ind <- function(d, pal, xlab, ylab, title, from_zero = FALSE,
     ggplot2::labs(x = xlab, y = ylab) + gr_theme() +   # title omitted: header block identifies it
     ggplot2::theme(panel.grid.major = ggplot2::element_line(colour = "grey85", linewidth = .25),
                    legend.position = "none",
-                   plot.margin = ggplot2::margin(t = 26 + 13 * nlines, r = 10, b = 4, l = 6))
+                   plot.margin = if (compact) ggplot2::margin(t = gr_sp(8) + hdr_ls() * nlines, r = gr_sp(10),
+                                                              b = gr_sp(4), l = gr_sp(6))
+                                 else ggplot2::margin(t = 26 + 13 * nlines, r = 10, b = 4, l = 6))
   if (reverse) p <- p + ggplot2::scale_x_reverse() + ggplot2::scale_y_reverse()
   # place things by DISPLAY fraction (from left / from top) so axis reversal is
   # handled uniformly; fy < 0 sits above the panel
@@ -2262,12 +2465,17 @@ scatter_ind <- function(d, pal, xlab, ylab, title, from_zero = FALSE,
       p <- p + hdr_line(fx, -(HDR_BASE + 0.058 * (nlines - li)), blocks[[ci]]$lines[li],
                         blocks[[ci]]$col, 2.85)
   }
-  # Over/Undercorrected corner boxes (dx/dy already honour `reverse`)
+  # Over/Undercorrected corner boxes (dx/dy already honour `reverse`); at a
+  # reduced text scale (R2-2) a long corner label goes on two lines, so it
+  # stays inside the small square plot
+  if (compact && (.gr_opts$cell_w %||% GR_BAR_MIN_W) < 3) corner_labels <- vapply(corner_labels, function(s)
+    if (nchar(s) > 16) paste(strwrap(s, width = max(12, ceiling(nchar(s) / 2) + 5)), collapse = "\n") else s,
+    character(1))
   p <- p +
     ggplot2::annotate("label", x = dx(0.03), y = dy(0.05), label = corner_labels[1],
-                      hjust = 0, vjust = 1, size = 2.9, fontface = "bold") +
+                      hjust = 0, vjust = 1, size = gr_mm(2.9), fontface = "bold") +
     ggplot2::annotate("label", x = dx(0.97), y = dy(0.95), label = corner_labels[2],
-                      hjust = 1, vjust = 0, size = 2.9, fontface = "bold")
+                      hjust = 1, vjust = 0, size = gr_mm(2.9), fontface = "bold")
   # Journal style (D20): the colored N-boxes go UNDER the plot, across the
   # figure (as on the horizontal bar panels, nbox_stack_grob), so they never
   # cover a data point; the annotated style keeps them inside, stacked under
@@ -2280,11 +2488,11 @@ scatter_ind <- function(d, pal, xlab, ylab, title, from_zero = FALSE,
                                  fill = "white", hjust = 0, vjust = 1, size = 2.7,
                                  fontface = "bold", linewidth = .5)
   p <- p + ggplot2::coord_fixed(xlim = lim, ylim = lim, clip = "off")
+  # the compact header across the whole figure (the square plot is narrower)
+  if (compact) return(gr_add_nbox_rows(attach_header(p, hs, fit = TRUE, span = "all"),
+                                       if (journal) nbox else NULL))
   if (!journal || is.null(nbox) || !length(nbox)) return(p)
-  gt <- ggplot2::ggplotGrob(p)
-  gt <- gtable::gtable_add_rows(gt, grid::unit(1.05 * length(nbox) + 0.2, "lines"), pos = nrow(gt))
-  gtable::gtable_add_grob(gt, nbox_stack_grob(nbox), t = nrow(gt), b = nrow(gt), l = 1, r = ncol(gt),
-                          clip = "off", name = "nbox", z = Inf)
+  gr_add_nbox_rows(ggplot2::ggplotGrob(p), nbox)
 }
 
 # attempted = preop SEQ - intended target (tgt: per-eye target SEQ, 0 = plano);
@@ -2384,10 +2592,15 @@ g_astigmatism <- function(pcyl, ocyl, gl, glv, pal, second_col = NULL, nb = TRUE
       vs_line("", paste0(ra[1], " D"), paste0(ra[2], " D"), cols)),
       p_d_lines(post, gl, glv, pp))
     hs <- list(list(x = 0.01, lines = leftlines), list(x = "auto", lines = rightlines))
+    # short form (R2-2): the mean of each cohort and the test
+    pdl <- p_d_text(post, gl, glv, pp)
+    hs_short <- list(list(x = 0.01, lines = c(list(
+      vs_line("Postop RA: ", paste0(ra[1], " D"), paste0(ra[2], " D"), cols)),
+      if (nzchar(pdl)) list(list(seg(pdl))) else list())))
   }
   gr_bars(do.call(rbind, rows), pal2, "Refractive Astigmatism (D)", "% of eyes",
           "Refractive Astigmatism", ann, label_size = 2.2, x_angle = 45, nbox = nb, header_spec = hs,
-          caution = gr_caution(pp))
+          caution = gr_caution(pp), short_spec = if (!is.null(hs)) hs_short)
 }
 
 g_tia_sia <- function(av, gl, glv, pal) {
@@ -2524,7 +2737,7 @@ stability_long <- function(df, visits, gl, glv, pre_seq = NULL, logger = NULL) {
     # given by label: say which visit it means
     va <- unique(d[, c("ord", "label")]); va <- va[order(va$ord), , drop = FALSE]
     for (lb in unique(va$label[duplicated(va$label)]))
-      logger(sprintf("Stability: %d time points are labelled '%s' - each is kept as its own point; a change pair naming '%s' uses the %s.",
+      logger(sprintf("Stability: %d time points are labeled '%s' - each is kept as its own point; a change pair naming '%s' uses the %s.",
                      sum(va$label == lb), lb, lb,
                      if (va$ord[va$label == lb][1] == 0) "preoperative point" else "first of them"))
   }
@@ -2683,7 +2896,7 @@ g_stability <- function(df, visits, gl, glv, pal, pre_seq = NULL,
                    panel.grid.minor = ggplot2::element_blank(),
                    axis.text.x = ggplot2::element_text(
                      colour = "transparent", lineheight = STAB_AX_LH,
-                     margin = ggplot2::margin(t = STAB_AX_TOP, b = 2 + STAB_NROW_PT * n_rows)))
+                     margin = ggplot2::margin(t = stab_sizes()$top, b = gr_sp(2) + stab_sizes()$nrow * n_rows)))
   # Explicit limits, so the value labels and the axis text (drawn by grobs that
   # map data to the panel themselves) land exactly where ggplot would put them:
   # x = the range of everything drawn plus 5% each side, y = c(ylo, yhi)
@@ -2733,8 +2946,8 @@ g_stability <- function(df, visits, gl, glv, pal, pre_seq = NULL,
     hs[[length(hs) + 1]] <- list(x = if (j == 1) 0.01 else "auto", lines = lines)
   }
   p <- p + ggplot2::theme(
-    plot.margin = ggplot2::margin(t = 10 + MHDR_LS * hdr_nlines(hs), r = 12,
-                                  b = if (rein) 4 else 10, l = 6))
+    plot.margin = ggplot2::margin(t = gr_sp(10) + hdr_ls() * hdr_nlines(hs), r = gr_sp(12),
+                                  b = gr_sp(if (rein) 4 else 10), l = gr_sp(6)))
   gt <- attach_header(p, hs)
   pan <- gt$layout[grepl("^panel", gt$layout$name), , drop = FALSE]
   gt <- gtable::gtable_add_grob(gt, stab_label_grob(lab_df, xl, yl),
@@ -2765,8 +2978,18 @@ STAB_AX_TOP <- 7       # pt from the tick end to its label: room for a leader
 STAB_NROW_PT <- 9      # pt per N row
 STAB_COL_GAP <- 4      # pt kept between neighbouring columns
 
+# The stability axis and value-label sizes (pt) at text scale `sc` - the
+# gr_ts() of the panel being built (R2-2), kept in the grobs for draw time
+stab_sizes <- function(sc = gr_ts()) {
+  sc <- min(1, sc %||% 1)
+  f <- function(pt) if (sc >= 1) pt else max(GR_MIN_TEXT_PT, pt * sc)
+  list(ax = f(STAB_AX_FS), lab = f(STAB_LAB_FS), nrow = STAB_NROW_PT * f(STAB_LAB_FS) / STAB_LAB_FS,
+       top = STAB_AX_TOP * sc, tick = STAB_TICK_PT * sc, gap = STAB_COL_GAP * sc,
+       pad = STAB_LAB_PAD * sc, lgap = STAB_LAB_GAP * sc)
+}
+
 stab_axis_grob <- function(xs, labs, nrows, cols, xl)
-  grid::gTree(xs = xs, labs = labs, nrows = nrows, cols = cols, xl = xl, cl = "stab_axis")
+  grid::gTree(xs = xs, labs = labs, nrows = nrows, cols = cols, xl = xl, sc = gr_ts(), cl = "stab_axis")
 
 # Centre (pt) of each column, columns in tick order: as close to its tick `px`
 # as possible with neighbouring columns (widths `w`) at least `gap` apart and
@@ -2789,19 +3012,20 @@ makeContent.stab_axis <- function(x) {
   vw <- grid::convertWidth(grid::unit(1, "npc"), "pt", valueOnly = TRUE)
   vh <- grid::convertHeight(grid::unit(1, "npc"), "pt", valueOnly = TRUE)
   px <- (x$xs - x$xl[1]) / diff(x$xl) * vw
-  gp_l <- grid::gpar(fontsize = STAB_AX_FS, fontface = "bold", lineheight = STAB_AX_LH)
+  ss <- stab_sizes(x$sc %||% 1)
+  gp_l <- grid::gpar(fontsize = ss$ax, fontface = "bold", lineheight = STAB_AX_LH)
   tw <- function(s, gp) grid::convertWidth(grid::grobWidth(grid::textGrob(s, gp = gp)),
                                            "pt", valueOnly = TRUE)
   w <- vapply(x$labs, tw, numeric(1), gp = gp_l)
   for (r in x$nrows) {
-    gp_n <- grid::gpar(fontsize = STAB_LAB_FS, fontface = "bold")
+    gp_n <- grid::gpar(fontsize = ss$lab, fontface = "bold")
     w <- pmax(w, vapply(r, tw, numeric(1), gp = gp_n))
   }
   # the right edge may use part of the plot margin; the left one may not ("N =")
-  lx <- stab_col_place(px, w + 2, lo = 0, hi = vw + 8)
+  lx <- stab_col_place(px, w + 2, lo = 0, hi = vw + 8 * min(1, x$sc %||% 1), gap = ss$gap)
   pt <- function(v) grid::unit(v, "pt")
-  tick_end <- vh - STAB_TICK_PT
-  lab_top <- tick_end - STAB_AX_TOP
+  tick_end <- vh - ss$tick
+  lab_top <- tick_end - ss$top
   kids <- grid::gList()
   moved <- which(abs(lx - px) > 0.5)
   if (length(moved))
@@ -2811,8 +3035,8 @@ makeContent.stab_axis <- function(x) {
                                            gp = gp_l))
   nr <- length(x$nrows)
   for (j in seq_len(nr)) {
-    yj <- 2 + (nr - j + 0.5) * STAB_NROW_PT
-    gp_j <- grid::gpar(col = x$cols[j], fontsize = STAB_LAB_FS, fontface = "bold")
+    yj <- 2 * min(1, x$sc %||% 1) + (nr - j + 0.5) * ss$nrow
+    gp_j <- grid::gpar(col = x$cols[j], fontsize = ss$lab, fontface = "bold")
     kids <- grid::gList(kids,
       grid::textGrob(x$nrows[[j]], pt(lx), pt(yj), gp = gp_j),
       grid::textGrob("N =", pt(-3), pt(yj), just = c("right", "centre"), gp = gp_j))
@@ -2841,7 +3065,7 @@ STAB_LAB_FS <- 2.5 * STAB_PT        # = annotate(size = 2.5)
 STAB_LAB_PAD <- 1.4                 # pt, as label.padding
 STAB_LAB_GAP <- 2                   # pt kept between neighbouring labels
 
-stab_label_grob <- function(lab, xl, yl) grid::gTree(lab = lab, xl = xl, yl = yl, cl = "stab_labels")
+stab_label_grob <- function(lab, xl, yl) grid::gTree(lab = lab, xl = xl, yl = yl, sc = gr_ts(), cl = "stab_labels")
 
 # horizontal shift (pt) per label so that no two labels of DIFFERENT time points
 # overlap; the left one moves left and the right one right, half each
@@ -2871,13 +3095,14 @@ makeContent.stab_labels <- function(x) {
   px <- (d$x - x$xl[1]) / diff(x$xl) * vw
   py <- (d$y - x$yl[1]) / diff(x$yl) * vh
   ly <- (d$ly - x$yl[1]) / diff(x$yl) * vh
-  gp_t <- grid::gpar(fontsize = STAB_LAB_FS, fontface = "bold")
+  ss <- stab_sizes(x$sc %||% 1)
+  gp_t <- grid::gpar(fontsize = ss$lab, fontface = "bold")
   tw <- vapply(d$lab, function(s) grid::convertWidth(grid::grobWidth(
     grid::textGrob(s, gp = gp_t)), "pt", valueOnly = TRUE), numeric(1))
   th <- grid::convertHeight(grid::grobHeight(grid::textGrob("0.00", gp = gp_t)), "pt", valueOnly = TRUE) +
     grid::convertHeight(grid::grobDescent(grid::textGrob("0.00", gp = gp_t)), "pt", valueOnly = TRUE)
-  w <- tw + 2 * STAB_LAB_PAD; h <- rep(th + 2 * STAB_LAB_PAD, nrow(d))
-  dx <- stab_label_shift(px, ly, w, h, d$t)
+  w <- tw + 2 * ss$pad; h <- rep(th + 2 * ss$pad, nrow(d))
+  dx <- stab_label_shift(px, ly, w, h, d$t, gap = ss$lgap)
   lx <- px + dx
   pt <- function(v) grid::unit(v, "pt")
   kids <- grid::gList()
@@ -2890,9 +3115,9 @@ makeContent.stab_labels <- function(x) {
     kids <- grid::gList(kids,
       grid::roundrectGrob(pt(lx[i]), pt(ly[i]), width = pt(w[i]), height = pt(h[i]),
                           r = grid::unit(0.15, "lines"),
-                          gp = grid::gpar(fill = d$fill[i], col = NA, fontsize = STAB_LAB_FS)),
+                          gp = grid::gpar(fill = d$fill[i], col = NA, fontsize = ss$lab)),
       grid::textGrob(d$lab[i], pt(lx[i]), pt(ly[i]),
-                     gp = grid::gpar(col = d$col[i], fontsize = STAB_LAB_FS, fontface = "bold")))
+                     gp = grid::gpar(col = d$col[i], fontsize = ss$lab, fontface = "bold")))
   }
   grid::setChildren(x, kids)
 }
@@ -2999,12 +3224,70 @@ gr_wald_p <- function(fit, idx) {
 # The bootstrap resamples WITHIN each cohort (statistics.md S12): every resample
 # keeps every cohort with its own number of patients (eyes), so none is skipped
 # for a lost cohort. When a cluster id is supplied it resamples PATIENTS, so
-# the robustness and the clustering hold at the same time. The P value carries
-# attr "B" - the resamples actually used (one whose statistic cannot be
-# computed, e.g. a resample without spread, is skipped and not counted).
+# the robustness and the clustering hold at the same time.
+# Quantized data (decision R2-5): refractive astigmatism measured in quarter-
+# dioptre steps often puts more than 60% of a cohort's eyes on one value, where
+# the 20%-winsorized variance is zero and the trimmed statistic does not exist.
+# Every robust test (this centroid comparison, the centroid against zero, the
+# precision and the mean magnitude) therefore runs through astig_boot_test():
+# the trimmed test is used only when its statistic exists in the data AND in at
+# least ASTIG_TRIM_OK (95%) of the resamples; otherwise the same bootstrap test
+# runs UNTRIMMED (ordinary means and covariance, patients resampled within the
+# cohorts), labelled ASTIG_UNTRIMMED. Resampling continues until exactly B
+# usable resamples (at most ASTIG_BOOT_MAX x B draws); short of that the test
+# is not computed, with the reason. A P value always rests on exactly B usable
+# resamples (attr "B"); attr "variant" is "trimmed" or "untrimmed".
 ASTIG_TRIM <- 0.2
 ASTIG_BOOT_B <- 999L
 ASTIG_SEED <- 20250601L
+ASTIG_TRIM_OK <- 0.95
+ASTIG_BOOT_MAX <- 3L
+ASTIG_UNTRIMMED <- "untrimmed bootstrap test (the trimmed statistic is not defined for these data)"
+
+# Count the resamples whose statistic reaches the observed one, drawing until B
+# usable resamples: list(ok, p = (count + 1) / (B + 1), eff, draws). ok is
+# FALSE when more than `max_fail` draws were unusable (the statistic undefined)
+# before B usable ones were found.
+astig_boot_count <- function(obs, stat, draw, B, max_fail) {
+  cnt <- 0L; eff <- 0L; fail <- 0L
+  while (eff < B) {
+    if (fail > max_fail) return(list(ok = FALSE, eff = eff, draws = eff + fail))
+    st <- stat(draw())
+    if (!is.finite(st)) { fail <- fail + 1L; next }
+    eff <- eff + 1L
+    if (st >= obs) cnt <- cnt + 1L
+  }
+  list(ok = TRUE, p = (cnt + 1) / (B + 1), eff = eff, draws = eff + fail)
+}
+
+# The trimmed bootstrap test, else the untrimmed one (decision R2-5).
+#   prep(trim) -> list(obs = the observed statistic (NA when it does not exist),
+#                      stat = function(idx) the statistic of a resample of the
+#                      null data, recentred at that trim's centre)
+#   draw()     -> the row indices of one resample (astig_resampler)
+#   tst        -> the trimmed test's label; why_none: the reason when even the
+#                 untrimmed statistic does not exist in the data
+# Each attempt starts from the fixed seed ASTIG_SEED. Returns the P value with
+# attrs "test", "B" (= B), "variant", or NA with "why" and "test".
+astig_boot_test <- function(prep, draw, B, tst, why_none, trim = ASTIG_TRIM) {
+  tr <- with_local_seed(ASTIG_SEED, {
+    pr <- prep(trim)
+    if (!is.finite(pr$obs)) NULL
+    else astig_boot_count(pr$obs, pr$stat, draw, B, floor(B * (1 / ASTIG_TRIM_OK - 1) + 1e-9))
+  })
+  if (!is.null(tr) && isTRUE(tr$ok))
+    return(structure(tr$p, test = tst, B = tr$eff, variant = "trimmed"))
+  un <- with_local_seed(ASTIG_SEED, {
+    pr <- prep(0)
+    if (!is.finite(pr$obs)) NULL
+    else astig_boot_count(pr$obs, pr$stat, draw, B, (ASTIG_BOOT_MAX - 1L) * B)
+  })
+  if (is.null(un)) return(astig_na(why_none, ASTIG_UNTRIMMED))
+  if (!isTRUE(un$ok))
+    return(astig_na(sprintf("only %d of %d bootstrap resamples were usable (%d needed)", un$eff, un$draws, B),
+                    ASTIG_UNTRIMMED))
+  structure(un$p, test = ASTIG_UNTRIMMED, B = un$eff, variant = "untrimmed")
+}
 # A function returning the row indices of one bootstrap resample: whole
 # clusters (patients; each eye its own cluster when id is NULL) drawn with
 # replacement WITHIN each group, as many as the group has. A patient whose
@@ -3069,29 +3352,22 @@ astig_robust_biv_p <- function(x, y, g, id = NULL, trim = ASTIG_TRIM, B = ASTIG_
   why <- astig_p_guard(g, if (clustered) id else NULL)
   if (nzchar(why)) return(astig_na(why))
   if (length(x) < 12) return(astig_na("fewer than 12 eyes for the bootstrap test"))
-  # Reproducibility: the bootstrap seed is fixed locally (with_local_seed),
-  # restoring the caller's RNG state afterwards. Without this the same config +
-  # data printed a slightly different p on every run, which contradicts the
-  # preset-reproducibility claim.
-  with_local_seed(ASTIG_SEED, {
-    obs <- robust_biv_stat(x, y, g, trim)
-    if (!is.finite(obs)) return(astig_na("the robust statistic could not be computed"))
-    # null: recentre every group on its own trimmed mean, so groups share a centre
+  # Reproducibility: the bootstrap seed is fixed locally (with_local_seed,
+  # inside astig_boot_test), restoring the caller's RNG state afterwards.
+  # The null: every group recentred on its own (trimmed) mean, so the groups
+  # share a centre; resampled within each cohort.
+  prep <- function(tr) {
+    x0 <- x; y0 <- y
     for (l in levels(g)) {
       k <- g == l
-      x[k] <- x[k] - mean(x[k], trim = trim); y[k] <- y[k] - mean(y[k], trim = trim)
+      x0[k] <- x[k] - mean(x[k], trim = tr); y0[k] <- y[k] - mean(y[k], trim = tr)
     }
-    draw <- astig_resampler(g, if (clustered) id else NULL)   # within each cohort
-    cnt <- 0L; eff <- 0L
-    for (b in seq_len(B)) {
-      idx <- draw()
-      st <- robust_biv_stat(x[idx], y[idx], g[idx], trim)
-      if (!is.finite(st)) next
-      eff <- eff + 1L; if (st >= obs) cnt <- cnt + 1L
-    }
-    if (eff < 50) return(astig_na("too few usable bootstrap resamples"))
-    structure((cnt + 1) / (eff + 1), B = eff)
-  })
+    list(obs = robust_biv_stat(x, y, g, tr),
+         stat = function(idx) robust_biv_stat(x0[idx], y0[idx], g[idx], tr))
+  }
+  astig_boot_test(prep, astig_resampler(g, if (clustered) id else NULL), B,
+                  sprintf("robust %d%%-trimmed T², bootstrap", as.integer(round(trim * 100))),
+                  "the eyes have no spread in one direction", trim)
 }
 
 # Bivariate comparison of astigmatism centroids on the DOUBLED-angle components.
@@ -3223,16 +3499,21 @@ astig_vs_ref <- function(x, y, g, glv, holm = TRUE, id = NULL, w = NULL,
 #   method "normal" - the bivariate-normal ellipse {u : (u-c)' S^-1 (u-c) <=
 #          qchisq(level, 2)}; attr "method".
 # ("polygon", the v1.0.0 name of the hull, is read as "depth".) NULL when the
-# cohort has fewer than 3 eyes or the ellipse's covariance is singular.
+# cohort has fewer than 3 eyes, or when the region would be a line, not a
+# polygon (decision R2-6): every eye - or every eye the hull is built from -
+# on one meridian (a line through the origin of the doubled-angle plane, e.g.
+# plus axes 90 and 180 only), or the ellipse's covariance singular.
+# astig_region_skip_why() gives the reason.
 astig_region <- function(x, y, method = "depth", level = 0.95, center = "mean") {
   ok <- is.finite(x) & is.finite(y)
   x <- x[ok]; y <- y[ok]
   n <- length(x)
-  if (n < 3) return(NULL)
+  if (n < 3 || astig_collinear(x, y)) return(NULL)
   if (method %in% c("depth", "polygon")) {
     o <- astig_depth(x, y, center)
     k <- min(n, max(floor(level * n + 1e-9), 3L))
     idx <- order(o)[seq_len(k)]
+    if (astig_collinear(x[idx], y[idx])) return(NULL)
     h <- grDevices::chull(x[idx], y[idx])
     hx <- x[idx][h]; hy <- y[idx][h]
     out <- data.frame(x = c(hx, hx[1]), y = c(hy, hy[1]))
@@ -3246,6 +3527,29 @@ astig_region <- function(x, y, method = "depth", level = 0.95, center = "mean") 
   out <- ellipse_path(mean(x), mean(y), S, sqrt(stats::qchisq(level, df = 2)))
   if (!is.null(out)) { attr(out, "n") <- n; attr(out, "method") <- "normal" }
   out
+}
+
+# TRUE when the points (x, y) lie on one line - no spread across it, relative
+# to the spread along it (all eyes on one meridian, or all identical)
+astig_collinear <- function(x, y) {
+  if (length(x) < 2) return(TRUE)
+  ev <- tryCatch(eigen(stats::cov(cbind(x, y)), symmetric = TRUE, only.values = TRUE)$values,
+                 error = function(e) c(0, 0))
+  !all(is.finite(ev)) || max(ev) < 1e-24 || min(ev) < 1e-10 * max(ev)
+}
+
+# Why astig_region() drew no region for these eyes (the sheet's "95% data
+# region" cell and the figure's legend file say it in these words)
+ASTIG_REGION_LINE <- "95% region not drawn: all eyes lie on one meridian"
+astig_region_skip_why <- function(x, y, method = "depth", level = 0.95) {
+  ok <- is.finite(x) & is.finite(y)
+  x <- x[ok]; y <- y[ok]; n <- length(x)
+  if (n < 3) return(sprintf("95%% region not drawn: %d eye%s (3 needed)", n, if (n == 1) "" else "s"))
+  if (astig_collinear(x, y)) return(ASTIG_REGION_LINE)
+  if (method %in% c("depth", "polygon"))
+    return(sprintf("95%% region not drawn: the %d deepest eyes lie on one meridian",
+                   min(n, max(floor(level * n + 1e-9), 3L))))
+  "95% region not drawn: the covariance of the eyes is singular"
 }
 
 # Projection-type OUTLYINGNESS of every point (its depth is 1 / (1 + it)), in
@@ -3533,22 +3837,16 @@ astig_zero_p <- function(x, y, id = NULL, method = "robust", trim = ASTIG_TRIM, 
   if (n < 12) return(astig_na("fewer than 12 eyes for the bootstrap test", tst))
   if (!is.null(id) && length(unique(id)) < 3)
     return(astig_na(sprintf("%d patients (at least 3 needed to resample patients)", length(unique(id))), tst))
-  obs <- robust_zero_stat(x, y, trim)
-  if (!is.finite(obs)) return(astig_na("the eyes have no spread in one direction", tst))
-  x0 <- x - mean(x, trim = trim); y0 <- y - mean(y, trim = trim)
-  draw <- astig_resampler(rep("cohort", n), id)
-  with_local_seed(ASTIG_SEED, {
-    cnt <- 0L; eff <- 0L
-    for (b in seq_len(B)) {
-      i <- draw()
-      st <- robust_zero_stat(x0[i], y0[i], trim)
-      if (!is.finite(st)) next
-      eff <- eff + 1L; if (st >= obs) cnt <- cnt + 1L
-    }
-  })
-  if (eff < 50) return(astig_na("too few usable bootstrap resamples", tst))
-  structure((cnt + 1) / (eff + 1), test = tst, B = eff,
-            few = if (!is.null(id)) few_patient_groups(id, rep("cohort", n)) else NULL)
+  # the null: the eyes recentred on their (trimmed) mean; the trimmed test, else
+  # the untrimmed one (one-sample Hotelling-type T², decision R2-5)
+  prep <- function(tr) {
+    x0 <- x - mean(x, trim = tr); y0 <- y - mean(y, trim = tr)
+    list(obs = robust_zero_stat(x, y, tr), stat = function(i) robust_zero_stat(x0[i], y0[i], tr))
+  }
+  out <- astig_boot_test(prep, astig_resampler(rep("cohort", n), id), B, tst,
+                         "the eyes have no spread in one direction", trim)
+  if (is.finite(out) && !is.null(id)) attr(out, "few") <- few_patient_groups(id, rep("cohort", n))
+  out
 }
 
 # Heteroscedastic comparison of the 20%-trimmed means of a scalar between
@@ -3587,31 +3885,22 @@ astig_trimmed_p <- function(v, g, id = NULL, trim = ASTIG_TRIM, B = ASTIG_BOOT_B
   if (!nzchar(why)) why <- astig_p_guard(g, if (clustered) id else NULL)
   if (nzchar(why)) return(astig_na(why, tst))
   if (length(v) < 12) return(astig_na("fewer than 12 eyes for the bootstrap test", tst))
-  obs <- trim_q_stat(v, g, trim)
-  if (!is.finite(obs)) {
-    flat <- levels(g)[vapply(levels(g), function(l) {
-      z <- v[g == l]
-      length(z) - 2 * floor(trim * length(z)) < 2 || !isTRUE(stats::var(winsor(z, trim)) > 0)
-    }, logical(1))]
-    return(astig_na(paste0(if (length(flat)) paste(flat, collapse = ", ") else "a cohort",
-                           if (length(flat) > 1) " have" else " has",
-                           sprintf(" no spread after %d%% winsorizing", as.integer(trim * 100))), tst))
+  # the null: each cohort recentred on its own (trimmed) mean; the trimmed
+  # test, else the untrimmed one (Welch-type statistic of the ordinary means,
+  # decision R2-5)
+  prep <- function(tr) {
+    tms <- tapply(v, g, mean, trim = tr)
+    v0 <- v - tms[as.character(g)]
+    list(obs = trim_q_stat(v, g, tr), stat = function(i) trim_q_stat(v0[i], g[i], tr))
   }
-  tms <- tapply(v, g, mean, trim = trim)
-  v0 <- v - tms[as.character(g)]
-  draw <- astig_resampler(g, if (clustered) id else NULL)
-  with_local_seed(ASTIG_SEED, {
-    cnt <- 0L; eff <- 0L
-    for (b in seq_len(B)) {
-      i <- draw()
-      st <- trim_q_stat(v0[i], g[i], trim)
-      if (!is.finite(st)) next
-      eff <- eff + 1L; if (st >= obs) cnt <- cnt + 1L
-    }
-  })
-  if (eff < 50) return(astig_na("too few usable bootstrap resamples", tst))
-  structure((cnt + 1) / (eff + 1), test = tst, B = eff, values = tms,
-            few = if (clustered) few_patient_groups(id, g) else NULL)
+  flat <- levels(g)[vapply(levels(g), function(l) !isTRUE(stats::var(v[g == l]) > 0), logical(1))]
+  out <- astig_boot_test(prep, astig_resampler(g, if (clustered) id else NULL), B, tst,
+                         paste0(if (length(flat)) paste(flat, collapse = ", ") else "a cohort",
+                                if (length(flat) > 1) " have" else " has", " no spread"), trim)
+  if (!is.finite(out)) return(out)
+  attr(out, "values") <- tapply(v, g, mean, trim = if (identical(attr(out, "variant"), "trimmed")) trim else 0)
+  if (clustered) attr(out, "few") <- few_patient_groups(id, g)
+  out
 }
 
 # The univariate between-cohort test of the "gee" and "classic" methods (and
@@ -3803,6 +4092,7 @@ astig_vector_stats <- function(m, a, g, glv, id = NULL, method = "robust", regio
     er <- if (identical(region, "both")) astig_region(x[k], y[k], "normal") else NULL
     cr <- astig_centroid_region(x[k], y[k], if (is.null(cid)) NULL else cid[k], centroid_region)
     regs[[gn]] <- list(data = dr, ellipse = er, centroid = cr,
+                       data_why = if (is.null(dr)) astig_region_skip_why(x[k], y[k], reg_m) else "",
                        centroid_why = if (is.null(cr)) centroid_skip_why(x[k], y[k],
                                         if (is.null(cid)) NULL else cid[k]) else "")
     summ[[gn]] <- data.frame(group = gn, n = s$n, n_pat = s$n_pat, cx = s$cx, cy = s$cy, cm = s$cm,
@@ -3842,7 +4132,9 @@ astig_vector_stats <- function(m, a, g, glv, id = NULL, method = "robust", regio
     pc <- if (rob) astig_robust_biv_p(x[keep], y[keep], gk, id = ik)
           else astig_bivariate_p(x[keep], y[keep], gk, id = if (identical(method, "gee")) ik else NULL,
                                  w = if (is.null(wk)) NULL else wk[keep], matched = matched)
-    if (rob) attr(pc, "test") <- "robust 20%-trimmed T², bootstrap"
+    # (the test meant, on a centroid comparison that could not run at all)
+    if (rob && !nzchar(as.character(attr(pc, "test") %||% "")[1]))
+      attr(pc, "test") <- sprintf("robust %d%%-trimmed T², bootstrap", as.integer(round(ASTIG_TRIM * 100)))
     res[[1]] <- pc
     sc <- function(v) if (rob) astig_trimmed_p(v[keep], gk, ik)
                       else astig_univ_p(v[keep], gk, ik, "continuous", matched)
@@ -3857,15 +4149,18 @@ astig_vector_stats <- function(m, a, g, glv, id = NULL, method = "robust", regio
                           else sprintf("no eye is within %.2f D", cc)
       res[[length(res) + 1]] <- r
     }
-    tmf <- if (rob) function(z) mean(z, trim = ASTIG_TRIM) else mean
-    tml <- if (rob) "20%-trimmed mean: " else "mean: "
+    # the cohort values the test compared: trimmed means for a trimmed test,
+    # plain means for every other (an untrimmed bootstrap test included, R2-5)
+    trimmed <- function(r) rob && identical(attr(r, "variant"), "trimmed")
+    tmf <- function(r) if (trimmed(r)) function(z) mean(z, trim = ASTIG_TRIM) else mean
+    tml <- function(r) if (trimmed(r)) sprintf("%d%%-trimmed mean: ", as.integer(round(ASTIG_TRIM * 100))) else "mean: "
     vals <- c(paste(vapply(lv, function(l) {
                   k <- gk == l
                   paste0(l, " ", astig_polar_text(sqrt(mean(x[keep][k])^2 + mean(y[keep][k])^2),
                                                   (atan2(mean(y[keep][k]), mean(x[keep][k])) * 180 / pi / 2) %% 180))
                 }, character(1)), collapse = "; "),
-              paste0(tml, val_txt(dist[keep], gk, tmf, "%.2f D")),
-              paste0(tml, val_txt(m[keep], gk, tmf, "%.2f D")),
+              paste0(tml(res[[2]]), val_txt(dist[keep], gk, tmf(res[[2]]), "%.2f D")),
+              paste0(tml(res[[3]]), val_txt(m[keep], gk, tmf(res[[3]]), "%.2f D")),
               vapply(ASTIG_CUTS, function(cc)
                 val_txt(m[keep] <= cc + ASTIG_TOL, gk, function(z) 100 * mean(z), "%.1f%%"), character(1)))
     out <- data.frame(measure = measures,
@@ -3968,8 +4263,15 @@ astig_method_text <- function(st, clustered = st$clustered) {
       robust = sprintf(paste0("robust - centroids by a %d%%-trimmed Hotelling-type T² (pooled winsorized ",
                               "covariance), precision and mean magnitude by %d%%-trimmed means (Yuen / Welch-type), ",
                               "each calibrated by %d bootstrap resamples with %s resampled within each cohort ",
-                              "(seed %d); centroid against zero by the one-sample trimmed T², same bootstrap"),
-                       as.integer(ASTIG_TRIM * 100), as.integer(ASTIG_TRIM * 100), ASTIG_BOOT_B, unit, ASTIG_SEED),
+                              "(seed %d); centroid against zero by the one-sample trimmed T², same bootstrap. ",
+                              "A trimmed test is used only when its statistic exists in the data and in at least ",
+                              "%d%% of the resamples; otherwise the same bootstrap test runs untrimmed (ordinary ",
+                              "means and covariance) and is labeled '%s'. Resampling continues until exactly %d ",
+                              "usable resamples (at most %d drawn), else the test is not computed; each test is ",
+                              "named with the variant that ran"),
+                       as.integer(ASTIG_TRIM * 100), as.integer(ASTIG_TRIM * 100), ASTIG_BOOT_B, unit, ASTIG_SEED,
+                       as.integer(round(ASTIG_TRIM_OK * 100)), ASTIG_UNTRIMMED, ASTIG_BOOT_B,
+                       ASTIG_BOOT_MAX * ASTIG_BOOT_B),
       gee = paste0("clustered GEE - centroids by the joint Wald test of both components (stacked), precision ",
                    "and mean magnitude by a Gaussian GEE, centroid against zero by the intercepts' joint Wald ",
                    "test; ", gee_inference_text(unit = if (clustered) "patient" else "eye")),
@@ -4079,18 +4381,20 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
     ggplot2::geom_line(data = spk, ggplot2::aes(x, y, group = a),
                        colour = "grey62", linewidth = .28) +
     ggplot2::geom_text(data = labd, ggplot2::aes(x, y, label = lab),
-                       size = 2.9, colour = "grey15", fontface = "bold") +
+                       size = gr_mm(2.9), colour = "grey15", fontface = "bold") +
     ggplot2::geom_point(data = d, ggplot2::aes(x, y, colour = grp),
-                        size = 1.5, alpha = .5) +
-    # magnitude scale runs straight DOWN, clear of every meridian label; drawn on
-    # a white plate over the eyes, so it stays legible however dense they are
-    ggplot2::annotate("label", x = rmax * 0.045, y = -rings, label = rings,
-                      size = 3.0, colour = "black", fontface = "bold", hjust = 0,
+                        size = 1.5, alpha = .5)
+  # magnitude scale runs straight DOWN, clear of every meridian label; drawn on
+  # a white plate over the eyes - added last, over the regions and centroids
+  # too, so it stays legible however dense they are
+  ring_labels <- ggplot2::annotate("label", x = rmax * 0.045, y = -rings, label = rings,
+                      size = gr_mm(3.0), colour = "black", fontface = "bold", hjust = 0,
                       fill = "white", linewidth = .18, label.r = grid::unit(1, "pt"),
-                      label.padding = grid::unit(1.3, "pt"))
+                      label.padding = grid::unit(gr_sp(1.3), "pt"))
 
   # the 95% region of each cohort's eyes, as computed for the sheet (D5)
   inside <- character(0)       # "kept / n (inside)" per group, read back from the region drawn
+  reg_skip <- character(0)     # a region not drawn, with its reason (R2-6: a line, not a polygon)
   for (g in present) {
     rg <- st$regions[[g]]
     gc <- unname(pal[g])
@@ -4099,8 +4403,8 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
       inside[g] <- sprintf("%d deepest of %d eyes%s", attr(dr, "kept"), attr(dr, "n"),
                            if (attr(dr, "inside") > attr(dr, "kept"))
                              sprintf(" (%d inside or on it: ties)", attr(dr, "inside")) else "")
-    else if (!identical(ellipse, "normal"))             # a hull needs three eyes
-      inside[g] <- sprintf("none (n = %d)", srow(g)$n)
+    else if (is.null(dr))
+      reg_skip[g] <- if (nzchar(rg$data_why %||% "")) rg$data_why else sprintf("95%% region not drawn: n = %d", srow(g)$n)
     for (e1 in list(dr, rg$ellipse)) {
       if (is.null(e1)) next
       dashed <- identical(ellipse, "both") && identical(attr(e1, "method"), "depth")
@@ -4112,7 +4416,7 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
   cd <- cd[cd$grp %in% present, , drop = FALSE]
   p <- p +
     ggplot2::geom_point(data = cd, ggplot2::aes(x, y, fill = grp), shape = 23,
-                        size = 3.0, stroke = .7, colour = "grey10")
+                        size = 3.0 * max(0.7, gr_ts()), stroke = .7, colour = "grey10")
   # the 95% confidence region OF THE CENTROID goes on last: at large n it is
   # smaller than the marker (the centroid is precisely estimated), and it must
   # not be buried. Clustered by patient exactly when the printed tests are, so
@@ -4131,13 +4435,13 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
                                  colour = unname(pal[g]), linewidth = .8, linetype = "42")
     }
   }
-  p <- p +
+  p <- p + ring_labels +
     ggplot2::scale_colour_manual(values = pal[present], drop = FALSE) +
     ggplot2::scale_fill_manual(values = pal[present], drop = FALSE) +
     ggplot2::labs(title = NULL, x = unit_lab, y = NULL) +
-    ggplot2::theme_void(base_size = 12) +
+    ggplot2::theme_void(base_size = gr_pt(12)) +
     ggplot2::theme(legend.position = "none",
-                   axis.title.x = ggplot2::element_text(face = "bold", size = 10.5),
+                   axis.title.x = ggplot2::element_text(face = "bold", size = gr_pt(10.5)),
                    # no frame around the figure in the journal style (D20)
                    plot.background = ggplot2::element_rect(fill = "white",
                                                            colour = if (isTRUE(.gr_opts$journal)) NA else "grey25",
@@ -4176,24 +4480,79 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
                                          " (GEE not fitted)", "")), collapse = "  ·  "),
                     tv_lab, if (sum(is.finite(vs$p)) >= 2) "  [Holm]" else ""))
   }
+  # Journal style (decision R2-4): each test is ONE short line in the image -
+  #   "Centroid: P = .24 · vs Reference: Cohort A P = .24, Cohort B P = .24 [Holm]"
+  #   "Centroid vs 0: Reference P = .001, Cohort A P = .001, Cohort B P = .001"
+  #   "Mean magnitude: P = .32 · vs Reference: Cohort A P = .25, Cohort B P = .76 [Holm]"
+  # and the test that ran for each comparison (trimming or the untrimmed
+  # variant, B, the resampling unit), complete, goes to the legend file
+  # (test_desc). The annotated style keeps the bracketed test names in the image.
+  gnf <- function(r) isTRUE(r$fallback) || grepl("GEE not fitted", as.character(r$test %||% ""), fixed = TRUE)
+  short_cmp <- function(ms, lead) {
+    if (is.null(bt)) return(NULL)
+    vs <- brow("vs", ms)
+    main <- if (length(present) > 2) brow("omnibus", ms) else vs[1, , drop = FALSE]
+    first <- if (!is.finite(main$p)) {
+               if (nzchar(main$why %||% "")) p_not_tested(main$why) else "P = n/a"
+             } else paste0(fp(main$p), if (gnf(main)) " (GEE not fitted)" else "")
+    if (length(present) <= 2) return(paste0(lead, first))
+    pv <- ifelse(is.finite(vs$p_holm_ref), vs$p_holm_ref, vs$p)
+    parts <- vapply(seq_len(nrow(vs)), function(i)
+      paste0(vs$group[i], " ", if (is.finite(vs$p[i])) fp(pv[i]) else "n/a",
+             if (is.finite(vs$p[i]) && gnf(vs[i, , drop = FALSE])) " (GEE not fitted)" else ""), character(1))
+    paste0(lead, first, " · vs ", present[1], ": ", paste(parts, collapse = ", "),
+           if (sum(is.finite(vs$p)) >= 2) " [Holm]" else "")
+  }
+  # the legend's account of one test line: each comparison with the test that
+  # ran on it (grouped when several ran the same), or why it was not computed
+  test_desc <- function(rows, labs, what) {
+    if (is.null(rows) || !nrow(rows)) return(character(0))
+    tl <- vapply(seq_len(nrow(rows)), function(i)
+      if (is.finite(rows$p[i])) {
+        t <- g_astig_tlab(rows$test[i], rows$B[i], clus)
+        if (gnf(rows[i, , drop = FALSE])) paste0(sub(" (GEE not fitted)", "", t, fixed = TRUE),
+                                                 " - the clustered GEE could not be fitted") else t
+      } else paste0("not computed (", rows$why[i] %||% "", ")"), character(1))
+    u <- unique(tl)
+    paste0(what, " (test that ran): ", paste(vapply(u, function(t) paste0(paste(labs[tl == t], collapse = ", "), " - ", t),
+                                    character(1)), collapse = "; "), ".")
+  }
+  cmp_desc <- function(ms, what) {
+    if (is.null(bt)) return(character(0))
+    rows <- rbind(if (length(present) > 2) brow("omnibus", ms), brow("vs", ms))
+    test_desc(rows, ifelse(rows$cmp == "omnibus", "all cohorts", paste(rows$group, "vs", rows$ref)), what)
+  }
   if (isTRUE(jcrs)) {
+    journal_lines <- isTRUE(.gr_opts$journal)
     # JCRS 2025 Part II asks for a BIVARIATE comparison of the centroids; say
     # "P =" explicitly - a bare "Centroids: 0.26" reads as a distance in D
-    stat_lines <- cmp_lines("Centroid", "Centroid comparison: ")
+    stat_lines <- if (journal_lines) short_cmp("Centroid", "Centroid: ")
+                  else cmp_lines("Centroid", "Centroid comparison: ")
     # each cohort's centroid against zero (D7a), and the mean magnitude - for
     # PE the standard's main outcome (D7b)
     z <- st$zero[st$zero$group %in% present, , drop = FALSE]
     if (nrow(z)) {
       zt <- z$test[is.finite(z$p)][1]
-      stat_lines <- c(stat_lines, paste0("Centroid vs 0: ",
+      stat_lines <- c(stat_lines, if (journal_lines) paste0("Centroid vs 0: ",
+        paste(sprintf("%s %s", z$group, ifelse(is.finite(z$p), vapply(z$p, fp, character(1)), "n/a")),
+              collapse = ", "))
+        else paste0("Centroid vs 0: ",
         paste(ifelse(is.finite(z$p), sprintf("%s %s", z$group, vapply(z$p, fp, character(1))),
                      sprintf("%s %s", z$group, "P = n/a")), collapse = "  ·  "),
         if (!is.na(zt)) paste0("  [", g_astig_tlab(zt, z$B[is.finite(z$p)][1], clus), "]") else ""))
     }
-    stat_lines <- c(stat_lines, cmp_lines("Mean magnitude", "Mean magnitude: "))
+    stat_lines <- c(stat_lines, if (journal_lines) short_cmp("Mean magnitude", "Mean magnitude: ")
+                                else cmp_lines("Mean magnitude", "Mean magnitude: "))
+    # the tests that ran, complete, for the legend file (R2-4, R2-5)
+    test_lines <- c(cmp_desc("Centroid", "Centroid comparison"),
+                    if (nrow(z)) test_desc(z, z$group, "Centroid vs 0"),
+                    cmp_desc("Mean magnitude", "Mean magnitude comparison"))
     # a P value from a group of 2-9 patients: the caution line
     cau <- few_patients_text(st$few, short = !rob, bootstrap = rob)
-    if (nzchar(cau)) stat_lines <- c(stat_lines, cau)
+    if (nzchar(cau)) {
+      # (the short header of a narrow combined cell moves it to the legend, R2-2)
+      if (isTRUE(.gr_opts$short_hdr)) gr_moved(cau) else stat_lines <- c(stat_lines, cau)
+    }
     meth <- paste0(if (rob) "JCRS 2025 Part II plot  ·  robust trimmed tests (not the exact Part II variant), bootstrap over "
                    else "Per JCRS 2025 Part II  ·  ",
                    if (rob) (if (clus) "patients within cohorts" else "eyes within cohorts")
@@ -4205,6 +4564,7 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
     if (!is.null(dw))
       meth <- c(meth, "Matched cohort: the astigmatism tests other than a GEE centroid test do not use the matching weights")
   } else {
+    test_lines <- character(0)
     # p_omnibus looks the cluster ids / weights up by position: narrow them to
     # the eyes in `d`, or a single dropped eye would silently switch the test
     # to independent, unweighted eyes
@@ -4252,6 +4612,11 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
     paste0("Polygon = convex hull of the floor(0.95 n) deepest eyes: ",
            paste(sprintf("%s %s", gi, inside[gi]), collapse = ", "))
   } else character(0)
+  # a region not drawn, with its reason, once per reason (R2-6: "95% region not
+  # drawn: all eyes lie on one meridian (Cohort D)")
+  skip_lines <- if (length(reg_skip))
+    vapply(unique(reg_skip), function(w) paste0(w, " (", paste(names(reg_skip)[reg_skip == w], collapse = ", "), ")."),
+           character(1)) else character(0)
   # the dashed region's basis, as drawn: the region of the plain MEAN centroid
   # (the diamond)
   ci_txt <- if (!isTRUE(show_centroid_ellipse)) ""
@@ -4266,23 +4631,33 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
     paste0("Centroid confidence region not drawn: ",
            paste(sprintf("%s (%s)", names(ci_skip), ci_skip), collapse = ", "))
     else character(0)
-  orient <- paste0("Plus-cylinder format: each spoke is labelled with the plus axis; with-the-rule ",
+  orient <- paste0("Plus-cylinder format: each spoke is labeled with the plus axis; with-the-rule ",
                    "astigmatism to the left, against-the-rule to the right; ◆ = centroid (mean vector).")
   # the journal style keeps only the short statistics lines (the P values with
   # their tests, and any caution) inside the image; the title and the method
   # text go to the figure's legend file (attr "legend", decision D20)
   # the tests behind the P values printed (the sheet's method notes say the same)
   tests_txt <- if (isTRUE(jcrs)) grep("^(Tests|Precision)", astig_method_text(st), value = TRUE) else character(0)
-  method <- c(orient, paste0(reg, ci_txt), ci_note, inside_lines, meth, tests_txt,
-              "Total SD: population (N) denominator, JCRS 2025 Part II.")
   journal <- isTRUE(.gr_opts$journal)
-  foot <- if (journal) stat_lines else c(paste0(reg, ci_txt), ci_note, inside_lines, stat_lines, meth)
+  method <- c(orient, paste0(reg, ci_txt), ci_note, inside_lines, skip_lines, meth, tests_txt,
+              if (journal && length(test_lines)) test_lines,
+              "Total SD: population (N) denominator, JCRS 2025 Part II.")
+  foot <- if (journal) stat_lines else c(paste0(reg, ci_txt), ci_note, inside_lines, skip_lines, stat_lines, meth)
   terse <- length(present) > 5      # two narrow columns: the long form will not fit
+  # the short header of a narrow combined cell (R2-2): each cohort's centroid,
+  # total SD and n; the rest of its line goes to the legend file
+  short <- isTRUE(.gr_opts$short_hdr)
   hs <- hdr_groups(present, pal, function(g) {
     r <- srow(g)
     pts <- if (is.finite(r$n_pat)) sprintf(", %d %s", as.integer(r$n_pat),
                                            cluster_unit_word("patient", as.integer(r$n_pat))) else ""
+    if (short && !terse)
+      gr_moved(paste0(g, ": centroid x ", fmt_fix(r$cx, 2), ", y ", fmt_fix(r$cy, 2),
+                      " · magnitude ", f2(r$mmean), " ± ", f2(r$msd), ", median ", f2(r$mmed),
+                      ", range ", f2(r$mmin), " to ", f2(r$mmax), ", RMS ", f2(r$rms), " D",
+                      if (nzchar(pts)) paste0(" · ", sub("^, ", "", pts)) else ""))
     if (terse) sprintf("%s, total SD %s, n = %d", astig_polar_text(r$cm, r$ca), f2(r$tsd), r$n)
+    else if (short) sprintf("centroid %s · total SD %s D · n = %d", astig_polar_text(r$cm, r$ca), f2(r$tsd), r$n)
     # single-space separators: the header is wrapped at " · " and ", "
     else paste0("centroid ", astig_polar_text(r$cm, r$ca),
                 sprintf(" (x %s; y %s)", fmt_fix(r$cx, 2), fmt_fix(r$cy, 2)),
@@ -4368,20 +4743,20 @@ g_astig_semicircle_multi <- function(mag, axisdeg, gl, glv, pal, title,
   cd <- do.call(rbind, cent)
   p <- p +
     ggplot2::geom_point(data = cd, ggplot2::aes(x, y, fill = grp), shape = 23,
-                        size = 3.4, stroke = .7, colour = "grey10") +
+                        size = 3.4 * max(0.7, gr_ts()), stroke = .7, colour = "grey10") +
     ggplot2::scale_colour_manual(values = pal[present], drop = FALSE) +
     ggplot2::scale_fill_manual(values = pal[present], drop = FALSE) +
     ggplot2::geom_text(data = labd, ggplot2::aes(x, y, label = paste0(a, "°")),
-                       size = 2.9, colour = "grey15", fontface = "bold") +
+                       size = gr_mm(2.9), colour = "grey15", fontface = "bold") +
     ggplot2::annotate("text", x = c(-rings, rings), y = -rmax * 0.055,
-                      label = c(rings, rings), size = 3.0, colour = "black",
+                      label = c(rings, rings), size = gr_mm(3.0), colour = "black",
                       fontface = "bold") +
     ggplot2::annotate("point", x = 0, y = 0, shape = 25, fill = "black",
-                      colour = "black", size = 2.6) +
+                      colour = "black", size = 2.6 * max(0.7, gr_ts())) +
     ggplot2::labs(title = NULL, x = unit_lab, y = NULL) +
-    ggplot2::theme_void(base_size = 12) +
+    ggplot2::theme_void(base_size = gr_pt(12)) +
     ggplot2::theme(legend.position = "none",
-                   axis.title.x = ggplot2::element_text(face = "bold", size = 10.5),
+                   axis.title.x = ggplot2::element_text(face = "bold", size = gr_pt(10.5)),
                    plot.background = ggplot2::element_rect(fill = "white",
                                                            colour = if (isTRUE(.gr_opts$journal)) NA else "grey25",
                                                            linewidth = .8))
@@ -4389,9 +4764,13 @@ g_astig_semicircle_multi <- function(mag, axisdeg, gl, glv, pal, title,
     p <- p + ggplot2::annotate("path", x = arc_at * cos(th_s), y = arc_at * sin(th_s),
                                colour = "grey25", linewidth = .3)
   terse <- length(present) > 5      # two narrow columns: the long form will not fit
+  # the short header of a narrow combined cell (R2-2): the mean magnitude goes
+  # to the legend file
+  short <- isTRUE(.gr_opts$short_hdr) && !terse
   hs <- hdr_groups(present, pal, function(g) {
     r <- cd[cd$grp == g, ]
-    if (terse) sprintf("◆ %s, n = %d", astig_polar_text(r$cm, r$ca), r$n)
+    if (short) gr_moved(sprintf("%s: magnitude mean %.2f ± %s D", g, r$am, f2(r$asd)))
+    if (terse || short) sprintf("◆ %s, n = %d", astig_polar_text(r$cm, r$ca), r$n)
     else sprintf("◆ %s  ·  mean %.2f ± %s D  ·  n = %d",
                  astig_polar_text(r$cm, r$ca), r$am, f2(r$asd), r$n)
   }, foot = if (isTRUE(.gr_opts$journal)) NULL
@@ -4403,7 +4782,7 @@ g_astig_semicircle_multi <- function(mag, axisdeg, gl, glv, pal, title,
   # the title and the method note go to the legend file in the journal style
   attr(out, "legend") <- list(title = title, lines = c(
     "◆ vector mean, computed in double-angle space.",
-    "Each vector is drawn at its plus axis (plus-cylinder format); the spokes are labelled with the axis."))
+    "Each vector is drawn at its plus axis (plus-cylinder format); the spokes are labeled with the axis."))
   out
 }
 
@@ -4516,26 +4895,103 @@ gr_width_layout <- function(n, width_in, pw, ph, gap_in = 0, min_pw = GR_COMPOSI
 }
 
 # The highest a composite laid out at a chosen width (figure_width_cm) may be:
-# a journal page. A taller one is split into pages, each a figure of its own
-# (<base>_1, <base>_2 ..., panel letters from A on each, its own legend file).
+# a journal page. A taller one is split into pages, each a complete figure of
+# its own (<base>_p1, <base>_p2 ..., its own legend file), the panel letters
+# continuing from page to page (A-F, G-K; decision R2-2).
 GR_PAGE_MAX_H_CM <- 23
 # The plotting area of a panel is never laid out lower than this (inches): a
 # panel whose stat lines, axes and key take more of its height grows downward
-# (its own file and its composite row) instead of squashing the bars.
+# (its own file and its composite row) instead of squashing the bars. A panel
+# built at a reduced text scale (R2-2) needs proportionally less.
 GR_MIN_PANEL_IN <- 2.3
+GR_MIN_PANEL_COMPACT_IN <- 1.1     # ... in a combined figure at a journal width (R2-2)
 
 # The height (inches) panel `p` needs when drawn `w` inches wide: its fixed
-# rows (header, margins, axis text and titles, key) plus GR_MIN_PANEL_IN for
+# rows (header, margins, axis text and titles, key) plus `min_plot` inches for
 # the plotting area; 0 when it cannot be measured.
-gr_need_h <- function(p, w) {
+gr_need_h <- function(p, w, min_plot = GR_MIN_PANEL_IN) {
   out <- tryCatch(gr_with_measure_device(w, 6, function() {
     gt <- if (inherits(p, "ggplot")) ggplot2::ggplotGrob(p) else p
     if (!inherits(gt, "gtable")) return(0)
     nn <- grid::unitType(gt$heights) != "null"
     fixed <- if (any(nn)) sum(grid::convertHeight(gt$heights[nn], "in", valueOnly = TRUE)) else 0
-    fixed + GR_MIN_PANEL_IN
+    fixed + min_plot
   }), error = function(e) 0)
   if (length(out) == 1 && is.finite(out)) out else 0
+}
+
+# ------------------------------------------------------------
+# Combined figures at a journal width (decision R2-2). With figure_width_cm
+# set, a combined figure (the standard graphs, the double-angle and the
+# semicircle sets) has two panels per row from 12 cm (17.77 and 12.69 cm) and
+# one below (8.76 cm); a row is about 7.6 cm high at 17.77 cm - the same
+# proportion of a panel's width at every width (GR_JOURNAL_ROW_RATIO) - not
+# the free-size layout's 4.9-inch floor; a page is at most 23 cm high, so a
+# six-panel set is one page at 17.77 cm and the ten- or eleven-panel set two
+# (_p1, _p2), the panel letters continuing. The panels of such a figure are
+# built again for their cells at a reduced text scale (gr_ts: every font size
+# times the cell's share of the designed panel width, never below 6 pt); a
+# panel whose statistics lines do not fit its row at that size keeps the
+# first line per cohort and its test lines, and the rest goes to the legend
+# file (gr_moved). A row higher than that grows to what its panels need.
+# Returns list(ncol, pw, ph, row_in, ts, letter_in).
+# ------------------------------------------------------------
+GR_JOURNAL_ROW_RATIO <- 7.6 / (17.77 / 2)   # row height / cell width (7.6 cm at 17.77 cm, two per row)
+GR_JOURNAL_LETTER_IN <- 0.2                 # the strip above a panel for its letter
+GR_JOURNAL_LETTER_PT <- 10                  # the panel letters (bold)
+GR_JOURNAL_DESIGN_W <- 5.6                  # the designed width (in) of a combined figure's panel
+gr_journal_layout <- function(n, width_in, gap_in = 0) {
+  wcm <- width_in * 2.54
+  k <- if (wcm < 12) 1L else if (wcm <= 26) 2L else max(2L, as.integer(floor(width_in / 4.2)))
+  k <- max(1L, min(k, n))
+  cell <- width_in / max(k, if (wcm >= 12 && n == 1) 2L else 1L)
+  row_in <- GR_JOURNAL_ROW_RATIO * cell
+  pw <- cell - gap_in
+  ph <- row_in - GR_JOURNAL_LETTER_IN - 0.06 - gap_in      # less the letter strip and the bottom band
+  list(ncol = k, pw = pw, ph = ph, row_in = row_in, letter_in = GR_JOURNAL_LETTER_IN,
+       ts = min(1, pw / GR_JOURNAL_DESIGN_W))
+}
+
+# A panel built for its cell of a combined figure at a journal width (R2-2):
+# build() runs at the cell's size (.gr_opts$cell_w / cell_h = lay$pw / lay$ph)
+# and text scale (lay$ts); when the panel needs more height than its row
+# gives (need(p) > lay$ph) and short_ok, it is built again with its short
+# statistics lines (.gr_opts$short_hdr), the lines left out recorded. The run
+# log's counters are restored, so a panel built twice is counted once.
+# Returns list(p (NULL when it could not be built), need, moved).
+gr_build_cell <- function(build, lay, short_ok = TRUE, need = function(p) 0) {
+  keep <- list(ts = .gr_opts$tscale, cw = .gr_opts$cell_w, ch = .gr_opts$cell_h,
+               sh = .gr_opts$short_hdr, mv = .gr_opts$moved,
+               fb = .gr_opts$n_gee_fallback, lt = .gr_opts$n_label_thin)
+  on.exit({
+    .gr_opts$tscale <- keep$ts; .gr_opts$cell_w <- keep$cw; .gr_opts$cell_h <- keep$ch
+    .gr_opts$short_hdr <- keep$sh; .gr_opts$moved <- keep$mv
+    .gr_opts$n_gee_fallback <- keep$fb; .gr_opts$n_label_thin <- keep$lt
+  }, add = TRUE)
+  .gr_opts$tscale <- lay$ts; .gr_opts$cell_w <- lay$pw; .gr_opts$cell_h <- lay$ph
+  .gr_opts$short_hdr <- FALSE; .gr_opts$moved <- character(0)
+  why <- ""
+  p <- tryCatch(build(), error = function(e) { why <<- conditionMessage(e); NULL })
+  if (is.null(p)) return(list(p = NULL, need = 0, moved = character(0), why = why))
+  nd <- need(p); moved <- character(0)
+  if (isTRUE(short_ok) && nd > lay$ph + 0.02) {
+    .gr_opts$short_hdr <- TRUE; .gr_opts$moved <- character(0)
+    p2 <- tryCatch(build(), error = function(e) NULL)
+    if (!is.null(p2)) { p <- p2; moved <- unique(.gr_opts$moved); nd <- need(p2) }
+  }
+  list(p = p, need = nd, moved = moved)
+}
+
+# The legend lines that list, under each panel's letter, the statistics lines
+# that panel leaves out of its cell at a journal width (R2-2)
+gr_moved_legend <- function(letters, moved) {
+  out <- character(0)
+  for (k in seq_along(letters)) {
+    mv <- moved[[k]]
+    if (length(mv)) out <- c(out, paste0(letters[k], ": statistics not printed in the panel at this width (",
+                                        "too long for its row at 6 pt): ", paste(mv, collapse = "; "), "."))
+  }
+  out
 }
 
 # width_in: the page width the composite is laid out at (NA = its designed
@@ -4545,15 +5001,25 @@ gr_need_h <- function(p, w) {
 # max_h_in: at a chosen width, a composite taller than this is written as pages
 # (GR_PAGE_MAX_H_CM). The files written carry attr "pages": per page its base
 # and the indices of its panels, for the caller's legend files.
+# journal: a gr_journal_layout() list - a combined figure at a journal width
+# (decision R2-2): ncol panels of pw x ph per row, every panel the same width
+# (a last row of fewer panels is not stretched), a letter strip above each
+# panel only (letters of GR_JOURNAL_LETTER_PT), pages <base>_p1, _p2 ... with
+# the letters continuing; width_in is then not used.
+# letter0: the panels before these (a later page: its first letter follows).
 compose_panels <- function(plots, captions, base, formats, dpi, ncol = 3,
                            pw = 5.6, ph = 4.9, cap_h = 0.42, rows_spec = NULL,
                            sections = NULL, note = NULL, preview_dir = NULL,
                            logger = NULL, gap_in = 0, width_in = NA_real_,
                            min_pw = GR_COMPOSITE_MIN_PW, ph_min = 0, need_h = NULL,
                            max_h_in = if (is.finite(width_in)) GR_PAGE_MAX_H_CM / 2.54 else NA_real_,
-                           row_ph = NULL, n_lab = NULL) {
+                           row_ph = NULL, n_lab = NULL, journal = NULL, letter0 = 0L) {
   n <- length(plots); if (n == 0) return(character(0))
-  if (is.finite(width_in)) {
+  if (!is.null(journal)) {
+    ncol <- journal$ncol; pw <- journal$pw; ph <- journal$ph
+    rows_spec <- rep(ncol, ceiling(n / ncol)); rows_spec[length(rows_spec)] <- n - ncol * (length(rows_spec) - 1L)
+    if (!is.finite(max_h_in)) max_h_in <- GR_PAGE_MAX_H_CM / 2.54
+  } else if (is.finite(width_in)) {
     lay <- gr_width_layout(n, width_in, pw, ph, max(as.numeric(gap_in %||% 0)[1], 0, na.rm = TRUE),
                            min_pw, ph_min)
     ncol <- lay$ncol; rows_spec <- lay$rows_spec; pw <- lay$pw; ph <- lay$ph
@@ -4563,7 +5029,9 @@ compose_panels <- function(plots, captions, base, formats, dpi, ncol = 3,
   hh_in  <- if (!is.null(sections)) 0.55 else 0            # section header band
   cap_in <- if (is.null(captions)) 0.06 else cap_h         # caption band
   gap_in <- max(as.numeric(gap_in %||% 0)[1], 0, na.rm = TRUE)
-  lab_in <- PANEL_LETTER_IN                                # panel-letter strips
+  lab_in <- if (is.null(journal)) PANEL_LETTER_IN else journal$letter_in   # panel-letter strips
+  lab_w <- if (is.null(journal)) lab_in else 0             # ... beside a panel (none in the journal layout)
+  fill_rows <- is.null(journal)                            # a short last row is stretched to the full width
   # each row as high as ph, or as its tallest panel needs (need_h)
   row_of <- rep(seq_len(nr), rows_spec)
   if (is.null(row_ph)) {
@@ -4578,7 +5046,7 @@ compose_panels <- function(plots, captions, base, formats, dpi, ncol = 3,
   # for the fullest row, so its panels keep the width they had without them
   # (n_lab: the letter strips of the whole composite, so each of its pages has
   # the page width of the composite)
-  W <- ncol * (pw + gap_in) + (n_lab %||% max(rows_spec)) * lab_in; H <- sum(band_r) + note_in
+  W <- ncol * (pw + gap_in) + (n_lab %||% max(rows_spec)) * lab_w; H <- sum(band_r) + note_in
   # Too high for a page: split into pages of whole rows (a row higher than a
   # page is a page of its own), each written by this function as a figure
   if (is.finite(max_h_in) && nr > 1 && H > max_h_in + 1e-6) {
@@ -4589,19 +5057,20 @@ compose_panels <- function(plots, captions, base, formats, dpi, ncol = 3,
     }
     pages[[length(pages) + 1]] <- cur
     if (!is.null(logger))
-      logger(sprintf("%s: %.1f cm high at this width - written as %d pages of at most %.0f cm (%s_1 ... _%d), each with its own legend file.",
+      logger(sprintf("%s: %.1f cm high at this width - written as %d pages of at most %.0f cm (%s_p1 ... _p%d), each with its own legend file; the panel letters continue from page to page.",
                      basename(base), H * 2.54, length(pages), max_h_in * 2.54, basename(base), length(pages)))
     written <- character(0); pinfo <- list()
     for (pg in seq_along(pages)) {
       rr <- pages[[pg]]
       idx <- which(row_of %in% rr)
-      b <- paste0(base, "_", pg)
+      b <- paste0(base, "_p", pg)
       got <- compose_panels(plots[idx], if (is.null(captions)) NULL else captions[idx], b, formats, dpi,
                             ncol = ncol, pw = pw, ph = ph, cap_h = cap_h, rows_spec = rows_spec[rr],
                             sections = if (is.null(sections)) NULL else sections[rr],
                             note = note, preview_dir = preview_dir, logger = logger, gap_in = gap_in,
                             width_in = NA_real_, max_h_in = NA_real_, row_ph = row_ph[rr],
-                            n_lab = n_lab %||% max(rows_spec))
+                            n_lab = n_lab %||% max(rows_spec), journal = journal,
+                            letter0 = letter0 + idx[1] - 1L)
       written <- c(written, got)
       pinfo[[pg]] <- list(base = b, idx = idx, ok = length(got) > 0)
     }
@@ -4619,28 +5088,36 @@ compose_panels <- function(plots, captions, base, formats, dpi, ncol = 3,
     grid::pushViewport(grid::viewport(y = 1, height = (H - note_in) / H, just = "top"))
     i <- 0
     for (r in seq_len(nr)) {
-      k <- rows_spec[r]
+      # (the journal layout: every panel a 1/ncol share, a short row not stretched)
+      k <- if (fill_rows) rows_spec[r] else ncol
       # this row's band and its parts, as fractions of the rows' area
       hr <- band_r[r] / Hr
       fh <- hh_in / band_r[r]; fp <- (row_ph[r] + gap_in) / band_r[r]; fc <- cap_in / band_r[r]
       band_bot <- row_bot[r]; band_top <- band_bot + hr
-      for (j in seq_len(k)) {
+      for (j in seq_len(rows_spec[r])) {
         i <- i + 1; if (i > n) break
         xc <- (j - 0.5) / k
         # the panel's slot less the gap and the letter strip on its left
         # (pw x row height when the row is full); the strip above it is in the band
-        p_left <- grid::unit((j - 1) / k, "npc") + grid::unit(gap_in / 2 + lab_in, "in")
+        p_left <- grid::unit((j - 1) / k, "npc") + grid::unit(gap_in / 2 + lab_w, "in")
         p_top <- grid::unit(band_bot + hr * (fc + fp), "npc") - grid::unit(gap_in / 2, "in")
         vp_p <- grid::viewport(x = p_left, y = band_bot + hr * (fc + fp / 2), just = c("left", "centre"),
-                               width = grid::unit(1 / k, "npc") - grid::unit(gap_in + lab_in, "in"),
+                               width = grid::unit(1 / k, "npc") - grid::unit(gap_in + lab_w, "in"),
                                height = grid::unit(hr * fp, "npc") - grid::unit(gap_in, "in"))
         if (inherits(plots[[i]], "gtable") || inherits(plots[[i]], "grob")) {
           grid::pushViewport(vp_p); grid::grid.draw(plots[[i]]); grid::popViewport()
         } else print(plots[[i]], vp = vp_p)
-        # the letter above-left of the panel's top-left corner, in its strips
-        grid::grid.text(LETTERS[i], x = p_left - grid::unit(lab_in - 0.03, "in"),
-                        y = p_top + grid::unit(0.03, "in"),
-                        just = c("left", "bottom"), gp = grid::gpar(fontface = "bold", cex = 1.9))
+        # the letter above-left of the panel's top-left corner, in its strips;
+        # the letters continue across the pages of a figure (letter0)
+        lt <- LETTERS[letter0 + i]
+        if (is.null(journal))
+          grid::grid.text(lt, x = p_left - grid::unit(lab_in - 0.03, "in"),
+                          y = p_top + grid::unit(0.03, "in"),
+                          just = c("left", "bottom"), gp = grid::gpar(fontface = "bold", cex = 1.9))
+        else
+          grid::grid.text(lt, x = p_left + grid::unit(0.02, "in"), y = p_top + grid::unit(0.03, "in"),
+                          just = c("left", "bottom"),
+                          gp = grid::gpar(fontface = "bold", fontsize = GR_JOURNAL_LETTER_PT))
         if (!is.null(captions)) {
           vp_c <- grid::viewport(x = xc, y = band_bot + hr * fc / 2,
                                  width = 1 / k, height = hr * fc)
@@ -4952,7 +5429,7 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
       logger(sprintf("StandardEyes figures%s: %d of %d eyes have no patient ID - each is treated as its own patient in the clustered p-values.",
                      if (nzchar(tag)) paste0(" (", sub("^_", "", tag), ")") else "", n_noid, length(cid)))
     logger(paste0("StandardEyes figures: p-values clustered by patient (GEE; ", gee_inference_text(),
-                  ") wherever a patient has two analysed eyes - both eyes of a patient count once; ",
+                  ") wherever a patient has two analyzed eyes - both eyes of a patient count once; ",
                   "with one eye per patient the classical tests run, as in the tables."))
   } else {
     .gr_opts$cluster_id <- NULL
@@ -4990,21 +5467,39 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
   fail_why <- character(0)       # why a panel could not be drawn, by panel name
   ptxt <- list()                 # the text each panel draws (journal legend files)
   cneed <- numeric(0)            # the height each panel needs in its composite cell (gr_need_h)
+  # at a journal width (R2-2): each panel's version built for its cell of the
+  # combined figure, and the statistics lines it left out of that cell
+  jl <- NULL; ccell <- list(); cmoved <- list()
   addC <- function(nm, cap, expr, section = "") {
     if (planning) { plan[[nm]] <<- section; return(invisible(NULL)) }
+    ex <- substitute(expr); env <- parent.frame()
     .gr_opts$cell_w <- if (nm %in% names(cell_w)) cell_w[[nm]] else GR_BAR_MIN_W
     .gr_opts$cell_h <- cell_h
     on.exit({ .gr_opts$cell_w <- NULL; .gr_opts$cell_h <- NULL }, add = TRUE)
-    p <- tryCatch(expr, error = function(e) {
+    p <- tryCatch(eval(ex, env), error = function(e) {
       fail_why[[nm]] <<- conditionMessage(e)
       logger(paste0("StandardEyes figure '", nm, "' failed", run_lab, ": ", conditionMessage(e))); NULL })
     if (!is.null(p)) {
       if (inherits(p, "ggplot")) p <- p + ggplot2::labs(title = NULL)
+      # the version for the combined figure's cell at a journal width: built
+      # again at the cell's size and text scale; its short statistics lines
+      # when the full ones do not fit the row (journal style only - the
+      # annotated style writes no legend file, so its rows grow instead)
+      if (!is.null(jl)) {
+        cb <- gr_build_cell(function() {
+          q <- eval(ex, env)
+          if (inherits(q, "ggplot")) q + ggplot2::labs(title = NULL) else q
+        }, jl, short_ok = fs$journal, need = function(q) gr_need_h(q, jl$pw, GR_MIN_PANEL_COMPACT_IN))
+        if (!is.null(cb$p)) {
+          ccell[[nm]] <<- cb$p; cmoved[[nm]] <<- cb$moved; cneed[[nm]] <<- cb$need
+        } else logger(sprintf("StandardEyes figure '%s'%s: its cell of the combined figure could not be built at the journal width (%s) - the combined figure shows its own file's layout.",
+                              nm, run_lab, cb$why %||% "unknown error"))
+      }
       base <- file.path(out_dir, paste0("StandardEyes_", nm, tg))
       # its own file grows downward when its stat lines, axes and key leave the
       # bars less than GR_MIN_PANEL_IN (never squashed); its composite row too
       fh_p <- max(file_h, gr_need_h(p, file_w))
-      cneed[[nm]] <<- gr_need_h(p, .gr_opts$cell_w)
+      if (is.null(jl)) cneed[[nm]] <<- gr_need_h(p, .gr_opts$cell_w)
       got <- save_graph(p, base, formats, dpi, w = file_w, h = fh_p, logger = logger)
       written <<- c(written, got)
       # journal style: the panel title and its abbreviations in <figure>_legend.txt
@@ -5078,9 +5573,11 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
   # draw (logged) re-packs the composite rows the others were planned for.
   # At a chosen width the composite is laid out at that width (gr_width_layout).
   if (length(plan) >= 2 && is.finite(width_in)) {
-    wl <- gr_width_layout(length(plan), width_in, 5.6, 4.9, ph_min = GR_COMPOSITE_MIN_PH)
-    comp_w <- compose_panel_w(length(plan), wl$ncol, wl$pw, wl$rows_spec)
-    cell_h <- min(file_h, wl$ph)
+    # a journal width (R2-2): each panel's own file is laid out at the full
+    # width, and the combined figure's cells are built apart (addC, jl)
+    jl <- gr_journal_layout(length(plan), width_in)
+    comp_w <- rep(file_w, length(plan))
+    cell_h <- file_h
   } else {
     comp_w <- if (length(plan) >= 2)
       compose_panel_w(length(plan), rows_spec = build_sections(unname(plan))$rows_spec)
@@ -5093,26 +5590,35 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
   if (length(cp) >= 2) {
     lay <- build_sections(cs)
     base_c <- file.path(out_dir, paste0("StandardEyes_AllGroups", tg))
+    # at a journal width the cells' own versions (R2-2), in panel order (a
+    # panel whose cell version could not be built keeps its file's)
+    if (!is.null(jl)) {
+      jl <- gr_journal_layout(length(cp), width_in)
+      cpc <- lapply(seq_along(cp), function(i) ccell[[cn[i]]] %||% cp[[i]])
+    } else cpc <- cp
     # journal style (D20): no section bands, frames or captions in the image -
-    # the panel titles and the matched-cohort note go to the legend file
-    got <- compose_panels(cp,
-      captions = if (fs$journal || !is.null(lay$sections)) NULL else cc_,
+    # the panel titles and the matched-cohort note go to the legend file; at a
+    # journal width the two-per-row layout has no section bands either
+    got <- compose_panels(cpc,
+      captions = if (fs$journal || !is.null(lay$sections) || !is.null(jl)) NULL else cc_,
       base = base_c, formats = formats, dpi = dpi,
-      rows_spec = lay$rows_spec, sections = if (fs$journal) NULL else lay$sections,
+      rows_spec = lay$rows_spec, sections = if (fs$journal || !is.null(jl)) NULL else lay$sections,
       note = if (fs$journal) NULL else w_note, preview_dir = preview_dir(), logger = logger,
       width_in = width_in, ph_min = GR_COMPOSITE_MIN_PH,
-      need_h = unname(cneed[cn]))
+      need_h = unname(cneed[cn]), journal = jl)
     written <- c(written, got)
-    # one legend file per figure: the composite, or each of its pages
+    # one legend file per figure: the composite, or each of its pages; the
+    # letters continue from page to page (R2-2)
     pages <- attr(got, "pages") %||% list(list(base = base_c, idx = seq_along(cp), ok = length(got) > 0))
     if (fs$journal) for (pg in pages) if (isTRUE(pg$ok)) {
       ii <- pg$idx
       gr_write_legend(pg$base, paste0("Standard graphs", leg_lab,
                                       if (length(pages) > 1) sprintf(" (page %d of %d)", match(pg$base, vapply(pages, `[[`, "", "base")), length(pages)) else ""),
-                      c(paste0(paste0(LETTERS[seq_along(ii)], ", ", cc_[ii], collapse = "; "), "."), w_note,
+                      c(paste0(paste0(LETTERS[ii], ", ", cc_[ii], collapse = "; "), "."), w_note,
                         unlist(lapply(seq_along(ii), function(k) {
                           nt <- gr_panel_notes(cn[ii[k]])
-                          if (length(nt)) paste0(LETTERS[k], ": ", nt) })),
+                          if (length(nt)) paste0(LETTERS[ii[k]], ": ", nt) })),
+                        gr_moved_legend(LETTERS[ii], lapply(cn[ii], function(x) cmoved[[x]])),
                         gr_gee_legend_lines(ptxt[cn[ii]])),
                       texts = unlist(ptxt[cn[ii]]), logger = logger)
     }
@@ -5222,54 +5728,77 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
     # gap), so each panel is built again at its cell's size - its header wrapped
     # to that width - rather than drawn squeezed; at the designed size the
     # file's plot is the cell's. A panel that cannot be rebuilt keeps its file's.
-    polar_cells <- function(plots, mks, pw, ph) {
+    # At a journal width (R2-2) the combined figure follows the standard
+    # graphs' layout - two panels per row at 17.77 and 12.69 cm, one at 8.76
+    # cm, rows of the same proportion, pages of at most 23 cm - and each panel
+    # is built again for its cell at the reduced text scale, with its short
+    # statistics lines when the full ones do not fit the row (journal style).
+    polar_cells <- function(plots, mks) {
+      lay <- NULL; moved <- rep(list(character(0)), length(plots))
       if (is.finite(width_in)) {
-        lay <- gr_width_layout(length(plots), width_in, pw, ph, POLAR_GAP_IN, GR_POLAR_MIN_PW)
-        plots <- lapply(seq_along(plots), function(i)
-          tryCatch(mks[[i]](lay$pw, lay$ph), error = function(e) plots[[i]]))
+        lay <- gr_journal_layout(length(plots), width_in, POLAR_GAP_IN)
+        plots <- lapply(seq_along(plots), function(i) {
+          cb <- gr_build_cell(function() mks[[i]](lay$pw, lay$ph), lay, short_ok = fs$journal,
+                              need = function(q) fig_h_of(q, 0))
+          if (is.null(cb$p)) {
+            logger(sprintf("StandardEyes polar plot %d%s: its cell of the combined figure could not be built at the journal width (%s) - the combined figure shows its own file's layout.",
+                           i, run_lab, cb$why %||% "unknown error"))
+            return(plots[[i]])
+          }
+          moved[[i]] <<- cb$moved
+          cb$p
+        })
       }
-      list(plots = plots, need_h = vapply(plots, function(p) fig_h_of(p, 0), numeric(1)))
+      list(plots = plots, need_h = vapply(plots, function(p) fig_h_of(p, 0), numeric(1)),
+           lay = lay, moved = moved)
     }
     # a composite's legend: its panels by letter, then the method text of each;
-    # a composite written as pages (compose_panels attr "pages") gets one per page
-    composite_legend <- function(plots, legs, base, what, got = NULL) {
+    # a composite written as pages (compose_panels attr "pages") gets one per
+    # page, the letters continuing from page to page (R2-2)
+    composite_legend <- function(plots, legs, base, what, got = NULL, moved = NULL) {
       if (!fs$journal) return(invisible(NULL))
       pages <- attr(got, "pages") %||% list(list(base = base, idx = seq_along(plots), ok = TRUE))
       for (pg in seq_along(pages)) {
         if (!isTRUE(pages[[pg]]$ok)) next
         ii <- pages[[pg]]$idx
         ttl <- vapply(legs[ii], function(l) as.character(l$title %||% "")[1], character(1))
-        lines <- unlist(lapply(seq_along(ii), function(k)
-          if (length(legs[[ii[k]]]$lines)) paste0(LETTERS[k], ": ", legs[[ii[k]]]$lines)))
+        # a method line every panel shares is written once, the others under
+        # their panel's letter
+        common <- if (length(ii) > 1) Reduce(intersect, lapply(legs[ii], function(l) as.character(l$lines)))
+                  else character(0)
+        lines <- c(common, unlist(lapply(seq_along(ii), function(k) {
+          lk <- setdiff(as.character(legs[[ii[k]]]$lines), common)
+          if (length(lk)) paste0(LETTERS[ii[k]], ": ", lk) })))
         tx <- unlist(lapply(plots[ii], gr_figure_texts))
         gr_write_legend(pages[[pg]]$base,
                         paste0(what, leg_lab, if (length(pages) > 1) sprintf(" (page %d of %d)", pg, length(pages)) else ""),
-                        c(paste0(paste0(LETTERS[seq_along(ttl)], ", ", ttl, collapse = "; "), "."), lines,
+                        c(paste0(paste0(LETTERS[ii], ", ", ttl, collapse = "; "), "."), lines,
+                          if (length(moved)) gr_moved_legend(LETTERS[ii], moved[ii]),
                           gr_gee_legend_lines(tx)),
                         texts = c(tx, "◆"), logger = logger)
       }
     }
     if (length(dap) >= 2) {
       base <- file.path(out_dir, paste0("StandardEyes_DoubleAngle", tg))
-      cells <- polar_cells(dap, da_mk, DA_W, DA_H)
+      cells <- polar_cells(dap, da_mk)
       got <- compose_panels(cells$plots, captions = NULL, base = base,
         formats = formats, dpi = dpi, ncol = 2, pw = DA_W, ph = DA_H, gap_in = POLAR_GAP_IN,
         preview_dir = preview_dir(), logger = logger, width_in = width_in, min_pw = GR_POLAR_MIN_PW,
-        need_h = cells$need_h)
+        need_h = cells$need_h, journal = cells$lay)
       written <- c(written, got)
-      if (length(got)) composite_legend(dap, da_leg, base, "Double-angle plots", got)
+      if (length(got)) composite_legend(dap, da_leg, base, "Double-angle plots", got, cells$moved)
     } else if (length(dap) == 1) {
       preview_single(dap[[1]], paste0("StandardEyes_DoubleAngle_", dac[1], tg), da_w, fig_h_of(dap[[1]], da_h))
     }
     if (length(scp) >= 2) {
       base <- file.path(out_dir, paste0("StandardEyes_Semicircle", tg))
-      cells <- polar_cells(scp, sc_mk, SC_W, SC_H)
+      cells <- polar_cells(scp, sc_mk)
       got <- compose_panels(cells$plots, captions = NULL, base = base,
         formats = formats, dpi = dpi, ncol = 2, pw = SC_W, ph = SC_H, gap_in = POLAR_GAP_IN,
         preview_dir = preview_dir(), logger = logger, width_in = width_in, min_pw = GR_POLAR_MIN_PW,
-        need_h = cells$need_h)
+        need_h = cells$need_h, journal = cells$lay)
       written <- c(written, got)
-      if (length(got)) composite_legend(scp, sc_leg, base, "Semicircle (single-angle) plots", got)
+      if (length(got)) composite_legend(scp, sc_leg, base, "Semicircle (single-angle) plots", got, cells$moved)
     } else if (length(scp) == 1) {
       preview_single(scp[[1]], paste0("StandardEyes_Semicircle_", scc[1], tg), sc_w, fig_h_of(scp[[1]], sc_h))
     }
@@ -5283,12 +5812,12 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
   # tests (p_omnibus) and the double-angle centroid tests (astig_bivariate_p) -
   # and whose P therefore comes from the unclustered test
   if ((.gr_opts$n_gee_fallback %||% 0L) > 0)
-    logger(sprintf("StandardEyes figures%s: in %d test(s) the clustered GEE could not be fitted (no convergence, a numerically singular covariance, or a group of a 0/1 outcome without events); those P values come from the unclustered test and are labelled \"GEE not fitted\" on the figure.",
+    logger(sprintf("StandardEyes figures%s: in %d test(s) the clustered GEE could not be fitted (no convergence, a numerically singular covariance, or a group of a 0/1 outcome without events); those P values come from the unclustered test and are labeled \"GEE not fitted\" on the figure.",
                    run_lab, .gr_opts$n_gee_fallback))
   # bar panels whose bars are too narrow for a label each: the tallest bars
   # kept theirs (gr_bars), the others are named here
   if ((.gr_opts$n_label_thin %||% 0L) > 0)
-    logger(sprintf("StandardEyes figures%s: in %d bar panel(s) the bars are too narrow at this width for a %g-pt value label on each - the tallest bars are labelled, the labels that would overlap them are left out.",
+    logger(sprintf("StandardEyes figures%s: in %d bar panel(s) the bars are too narrow at this width for a %g-pt value label on each - the tallest bars are labeled, the labels that would overlap them are left out.",
                    run_lab, .gr_opts$n_label_thin, GR_MIN_TEXT_PT))
   if (dir.exists(prev_dir) && !length(list.files(prev_dir, all.files = TRUE, no.. = TRUE)))
     unlink(prev_dir, recursive = TRUE)

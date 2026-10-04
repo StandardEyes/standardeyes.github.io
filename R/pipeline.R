@@ -260,7 +260,7 @@ add_group_label <- function(dat, group_source_clean, groups, reference_group,
     n_blank <- sum(is.na(ov) | !nzchar(trimws(as.character(ov))))
     vals <- vals[nzchar(vals)]
     logger(paste0("Grouping", where, ": ", sum(out_rows), " of ", nrow(dat),
-                  " rows belong to no group and are not analysed (",
+                  " rows belong to no group and are not analyzed (",
                   paste(c(if (length(vals)) paste0("'", src_lab, "' = ",
                                                    paste(utils::head(vals, 8), collapse = ", "),
                                                    if (length(vals) > 8) ", ..." else ""),
@@ -777,7 +777,7 @@ check_va_notation <- function(dat, cols, fmt, label_of, sheet_stats = list(),
            else max(0L, whole$n_lost - p$n_lost)
       ex <- if (oor) whole$oor_examples %||% character(0) else setdiff(whole$examples, p$examples)
       if (k > 0)
-        logger(sprintf("VA column '%s': %d value%s that %s cannot have%s %s only in rows that are not analysed (excluded, filtered out, or in no group or subset) - %s missing and %s not stop the run.",
+        logger(sprintf("VA column '%s': %d value%s that %s cannot have%s %s only in rows that are not analyzed (excluded, filtered out, or in no group or subset) - %s missing and %s not stop the run.",
                        lab, k, if (k == 1) "" else "s", fl, .pl_va_examples(ex),
                        if (k == 1) "is" else "are", if (k == 1) "it stays" else "they stay",
                        if (k == 1) "does" else "do"))
@@ -835,12 +835,12 @@ set_va_analysis_columns <- function(dat, va, fmt, do_logmar, label_of, logger = 
   labs <- function(x) paste(vapply(x, label_of, character(1)), collapse = ", ")
   if (length(as_logmar))
     logger(paste0(if (isTRUE(do_logmar)) "logMAR conversion not applied: the VA notation is logMAR, so " else "",
-                  "VA columns analysed in logMAR as recorded: ", labs(as_logmar), "."))
+                  "VA columns analyzed in logMAR as recorded: ", labs(as_logmar), "."))
   if (length(converted))
     logger(paste0("Converted to logMAR (-log10 of decimal acuity): ", labs(converted), "."))
   if (fmt %in% c("snellen", "etdrs") && length(as_decimal))
     logger(paste0("VA columns recorded as ", .pl_va_label[[fmt]],
-                  " are analysed as decimal acuity (not converted to logMAR): ", labs(as_decimal), "."))
+                  " are analyzed as decimal acuity (not converted to logMAR): ", labs(as_decimal), "."))
   list(data = dat, converted = converted, as_logmar = as_logmar, as_decimal = as_decimal)
 }
 
@@ -900,6 +900,11 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
       logger(sprintf("Astigmatism setting %s = '%s' is not known (use %s) - %s is used.", k,
                      as.character(unlist(cfg[[k]]))[1], paste(okv, collapse = ", "), okv[1]))
   }
+  # the figure style, width, resolution and formats, read once here so an
+  # unknown value is named at the start of every run - with or without
+  # figures - and its default used (decision R2-7; graphs.R gr_figure_settings,
+  # whose messages are logged once per run)
+  if (exists("gr_figure_settings", mode = "function")) invisible(gr_figure_settings(cfg, logger))
 
   bump(0.02, "Reading Excel file ...")
   rd <- read_input_sheet(cfg, logger)
@@ -919,6 +924,9 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
   res <- resolve_config(cfg, raw_names, logger)
   res$display_names <- disp_map
   res$run_started <- run_started
+  # the matched-analysis note says "clustered by patient" only with a mapped
+  # patient ID (decision R2-7)
+  set_matched_note_pid(length(res$patient_id_clean) && !is.na(res$patient_id_clean[1]))
   logger(paste0("P values: ", p_style_text(), "."))
 
   # GEE small-sample inference of every model, table test and figure P value
@@ -929,7 +937,8 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
                 gee_inference_text(unit = if (length(res$patient_id_clean) && !is.na(res$patient_id_clean[1]))
                                             "patient" else "eye"), "."))
   tt_req <- tolower(trimws(as.character(unlist(cfg$table_tests %||% "auto"))[1]))
-  if (!(tt_req %in% c("auto", "classical")))
+  # (a blank value is the default, said nowhere; an unknown one is named)
+  if (length(tt_req) && !is.na(tt_req) && nzchar(tt_req) && !(tt_req %in% c("auto", "classical")))
     logger(sprintf("Table tests setting '%s' is not known (use auto or classical) - auto is used.",
                    as.character(unlist(cfg$table_tests))[1]))
   logger(paste0("Table tests: ", table_tests_text(cfg, has_pid = !is.na(res$patient_id_clean)), "."))
@@ -958,10 +967,10 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
     if (is.na(res_subset_col)) {
       if (length(subs) > length(empty))
         stop(unresolved_name_message(raw_names, sraw, "Subset column"),
-             " No subset can be selected without it - re-select the subset column, or clear it to analyse all rows.",
+             " No subset can be selected without it - re-select the subset column, or clear it to analyze all rows.",
              call. = FALSE)
       logger(paste0(unresolved_name_message(raw_names, sraw, "Subset column"),
-                    " No subsets are defined, so all rows are analysed."))
+                    " No subsets are defined, so all rows are analyzed."))
     }
   }
 
@@ -1070,7 +1079,7 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
       v[miss] <- paste0("(no ID) row ", dat[[ROWPOS]][miss])
       dat[[pid]] <- v
       if (any(miss & analysed))
-        logger(sprintf("Patient ID: %d of the %d rows analysed have no patient ID in '%s'. Each such eye is counted as its own patient (its own cluster) in the tables, models, figure P values and bootstrap - if two of them belong to one patient they are counted twice; fill in the IDs to avoid this.",
+        logger(sprintf("Patient ID: %d of the %d rows analyzed have no patient ID in '%s'. Each such eye is counted as its own patient (its own cluster) in the tables, models, figure P values and bootstrap - if two of them belong to one patient they are counted twice; fill in the IDs to avoid this.",
                        sum(miss & analysed), sum(analysed), label_of(pid)))
     }
   }
@@ -1161,7 +1170,7 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
       logger(paste0("WARNING: filtered dataset NOT exported (",
                     if (length(why)) paste(why, collapse = "; ") else "the file was not created",
                     ") - check that the output folder is writable and the file is not open in Excel: ", fp))
-    } else logger(paste0("Filtered dataset exported (", nrow(out), " analysed rows): ", fp,
+    } else logger(paste0("Filtered dataset exported (", nrow(out), " analyzed rows): ", fp,
                          if (nzchar(warn)) paste0(" (warning: ", warn, ")") else ""))
   }
 

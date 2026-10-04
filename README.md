@@ -12,7 +12,8 @@ uses — decimal, logMAR, Snellen (20/x or 6/x) or ETDRS letters — and is anal
 and reported as the Snellen geometric mean with the logMAR mean ± SD. P values follow the journal style
 (.27, <.001), and the figures are drawn in a journal style (no frames or shading; titles and abbreviations in
 a legend file beside each figure) as TIFF, PNG, JPEG, PDF or EPS up to 1200 dpi, optionally at a journal
-column width (a combined figure taller than a 23-cm page is then split into pages). In EPS files the
+column width (a combined figure then has two panels per row - one at 8.76 cm - and is split into pages
+`_p1`, `_p2` when taller than a 23-cm page, the panel letters continuing). In EPS files the
 semi-transparent marks are embedded as images at 1200 dpi or more, since PostScript has no transparency.
 
 Everything runs on your own computer. Nothing is uploaded, and no internet connection is needed.

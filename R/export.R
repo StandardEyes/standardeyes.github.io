@@ -406,7 +406,7 @@ make_alpins_tabs <- function(df, wb, roles, pairing = NULL, logger = message, di
     # ambiguous numeric codes were logged once for the whole column above
     if (!eye_num_ok) bad <- bad & is.na(.eye_num_code(toupper(trimws(as.character(eye_raw)))))
     if (any(bad))
-      logger(sprintf("AstigMATIC tab '%s': %d eye code(s) not recognised as right/left (e.g. '%s') - left blank.",
+      logger(sprintf("AstigMATIC tab '%s': %d eye code(s) not recognized as right/left (e.g. '%s') - left blank.",
                      g, sum(bad), paste(utils::head(unique(as.character(eye_raw[bad])), 3), collapse = "', '")))
     # minus-cylinder notation, as the tab has always been read (export copy
     # only): a plus cylinder is transposed (axis + 90), whatever the analysis
@@ -501,7 +501,9 @@ astig_jcrs_sections <- function(cp) {
     s <- cp$stats[[k]]$summary; rg <- cp$stats[[k]]$regions
     reg_txt <- vapply(s$group, function(g) {
       dr <- rg[[g]]$data
-      if (is.null(dr)) return(sprintf("none (n = %d)", s$n[s$group == g]))
+      # not drawn: too few eyes, or a line rather than a polygon (R2-6)
+      if (is.null(dr)) return(if (nzchar(rg[[g]]$data_why %||% "")) rg[[g]]$data_why
+                              else sprintf("none (n = %d)", s$n[s$group == g]))
       if (identical(attr(dr, "method"), "normal")) return("95% bivariate-normal ellipse")
       sprintf("depth polygon: %d deepest of %d eyes", attr(dr, "kept"), attr(dr, "n"))
     }, character(1))
@@ -817,7 +819,7 @@ write_stacked_tables <- function(wb, sheet_name, sections, note = NULL) {
 # cohort)" with the statement of decision D18 (matched sets are not clusters).
 # NULL / "exchangeable" adds nothing.
 gee_skip_note <- function(g, corstr = NULL) {
-  m_note <- get0("MATCHED_ANALYSIS_NOTE", ifnotfound = "")
+  m_note <- matched_analysis_note()
   wtxt <- if (length(corstr) && identical(corstr[1], "independence (weighted)"))
     paste0("Models weighted by the matching weights - working correlation: ", corstr[1],
            ", robust (sandwich) standard errors. ", m_note)
@@ -1143,11 +1145,11 @@ PSM_CEM_EXACT_WHY <- "every matching covariate is categorical, so coarsened exac
   d <- tolower(trimws(as.character(distance %||% "glm")[1]))
   if (is.na(d) || !nzchar(d)) d <- "glm"
   switch(d,
-    mahalanobis        = "nearest-neighbour on Mahalanobis distance",
-    robust_mahalanobis = "nearest-neighbour on robust Mahalanobis distance",
-    euclidean          = "nearest-neighbour on Euclidean distance",
-    scaled_euclidean   = "nearest-neighbour on scaled Euclidean distance",
-    "nearest-neighbour on the propensity score")
+    mahalanobis        = "nearest-neighbor on Mahalanobis distance",
+    robust_mahalanobis = "nearest-neighbor on robust Mahalanobis distance",
+    euclidean          = "nearest-neighbor on Euclidean distance",
+    scaled_euclidean   = "nearest-neighbor on scaled Euclidean distance",
+    "nearest-neighbor on the propensity score")
 }
 psm_method_label <- function(psm) {
   req <- tolower(trimws(as.character(psm$method %||% "nearest")[1]))
@@ -1209,7 +1211,7 @@ psm_settings_table <- function(psm, reference_group, patient_id_raw = NULL, pair
     c("Random seed (matching)", fmt_setting(psm$seed)),
     c("Reference group", fmt_setting(reference_group)),
     c("Patient ID (clustering for GEE only; not used in matching)", fmt_setting(patient_id_raw)),
-    c("Matched analyses", get0("MATCHED_ANALYSIS_NOTE", ifnotfound = "(not recorded)"))))
+    c("Matched analyses", matched_analysis_note())))
   data.frame(Setting = vapply(rows, `[`, character(1), 1),
              Value   = vapply(rows, `[`, character(1), 2),
              stringsAsFactors = FALSE)
@@ -1366,10 +1368,10 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
   vi <- va_info(dat, cfg, res)
   va_notes <- c(
     if (length(vi$in_logmar))
-      paste0("Visual acuity analysed in logMAR (lower = better): ", paste(dn(vi$in_logmar), collapse = ", "),
+      paste0("Visual acuity analyzed in logMAR (lower = better): ", paste(dn(vi$in_logmar), collapse = ", "),
              if (vi$format == "logmar") " - as recorded." else " - converted from the recorded notation."),
     if (length(vi$as_decimal))
-      paste0("Visual acuity analysed as decimal acuity (higher = better): ",
+      paste0("Visual acuity analyzed as decimal acuity (higher = better): ",
              paste(dn(vi$as_decimal), collapse = ", "),
              if (vi$format %in% c("snellen", "etdrs")) paste0(" - converted from ", vi$label, ".") else "."))
   write_stacked_tables(wb, "Overview", list(
@@ -1506,9 +1508,9 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
   astig_on <- isTRUE(cfg$astig_sheet %||% TRUE)
   if (astig_on)
     optional_tab("Astigmatism (JCRS 2025) sheet", {
-      tb <- make_astig_jcrs_sheet(dat, wb, cfg, res, "Astigmatism (JCRS 2025)", "all analysed eyes",
+      tb <- make_astig_jcrs_sheet(dat, wb, cfg, res, "Astigmatism (JCRS 2025)", "all analyzed eyes",
                                   logger = logger, vectors_sheet = TRUE)
-      if (!is.null(tb)) astig_tables[["All analysed eyes"]] <- tb
+      if (!is.null(tb)) astig_tables[["All analyzed eyes"]] <- tb
     })
 
   # --- Unmatched GEE sheets (models fitted above) ---
@@ -1716,10 +1718,10 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
         },
         "Within-group sections and the ",
         "mEYEstro / AstigMATIC tabs list the matched rows unweighted. ",
-        MATCHED_ANALYSIS_NOTE)
+        matched_analysis_note())
         # unit weights: the matched tables' clustered tests and models follow
         # decision D18 too, and the sheet says so
-        else paste0("NOTE: matched cohort (unit matching weights). ", MATCHED_ANALYSIS_NOTE)
+        else paste0("NOTE: matched cohort (unit matching weights). ", matched_analysis_note())
       sub_glevels <- pair_lvls
       msum <- function(params, tmap) create_summary_table(
         md, params, tmap, sub_glevels, "GroupLabel",
@@ -1851,7 +1853,7 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
 describe_sheet <- function(nm) {
   mey <- paste0("copy columns E-S (15 columns, template order) into the mEYEstro template - ",
                 "yellow E-I preop refraction, vertex (12 mm), preop CDVA; green J-M intended refraction; ",
-                "red N-S postop refraction, vertex, postop CDVA, postop UDVA. Grey A-D (group, decimal ",
+                "red N-S postop refraction, vertex, postop CDVA, postop UDVA. Gray A-D (group, decimal ",
                 "acuities) and blue T (postop SEQ) are for reference only.")
   ast <- paste0("columns A-E (eye OD/OS, preop cylinder, preop axis, postop cylinder, postop axis) ",
                 "load directly into AstigMATIC; written in minus-cylinder notation.")
@@ -1870,7 +1872,7 @@ describe_sheet <- function(nm) {
     c("^mEYEstro_",           paste("mEYEstro-format export of one group (all rows):", mey)),
     c("^AstigMATIC_M_",       paste("AstigMATIC input for one group of a matched pairing (matched rows, unweighted):", ast)),
     c("^AstigMATIC_",         paste("AstigMATIC input for one group (all rows):", ast)),
-    c("^Astigmatism \\(JCRS 2025\\)$", paste("Astigmatism per the JCRS 2025 standard (all analysed eyes; a CSV copy is written beside the workbook),", jcrs)),
+    c("^Astigmatism \\(JCRS 2025\\)$", paste("Astigmatism per the JCRS 2025 standard (all analyzed eyes; a CSV copy is written beside the workbook),", jcrs)),
     c("^Astigmatism vectors$", paste0("Per eye: the astigmatism vectors PE, SIA, PRE, POST and the Alpins TIA and DV - ",
                                       "magnitude, plus axis and doubled-angle x, y - input for external tools.")),
     c("^Astig_M_",            paste("Astigmatism per the JCRS 2025 standard for the matched cohort of one pairing (matched rows),", jcrs)),
@@ -1974,7 +1976,7 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
     vi <- va_info(dat, cfg, res)
     logmar_txt <- if (vi$format == "logmar")
       paste0("not applied - acuity recorded in logMAR",
-             if (length(vi$in_logmar)) paste0(" (analysed as recorded: ", paste(dn(vi$in_logmar), collapse = ", "), ")") else "")
+             if (length(vi$in_logmar)) paste0(" (analyzed as recorded: ", paste(dn(vi$in_logmar), collapse = ", "), ")") else "")
       else if (isTRUE(cfg$do_logmar))
         paste0("on", if (length(vi$converted)) paste0(": ", paste(dn(vi$converted), collapse = ", "))
                      else " (no column converted)")
@@ -2041,7 +2043,10 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
     astig_m <- one(cfg$astig_test_method, "robust")
     astig_txt <- if (identical(astig_m, "robust") && exists("ASTIG_BOOT_B") && exists("ASTIG_TRIM"))
       sprintf(paste0("robust (%d%%-trimmed mean vectors, pooled winsorized covariance; precision and mean ",
-                     "magnitude by trimmed means; %s B = %d, seed 20250601)"),
+                     "magnitude by trimmed means; %s B = %d usable resamples, seed 20250601; a trimmed test ",
+                     "whose statistic does not exist in the data or in more than 5%% of the resamples is run ",
+                     "untrimmed - ordinary means and covariance, same bootstrap - and labeled so on the ",
+                     "astigmatism sheet and the figure legends)"),
               as.integer(round(get("ASTIG_TRIM") * 100)),
               if (fig_clustered) "bootstrap resampling patients within each cohort"
               else "bootstrap resampling eyes within each cohort (eyes independent)",
@@ -2138,7 +2143,7 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
                                        "reference' lines, from the same GEE of all groups as the GEE column ",
                                        "when the figure's test is a GEE); omnibus P ",
                                        "values and single comparisons unadjusted")),
-      if (matching_on) c("Matched analyses", MATCHED_ANALYSIS_NOTE),
+      if (matching_on) c("Matched analyses", matched_analysis_note()),
       c("GEE stage",            gee_stage),
       c("GEE adjustment covariates", gee_adj_txt),
       c("GEE columns in summary tables", gee_cols_txt),
@@ -2175,7 +2180,7 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
                                 else paste0("clustered by patient (GEE, ",
                                             if (identical(gee_small_sample(), "none")) "uncorrected robust SE, normal reference"
                                             else "robust SE (Mancl-DeRouen), t reference; F for joint tests",
-                                            ") wherever a patient has two analysed eyes; ",
+                                            ") wherever a patient has two analyzed eyes; ",
                                             "classical tests for one eye per patient"))
     )
     rows <- Filter(Negate(is.null), rows)

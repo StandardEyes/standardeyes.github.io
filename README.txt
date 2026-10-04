@@ -361,9 +361,14 @@ crash, the next time the app starts). You get:
     images (the look of version 1.0.0). A figure width
     (8.76, 12.69 or 17.77 cm, the journal column widths)
     lays every figure out at that width, so its text keeps
-    its size; a combined figure taller than a page (23 cm)
-    is then written as pages (_1, _2 ...), each with its
-    own legend file. EPS is vector, but PostScript has no
+    its size. A combined figure then has two panels per row
+    (one at 8.76 cm), rows about 7.6 cm high at 17.77 cm,
+    and text of at least 6 pt; statistics lines that do not
+    fit a panel at that size are listed in the legend file.
+    A combined figure taller than a page (23 cm) is written
+    as pages (_p1, _p2 ...), each with its own legend file,
+    the panel letters continuing. EPS is vector, but
+    PostScript has no
     transparency: the semi-transparent points and regions
     inside it are embedded as images at 1200 dpi (or the
     chosen resolution, if higher). Colors are RGB: convert

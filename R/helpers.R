@@ -1107,41 +1107,39 @@ fmt_effect <- function(kind, est, lo = NA_real_, hi = NA_real_, digits = 2) {
 # ------------------------------------------------------------
 # Visual acuity analysed in logMAR (decision D16): a cell reads
 #   "20/20 (0.00 ± 0.05 logMAR); range 20/16 to 20/32"
-# - the Snellen value is the geometric mean, 20/(20 x 10^mean logMAR), read
-# from the embedded decimal-to-Snellen chart (export.R decimal_to_snellen, the
-# chart of the mEYEstro tabs); the range runs from the best to the worst eye.
-# "logMAR" is always written with a lower-case l.
+# - the Snellen value is the geometric mean, 20/(20 x 10^mean logMAR); the
+# range runs from the best to the worst eye. "logMAR" is always written with a
+# lower-case l.
 # ------------------------------------------------------------
-# "20/x" (chart notation, e.g. "20/25-1") of each logMAR value; NA when missing.
-# A mean or a range end is read from the same chart, but where the chart lists
-# a plain line for the key beside letter-suffixed entries (-0.10: 15-1, 15-,
-# 16; 1.30: 350-3, 400) the plain line is taken, so a standard value reads as
-# its standard line (20/16, 20/32, 20/80, 20/400) and agrees with the figure
-# axes. The per-eye mEYEstro tabs keep decimal_to_snellen's first-match rule.
+# The standard label of each 0.1-logMAR chart line from -0.3 (20/10) to 1.7
+# (20/1000), the preferred-number series of logMAR charts
+VA_SNELLEN_LINES <- c("10", "12.5", "16", "20", "25", "32", "40", "50", "63", "80", "100",
+                      "125", "160", "200", "250", "320", "400", "500", "630", "800", "1000")
+VA_LINE_TOL <- 0.005     # logMAR: a value this close to a chart line reads as that line
+# "20/x" of each logMAR value v, NA when missing (decision R2-1; never a chart
+# letter suffix such as "20/16-3" or "20/20+"): when v is within VA_LINE_TOL of
+# a chart line - a multiple of 0.1 logMAR that the decimal-to-Snellen chart
+# (export.R decimal_to_snellen) carries - that line's standard label (20/16,
+# 20/20, 20/25 ... 20/63 ... 20/200); otherwise "20/" and the denominator 20 x
+# 10^v rounded to a whole number (one decimal below 10: 20/8.9). The geometric
+# mean and the range ends of the tables and figures read this way; the per-eye
+# mEYEstro tabs keep the chart's lettered notation (decimal_to_snellen).
 va_snellen <- function(lm) {
   lm <- suppressWarnings(as.numeric(lm))
   out <- rep(NA_character_, length(lm))
   ok <- is.finite(lm)
   if (!any(ok)) return(out)
+  v <- lm[ok]
+  k <- round(v * 10)                                   # the nearest 0.1-logMAR line
+  line <- abs(v - k / 10) <= VA_LINE_TOL + 1e-9 & k >= -3 & k <= 17
+  # only the lines the chart carries (any reading at that key, lettered or not)
   tbl <- if (exists("get_snellen_table", mode = "function")) get_snellen_table() else NULL
-  s <- rep("", sum(ok))
-  if (!is.null(tbl) && exists("excel_round0", mode = "function")) {
-    # the key decimal_to_snellen builds, in hundredths of logMAR
-    k100 <- as.integer(excel_round0(round(lm[ok], 9) / 0.02) * 2)
-    inr <- k100 >= SNELLEN_K100_RANGE[1] & k100 <= SNELLEN_K100_RANGE[2]
-    on <- !tbl$offchart
-    plain <- on & grepl("^[0-9]+(\\.[0-9]+)?$", trimws(tbl$snellen))
-    s <- vapply(seq_along(k100), function(i) {
-      if (!inr[i]) return("")
-      h <- which(plain & tbl$key100 == k100[i])
-      if (!length(h)) h <- which(on & tbl$key100 == k100[i])
-      if (length(h)) trimws(tbl$snellen[h[1]]) else ""
-    }, character(1))
-  }
-  # the chart does not list it (or is not found): the computed denominator
-  calc <- format(round(20 * 10^lm[ok]), scientific = FALSE, trim = TRUE)
-  s[is.na(s) | !nzchar(s)] <- calc[is.na(s) | !nzchar(s)]
-  out[ok] <- paste0("20/", s)
+  if (!is.null(tbl)) line <- line & (as.integer(k) * 10L) %in% tbl$key100[!tbl$offchart]
+  den <- 20 * 10^v
+  # whole number, halves up; one decimal below 10
+  calc <- ifelse(floor(den * 10 + 0.5) / 10 < 9.95, sprintf("%.1f", floor(den * 10 + 0.5) / 10),
+                 format(floor(den + 0.5), scientific = FALSE, trim = TRUE))
+  out[ok] <- paste0("20/", ifelse(line, VA_SNELLEN_LINES[pmin(pmax(k, -3), 17) + 4], calc))
   out
 }
 # m, s: mean and SD in logMAR; lo, hi: the best and worst eye (NA = no range)
@@ -1198,7 +1196,7 @@ build_type_map <- function(df_raw_names,
   hdr <- function(v) { i <- match(v, clean_names(raw)); if (is.na(i)) v else raw[i] }
   for (v in dup)
     logger(sprintf(
-      "Warning: variable '%s' is listed under more than one statistical type (%s); it is analysed as %s. Keep it in one type list only.",
+      "Warning: variable '%s' is listed under more than one statistical type (%s); it is analyzed as %s. Keep it in one type list only.",
       hdr(v), paste(unique(claimed[[v]]), collapse = ", "), out[[v]]))
   out
 }

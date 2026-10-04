@@ -39,7 +39,7 @@
   "preop": {
     "continuous": [
       "Optical_Zone_mm",
-      "Ablation_Depth_um"
+      "Ablation_or_Lenticule_Depth_um"
     ],
     "ordinal": [],
     "dichotomous": [],
@@ -84,9 +84,10 @@
     },
     {
       "var": "FollowUp_Days",
-      "op": ">=",
+      "op": "between",
       "value": [
-        90
+        150,
+        210
       ]
     },
     {
@@ -105,18 +106,18 @@
     }
   ],
   "groups": {
-    "Control": [
-      "Control"
+    "Reference": [
+      "Reference"
     ],
-    "Diabetes": [
-      "Diabetes"
+    "Cohort A": [
+      "Cohort A"
     ]
   },
-  "reference_group": "Control",
+  "reference_group": "Reference",
   "group_colors": {
-    "Control": "#5B2C86",
-    "Diabetes": "#F26522",
-    "Autoimmune": "#1B9E4B"
+    "Reference": "#5B2C86",
+    "Cohort A": "#F26522",
+    "Cohort B": "#1B9E4B"
   },
   "group_labels": {},
   "do_matching": true,
@@ -127,7 +128,7 @@
     "Preop_UDVA"
   ],
   "psm_method": "nearest",
-  "psm_distance": "logit",
+  "psm_distance": "linear.logit",
   "psm_ratio": 2,
   "psm_replace": false,
   "psm_caliper": 0.2,
@@ -138,7 +139,8 @@
   "run_adjusted_gee": true,
   "gee_adjust_covariates_raw": [
     "Age_Years",
-    "Preop_SEQ_D"
+    "Preop_SEQ_D",
+    "Preop_Pachymetry_um"
   ],
   "use_matching_weights_in_gee": true,
   "add_gee_columns": true,
@@ -250,6 +252,7 @@
     "post_axis": "Postop_Axis_Deg",
     "pre_seq": "Preop_SEQ_D",
     "post_seq": "Postop_SEQ_D",
+    "target_seq": "Target_SEQ_D",
     "eye": "Eye"
   },
   "dichotomous_preferred_level": {

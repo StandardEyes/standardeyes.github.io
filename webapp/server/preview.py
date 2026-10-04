@@ -1277,6 +1277,16 @@ def compute_counts(df: pd.DataFrame, cfg: dict) -> dict:
                 "groups": assign_group_counts(sub, group_col, groups),
             }
 
+    # the rows the engine analyses (decision D26): after the filters and the
+    # subsets, only those that fall in a group - R/pipeline.R `analysed`, the
+    # rows of the filtered-dataset CSV. None until a group is defined.
+    in_analysis = None
+    if group_col is not None and group_col in cohort.columns and groups:
+        hit = pd.Series(False, index=cohort.index)
+        for vals in groups.values():
+            hit = hit | group_mask(cohort[group_col], vals)
+        in_analysis = int(hit.sum())
+
     # patient identifiers: blank ids become one patient per eye in the run
     pid_col = resolve(cfg.get("patient_id_raw"), resolver)
     pid_missing = (int(_is_missing(cohort[pid_col]).sum())
@@ -1289,6 +1299,7 @@ def compute_counts(df: pd.DataFrame, cfg: dict) -> dict:
         "filter_steps": steps,
         "after_filters": after_filters,
         "after_subsets": after_subsets,
+        "in_analysis": in_analysis,
         "groups": overall_groups,
         "subsets": subset_out,
         "subset_col_missing": subset_column_missing(cfg, resolver),

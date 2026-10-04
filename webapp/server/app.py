@@ -219,8 +219,12 @@ def shutdown_cleanup() -> None:
             pass
         _OWNER_FH = None
 
-APP_VERSION = "2026-10-02-se.9"   # build id; bump together with static/app.js UI_VERSION
-PUBLIC_VERSION = "1.0.0"          # the release number the website and citation use
+# The ONE version source (decision D25): the engine reads these two lines from
+# this file (R/export.R standardeyes_version) for every workbook's Manifest,
+# also in a run from the command line; the release tools read them too. Keep
+# each a plain string assignment on its own line.
+APP_VERSION = "2026-10-04-se.10"  # build id; bump together with static/app.js UI_VERSION
+PUBLIC_VERSION = "1.1.0"          # the release number the website and citation use
 
 app = FastAPI(title="StandardEyes")
 
@@ -1081,11 +1085,15 @@ def _run_stamps(data: dict) -> set[str]:
     return out
 
 
+_LOVEPLOT_EXTS = (".png", ".tiff", ".jpeg", ".pdf", ".eps", "_legend.txt")
+
+
 def _run_sidecar_names(data: dict, folder: str) -> tuple[list[str], list[str]]:
-    """(love plots, filtered-dataset CSVs) in `folder` that the run of `data`
-    wrote: LovePlot_<prefix>_..._<stamp>.png and Filtered_Dataset_<stamp>.csv
-    with this run's stamp (and output prefix, when known) - never the files
-    of an earlier run into the same folder."""
+    """(love plots, CSVs) in `folder` that the run of `data` wrote:
+    LovePlot_<prefix>_..._<stamp>.png, Filtered_Dataset_<stamp>.csv and the
+    astigmatism tables' copy <prefix>_<run stem>_Astigmatism_<stamp>.csv
+    (decision D8) with this run's stamp (and output prefix, when known) -
+    never the files of an earlier run into the same folder."""
     stamps = _run_stamps(data)
     prefix = str(data.get("output_prefix") or "")
     # the workbooks' names without the stamp: '<prefix>_<run stem>'
@@ -1103,12 +1111,15 @@ def _run_sidecar_names(data: dict, folder: str) -> tuple[list[str], list[str]]:
         if not os.path.isfile(os.path.join(folder, fn)):
             continue
         low = fn.lower()
-        if fn.startswith("LovePlot_") and low.endswith(".png") and any(
-                low.endswith(f"_{s}.png") for s in stamps) and (
+        # the love plot in every chosen figure format, and its legend file
+        # (journal figure style): LovePlot_..._<stamp>.<ext> / _<stamp>_legend.txt
+        if fn.startswith("LovePlot_") and any(
+                low.endswith(f"_{s}{e}") for s in stamps for e in _LOVEPLOT_EXTS) and (
                 not prefix or fn.startswith(f"LovePlot_{prefix}_")
                 or any(fn.startswith(f"LovePlot_{h}_") for h in heads)):
             loves.append(fn)
-        elif any(fn == f"Filtered_Dataset_{s}.csv" for s in stamps):
+        elif any(fn == f"Filtered_Dataset_{s}.csv" for s in stamps) or any(
+                fn == f"{h}_Astigmatism_{s}.csv" for h in heads for s in stamps):
             csvs.append(fn)
     return loves, csvs
 
@@ -1122,7 +1133,8 @@ def _run_loveplots(data: dict) -> list[str]:
         if d and d not in dirs:
             dirs.append(d)
     for d in dirs:
-        out += [os.path.join(d, fn) for fn in _run_sidecar_names(data, d)[0]]
+        out += [os.path.join(d, fn) for fn in _run_sidecar_names(data, d)[0]
+                if not fn.lower().endswith("_legend.txt")]       # the figures, not their legends
     return out
 
 
@@ -1459,8 +1471,10 @@ def results():
                          for p in _run_loveplots(r) if os.path.isfile(p)]}
     for gd in r.get("graph_dirs", []):
         try:
-            # figure files only: the _preview folder holds low-res copies
-            n_files = (len([f for f in os.listdir(gd) if os.path.isfile(os.path.join(gd, f))])
+            # figure files only: the _preview folder holds low-res copies, and
+            # the <figure>_legend.txt files of the journal style are not figures
+            n_files = (len([f for f in os.listdir(gd) if os.path.isfile(os.path.join(gd, f))
+                            and not f.lower().endswith("_legend.txt")])
                        if os.path.isdir(gd) else 0)
         except OSError:
             n_files = 0

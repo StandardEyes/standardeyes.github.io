@@ -98,12 +98,14 @@ resolve_config <- function(cfg, raw_names, logger = message) {
       logger("Within-group: patient-level analysis was requested but no patient/cluster ID column is set - falling back to per eye.")
   }
 
-  # Optional Alpins vector columns and target refraction for the figures.
-  # Kept OUT of res$roles for the same reason as stability_visits: the
-  # roles loop below expects one scalar per role.
+  # Optional astigmatism vector columns (magnitude + plus axis; Alpins TIA, SIA,
+  # DV and the prediction error PE) and target refraction for the figures and
+  # the astigmatism sheet. Kept OUT of res$roles for the same reason as
+  # stability_visits: the roles loop below expects one scalar per role.
   res$astig_vector_cols <- local({
     out <- list()
-    for (nm in c("tia_mag", "tia_axis", "sia_mag", "sia_axis", "dv_mag", "dv_axis")) {
+    for (nm in c("tia_mag", "tia_axis", "sia_mag", "sia_axis", "dv_mag", "dv_axis",
+                 "pe_mag", "pe_axis")) {
       v <- (cfg$astig_vector_cols %||% list())[[nm]]
       if (!.pl_blank(v)) out[[nm]] <- O(v, paste0("Astigmatism vector (", nm, ") column"))
     }
@@ -656,11 +658,16 @@ va_format_of <- function(cfg) {
 }
 
 # The VA columns: the four VA roles plus logmar_cols_raw (clean names).
+# `listed` - the columns the logMAR conversion applies to - is logmar_cols_raw;
+# a settings file without that key converts the mapped VA role columns
+# (decision D16: logMAR by default for the mapped acuity columns). A list
+# that is present, even empty, is used as it is.
 va_columns <- function(res, cfg, raw_names, logger = message) {
   roles <- unlist(res$roles[intersect(c("pre_ucva", "pre_bcva", "post_ucva", "post_bcva"),
                                       names(res$roles))])
   roles <- as.character(roles[!is.na(roles)])
-  listed <- resolve_vec(raw_names, unlist(cfg$logmar_cols_raw), "logmar_cols", logger)
+  listed <- if (is.null(cfg$logmar_cols_raw)) roles
+            else resolve_vec(raw_names, unlist(cfg$logmar_cols_raw), "logmar_cols", logger)
   list(all = unique(c(roles, listed)), listed = listed)
 }
 
@@ -827,13 +834,13 @@ set_va_analysis_columns <- function(dat, va, fmt, do_logmar, label_of, logger = 
   }
   labs <- function(x) paste(vapply(x, label_of, character(1)), collapse = ", ")
   if (length(as_logmar))
-    logger(paste0(if (isTRUE(do_logmar)) "LogMAR conversion not applied: the VA notation is logMAR, so " else "",
+    logger(paste0(if (isTRUE(do_logmar)) "logMAR conversion not applied: the VA notation is logMAR, so " else "",
                   "VA columns analysed in logMAR as recorded: ", labs(as_logmar), "."))
   if (length(converted))
-    logger(paste0("Converted to LogMAR (-log10 of decimal acuity): ", labs(converted), "."))
+    logger(paste0("Converted to logMAR (-log10 of decimal acuity): ", labs(converted), "."))
   if (fmt %in% c("snellen", "etdrs") && length(as_decimal))
     logger(paste0("VA columns recorded as ", .pl_va_label[[fmt]],
-                  " are analysed as decimal acuity (not converted to LogMAR): ", labs(as_decimal), "."))
+                  " are analysed as decimal acuity (not converted to logMAR): ", labs(as_decimal), "."))
   list(data = dat, converted = converted, as_logmar = as_logmar, as_decimal = as_decimal)
 }
 
@@ -874,6 +881,25 @@ check_dicho_prefs <- function(dat, prefs, logger = message, dicho_vars = names(p
 # ------------------------------------------------------------
 run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
   bump <- function(frac, msg){ logger(msg); if (!is.null(progress)) progress(frac, msg) }
+  run_started <- Sys.time()          # the Manifest's run duration (D25)
+  # visual acuity in logMAR unless the settings say otherwise (D16): a
+  # settings file without the key gets the v1.1.0 default
+  if (is.null(cfg$do_logmar)) cfg$do_logmar <- TRUE
+  # one P value style for the tables, sheets, logs and figures of this run (D15)
+  set_p_style(cfg$p_style, logger)
+  # the astigmatism statistics shared by the sheet and the figures are cached
+  # for one run only (graphs.R astig_vector_stats)
+  if (exists("astig_cache_reset", mode = "function")) astig_cache_reset()
+  # an unknown astigmatism setting is named once, and its default used
+  for (k in c("astig_test_method", "astig_region", "astig_centroid_region")) {
+    v <- tolower(trimws(as.character(unlist(cfg[[k]]))[1]))
+    okv <- switch(k, astig_test_method = c("robust", "gee", "classic"),
+                  astig_region = c("polygon", "depth", "normal", "both"),
+                  astig_centroid_region = c("bootstrap", "hotelling"))
+    if (length(v) && !is.na(v) && nzchar(v) && !(v %in% okv))
+      logger(sprintf("Astigmatism setting %s = '%s' is not known (use %s) - %s is used.", k,
+                     as.character(unlist(cfg[[k]]))[1], paste(okv, collapse = ", "), okv[1]))
+  }
 
   bump(0.02, "Reading Excel file ...")
   rd <- read_input_sheet(cfg, logger)
@@ -892,6 +918,21 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
   log_header_collisions(raw_names, logger)
   res <- resolve_config(cfg, raw_names, logger)
   res$display_names <- disp_map
+  res$run_started <- run_started
+  logger(paste0("P values: ", p_style_text(), "."))
+
+  # GEE small-sample inference of every model, table test and figure P value
+  # of this run (decision D11; helpers.R set_gee_small_sample - a settings
+  # file without the key gets the default "md"), and the table tests (D12)
+  set_gee_small_sample(cfg$gee_small_sample, logger)
+  logger(paste0("GEE inference: ",
+                gee_inference_text(unit = if (length(res$patient_id_clean) && !is.na(res$patient_id_clean[1]))
+                                            "patient" else "eye"), "."))
+  tt_req <- tolower(trimws(as.character(unlist(cfg$table_tests %||% "auto"))[1]))
+  if (!(tt_req %in% c("auto", "classical")))
+    logger(sprintf("Table tests setting '%s' is not known (use auto or classical) - auto is used.",
+                   as.character(unlist(cfg$table_tests))[1]))
+  logger(paste0("Table tests: ", table_tests_text(cfg, has_pid = !is.na(res$patient_id_clean)), "."))
 
   # matching on, but none of its covariates is in the file: said once, here
   # (the Manifest records the skip); export.R builds no matched cohort then
@@ -1044,7 +1085,7 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
                       postop = as.character(postop[!is.na(postop)]), logger = logger)
   }
 
-  # (A2b) Visual acuity: analysis columns (LogMAR conversion), after filtering
+  # (A2b) Visual acuity: analysis columns (logMAR conversion), after filtering
   res$va_format <- va_fmt
   res$logmar_cols_clean <- character(0)
   if (length(va$all)) {
@@ -1085,9 +1126,32 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
 
   if (isTRUE(cfg$export_filtered_csv)) {
     fp <- .pl_os_path(file.path(output_dir, paste0("Filtered_Dataset_", stamp, ".csv")))
-    # the headers as typed in the file, and the scale each VA column holds
-    out <- drop_stash_cols(dat)
+    # the rows that are analysed (D26): in a group and, when subsets are
+    # defined, in one of them - with the group each row is in (GroupLabel) and
+    # its subset (Subset) leading. The headers are as typed in the file, with
+    # the scale each VA column holds.
+    out <- drop_stash_cols(dat[analysed, , drop = FALSE])
     names(out) <- export_headers(names(out), res$display_names, sfx)
+    lead <- list()
+    if (length(names(cfg$groups))) {
+      gh <- group_hits(dat[[res$group_source_clean]][analysed], cfg$groups)
+      lead$GroupLabel <- if (nrow(out)) names(cfg$groups)[max.col(gh, ties.method = "first")] else character(0)
+    }
+    if (!is.na(res_subset_col) && res_subset_col %in% names(dat) && length(names(cfg$subsets))) {
+      sv <- dat[[res_subset_col]][analysed]
+      subs <- cfg$subsets[vapply(cfg$subsets, function(v) !.pl_blank(v), logical(1))]
+      sh <- vapply(names(subs), function(s) match_values(sv, subs[[s]]), logical(length(sv)))
+      sh <- matrix(sh, nrow = length(sv))
+      lead$Subset <- if (nrow(out)) apply(sh, 1, function(r) paste(names(subs)[r], collapse = "; ")) else character(0)
+    }
+    if (length(lead)) {
+      lead <- as.data.frame(lead, check.names = FALSE, stringsAsFactors = FALSE)
+      # unique headers: a file column of the same name is listed as "GroupLabel.1"
+      hdr <- export_headers(c(names(lead), names(out)))
+      out <- data.frame(lead, as.data.frame(out, check.names = FALSE), check.names = FALSE,
+                        stringsAsFactors = FALSE)
+      names(out) <- hdr
+    }
     err <- ""; warn <- ""
     tryCatch(withCallingHandlers(write_csv_utf8_bom(out, fp),
                                  warning = function(w) { warn <<- conditionMessage(w); invokeRestart("muffleWarning") }),
@@ -1097,7 +1161,8 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
       logger(paste0("WARNING: filtered dataset NOT exported (",
                     if (length(why)) paste(why, collapse = "; ") else "the file was not created",
                     ") - check that the output folder is writable and the file is not open in Excel: ", fp))
-    } else logger(paste0("Filtered dataset exported: ", fp, if (nzchar(warn)) paste0(" (warning: ", warn, ")") else ""))
+    } else logger(paste0("Filtered dataset exported (", nrow(out), " analysed rows): ", fp,
+                         if (nzchar(warn)) paste0(" (warning: ", warn, ")") else ""))
   }
 
   runs <- build_runs(cfg)
@@ -1195,7 +1260,7 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
       # the headers as typed in the file (unique, as an Excel table needs),
       # with the same scale suffix on the VA columns as the filtered CSV
       names(mo) <- export_headers(names(mo), res$display_names, sfx)
-      wbm <- openxlsx::createWorkbook()
+      wbm <- openxlsx::createWorkbook(creator = WORKBOOK_CREATOR)   # never the user name (D25)
       md_sheet <- add_or_replace_worksheet(wbm, "Matched_Data")
       openxlsx::writeDataTable(wbm, md_sheet, mo)
       # built$matched_only stacks the pairings (a reference eye matched twice
@@ -1221,6 +1286,16 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
   if (length(skipped))
     logger(paste0("WARNING: ", length(skipped), " of ", n_runs, " run(s) produced no workbook - ",
                   paste(skipped, collapse = "; "), "."))
+
+  # The run duration (D25) covers the whole run - tables, workbooks AND the
+  # figures drawn after them: the Manifest row written with each workbook (the
+  # time up to that workbook) is replaced by the total now; where that cannot
+  # be done the row keeps its own, labelled, time and the log says so.
+  dur <- as.numeric(difftime(Sys.time(), run_started, units = "secs"))
+  logger(sprintf("Run duration: %.1f s (tables, workbooks and figures).", dur))
+  for (f in c(files, matched_files))
+    xlsx_replace_text(f, MANIFEST_DURATION_RE,
+                      sprintf("%.1f (seconds, the whole run: tables, workbooks and figures)", dur), logger)
 
   bump(1.0, "Done.")
   list(files = files, matched_files = matched_files, output_dir = output_dir,

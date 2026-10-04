@@ -3,8 +3,9 @@
 # Generalized statistical engine (N groups).
 #   - Type-aware summary tables with one column per group
 #     and an omnibus test across groups (group_test() in
-#     helpers.R; weighted GEE Wald tests on matched cohorts
-#     with non-unit matching weights).
+#     helpers.R; patient-clustered GEE tests when a patient
+#     has two analysed eyes; weighted GEE Wald tests on
+#     matched cohorts with non-unit matching weights).
 #   - Initial summary.
 #   - Clustered GEE (Gaussian / binomial) with a factor
 #     group predictor (handles >2 groups via contrasts).
@@ -92,17 +93,14 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
 # levs: optional labels of the 0 and 1 outcome (a two-level categorical), named
 # in that note instead of "events". unit: "eye" when `id` is the row (no
 # patient ID: each eye its own cluster), so the notes count eyes.
+# The Wald test takes the run's small-sample inference (helpers.R gee_wald;
+# decision D11: Mancl-DeRouen with a t reference for one comparison, F for
+# several), and the label says so: "Weighted Wald test (GEE, robust SE
+# (Mancl-DeRouen), t reference)"; with gee_small_sample "none" the v1.0.0
+# label "Weighted Wald test (GEE, robust SE)".
 .weighted_wald <- function(y, g, wt, id, family = c("gaussian", "binomial"), ranks = FALSE,
                            levs = NULL, unit = "patient") {
   family <- match.arg(family)
-  lab <- if (ranks) "Weighted Wald test on ranks (GEE, robust SE)" else "Weighted Wald test (GEE, robust SE)"
-  res <- function(p, note = "", test = lab) {
-    p <- suppressWarnings(as.numeric(p))
-    if (length(p) != 1 || !is.finite(p))
-      list(p = NA_real_, test = test,
-           note = if (nzchar(note)) note else "the weighted test could not be computed")
-    else list(p = p, test = test, note = "")
-  }
   y <- suppressWarnings(as.numeric(y))
   wt <- suppressWarnings(as.numeric(wt))
   glv <- if (is.factor(g)) levels(g) else unique(as.character(g[!is.na(g)]))
@@ -110,6 +108,15 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
   if (ranks) y[ok] <- rank(y[ok])
   d <- data.frame(.y = y[ok], .g = droplevels(factor(as.character(g[ok]), levels = glv)),
                   .w = wt[ok], .id = as.character(id[ok]), stringsAsFactors = FALSE)
+  lab <- paste0(if (ranks) "Weighted Wald test on ranks" else "Weighted Wald test",
+                " (GEE, ", gee_se_label(max(1L, nlevels(d$.g) - 1L)), ")")
+  res <- function(p, note = "", test = lab) {
+    p <- suppressWarnings(as.numeric(p))
+    if (length(p) != 1 || !is.finite(p))
+      list(p = NA_real_, test = test,
+           note = if (nzchar(note)) note else "the weighted test could not be computed")
+    else list(p = p, test = test, note = "")
+  }
   why <- p_value_guard(d$.y, d$.g, if (family == "binomial") "dichotomous" else "continuous")
   if (nzchar(why)) {
     # a constant variable / a single group: no test is named that never ran
@@ -147,17 +154,77 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
   fit <- quiet_eval(suppressWarnings(geepack::geeglm(
            f, data = d, id = .cid, weights = .w, family = fam, corstr = "independence")))$value
   if (is.null(fit)) return(res(NA))
-  b <- stats::coef(fit)
-  V <- tryCatch(fit$geese$vbeta, error = function(e) NULL)
-  idx <- grep("^\\.g", names(b))
-  if (is.null(V) || !length(idx) || any(!is.finite(b[idx])) || any(!is.finite(V))) return(res(NA))
+  # joint Wald test of the group terms (helpers.R gee_wald, the figures' test):
   # a numerically singular robust covariance gives no P value - the figures'
   # weighted GEE refuses it by the same rule (helpers.R gee_vcov_singular)
-  if (gee_vcov_singular(fit, idx)) return(res(NA))
-  W <- tryCatch(as.numeric(t(b[idx]) %*% solve(V[idx, idx, drop = FALSE]) %*% b[idx]),
-                error = function(e) NA_real_)
-  if (!is.finite(W)) return(res(NA))
-  res(stats::pchisq(W, df = length(idx), lower.tail = FALSE))
+  wd <- gee_wald(fit, grep("^\\.g", names(stats::coef(fit))), unit)
+  res(wd$p, wd$why)
+}
+
+# Patient-clustered table test of a per-eye row (decision D12), run when a
+# patient ID is in scope, the classical tests were not chosen and at least one
+# patient contributes two of the row's analysed eyes. The models are the ones
+# behind the figures' clustered P values (helpers.R gee_group_p), so a table
+# and a figure of one outcome give one P value:
+#   continuous  -> Gaussian GEE of the value on the group;
+#   ordinal     -> Gaussian GEE on the ranks;
+#   dichotomous -> binomial GEE of the event (v: TRUE / FALSE / NA);
+#   categorical -> two levels: binomial GEE of the second level; more: the
+#                  joint Wald test on stacked level indicators
+#                  (helpers.R gee_categorical_p).
+# Every group term is tested jointly (more than two groups: the omnibus test),
+# with the run's small-sample inference (decision D11). Working correlation:
+# exchangeable; independence on a matched cohort (matched = TRUE, decision
+# D18). Nothing is fitted - and the note says why, in the figures' words -
+# when a group has one patient, the data are below the minimum of a clustered
+# model, or there are too few patients for the t reference. A model that was
+# fitted but failed (no convergence, a numerically singular covariance) or a
+# 0/1 outcome without events (or with only events) in a group: the classical
+# test runs instead and its label says "(GEE not fitted)", exactly as on the
+# figures. Returns list(p, test, note) like group_test().
+.clustered_test <- function(v, g, id, kind = c("continuous", "ordinal", "dichotomous", "categorical"),
+                            matched = FALSE, unit = "patient") {
+  kind <- match.arg(kind)
+  cs <- if (isTRUE(matched)) "independence" else NULL
+  num <- kind %in% c("continuous", "ordinal")
+  x <- if (num) as_numeric_safe(v) else v
+  use <- (if (num) is.finite(x) else !is.na(x)) & !is.na(g)
+  k <- length(unique(as.character(g[use])))
+  q <- max(1L, k - 1L)
+  if (kind == "categorical") {
+    vv <- as.character(v)
+    levs <- sort(unique(stats::na.omit(vv[use])))
+    if (length(levs) > 2) {
+      base <- "GEE on level indicators"
+      q <- max(1L, (length(levs) - 1L) * (k - 1L))
+      p <- gee_categorical_p(vv, g, id, unit = unit)
+    } else {
+      base <- "Binomial GEE"
+      p <- gee_group_p(if (length(levs) == 2) vv == levs[2] else vv == levs[1], g, id, "proportion",
+                       unit = unit, corstr = cs)
+    }
+  } else if (kind == "dichotomous") {
+    base <- "Binomial GEE"
+    p <- gee_group_p(as.logical(v), g, id, "proportion", unit = unit, corstr = cs)
+  } else {
+    base <- if (kind == "ordinal") "GEE on ranks" else "GEE"
+    p <- gee_group_p(x, g, id, "continuous", unit = unit, ranks = kind == "ordinal", corstr = cs)
+  }
+  lab <- paste0(base, ", clustered by ", if (identical(unit, "eye")) "eye" else "patient",
+                " (", gee_se_label(q), ")")
+  # a single group, a constant variable, "B has n = 1": no test, and no test
+  # is named that never ran (the weighted test's rule)
+  why0 <- p_value_guard(if (num) x else as.character(v), g, if (num) kind else "dichotomous")
+  if (nzchar(why0)) {
+    na_lab <- p_guard_label(why0)
+    return(list(p = NA_real_, test = if (identical(na_lab, "Not tested")) lab else na_lab, note = why0))
+  }
+  if (is.finite(p)) return(list(p = as.numeric(p), test = lab, note = ""))
+  why <- as.character(attr(p, "why") %||% "")[1]
+  if (!is.na(why) && nzchar(why)) return(list(p = NA_real_, test = lab, note = why))
+  gt <- group_test(v, g, kind)
+  gt$test <- paste0(gt$test, " (GEE not fitted)")
+  gt
 }
 
 # ------------------------------------------------------------
@@ -176,6 +243,19 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
 # The returned tibble carries attr "row_key" (the clean key of the variable of
 # each row) and attr "row_var" (its display label), so the GEE / regression
 # merges find a variable's rows exactly, whatever its header looks like.
+# table_tests (decision D12): "auto" (default) - with a patient ID, every
+# per-eye row in which at least one patient contributes two analysed eyes gets
+# the patient-clustered test (.clustered_test: the model of the figures'
+# clustered P value, so a table and a figure of one outcome agree); the other
+# rows - no patient ID, one analysed eye per patient, [per patient] rows -
+# keep the classical tests of group_test(). "classical": group_test() for
+# every unweighted row (the v1.0.0 tables). Weighted rows always get the
+# weighted test. matched = TRUE: a matched cohort, whose clustered tests use
+# an independence working correlation (decision D18).
+# Cells (decision D24): means, SDs and medians with two decimals, percentages
+# with one. va_cols: the visual-acuity columns analysed in logMAR (export.R
+# va_info()$in_logmar); their continuous cells read "20/20 (0.00 ± 0.05
+# logMAR); range 20/16 to 20/32" (decision D16, helpers.R fmt_va).
 # ------------------------------------------------------------
 create_summary_table <- function(df, params_clean, type_map,
                                  glevels,
@@ -185,7 +265,10 @@ create_summary_table <- function(df, params_clean, type_map,
                                  dicho_pref_clean = list(),
                                  weights = NULL,
                                  logger = NULL,
-                                 display_names = NULL) {
+                                 display_names = NULL,
+                                 table_tests = "auto",
+                                 matched = FALSE,
+                                 va_cols = character(0)) {
 
   if (length(params_clean) == 0) return(tibble::tibble())
   dn <- function(x) disp_name(x, display_names)
@@ -211,6 +294,12 @@ create_summary_table <- function(df, params_clean, type_map,
   # eye its own cluster, and the notes then count eyes)
   row_id <- if (has_pid) df[[patient_id_clean]] else paste0("row ", seq_len(nrow(df)))
   cl_unit <- if (has_pid) "patient" else "eye"
+  # patient-clustered tests of the unweighted per-eye rows (decision D12)
+  tt_mode <- tolower(trimws(as.character(table_tests %||% "auto")[1]))
+  cl_tests <- has_pid && !identical(tt_mode, "classical")
+  # a row is tested clustered when one of its patients has two analysed eyes
+  clustered_row <- function(use, ids, unit_tag)
+    cl_tests && !nzchar(unit_tag) && fellow_eyes_present(ids[use])
 
   in_grp <- function(gvec, g) !is.na(gvec) & gvec == g
   n_eye <- vapply(glev, function(g) sum(in_grp(gv, g)), integer(1))
@@ -261,15 +350,11 @@ create_summary_table <- function(df, params_clean, type_map,
       row$p_value <- fmt_p(pval)
       row$Test <- test
       # Three states, not two: an NA p means the test could NOT be performed,
-      # which must never be reported as "no significant difference".
+      # which must never be reported as "not statistically significant".
       row$`Practical Interpretation` <- if (is.na(pval)) {
         if (nzchar(note)) paste0("Not estimable - ", note, ".")
         else "Not estimable - the test could not be performed (insufficient or missing data)."
-      } else if (pval < 0.05) {
-        paste0("Significant difference ", interp_word, ".")
-      } else {
-        paste0("No significant difference ", interp_word, ".")
-      }
+      } else p_interpretation(pval, interp_word)
       row
     }
 
@@ -289,6 +374,7 @@ create_summary_table <- function(df, params_clean, type_map,
       v_num <- as_numeric_safe(v)
       fin <- is.finite(v_num)
       nn <- vapply(glev, function(g) sum(fin & in_grp(gvec, g)), integer(1))
+      is_va <- var_type == "continuous" && pn %in% va_cols
       cells <- vapply(glev, function(g) {
         sel <- fin & in_grp(gvec, g)
         x <- v_num[sel]
@@ -296,16 +382,25 @@ create_summary_table <- function(df, params_clean, type_map,
         if (var_type == "continuous") {
           ms <- if (weighted) .wmean_sd(x, w[sel])
                 else c(mean(x), if (length(x) > 1) stats::sd(x) else NA_real_)
-          paste0(round(ms[1], 2), " ± ", if (is.finite(ms[2])) round(ms[2], 2) else "n/a")
+          # acuity in logMAR: the Snellen geometric mean, the logMAR mean ± SD
+          # and the range in Snellen (D16); a weighted cell's range is over
+          # the eyes with a positive weight
+          if (is_va) {
+            xr <- if (weighted) x[is.finite(w[sel]) & w[sel] > 0] else x
+            return(fmt_va(ms[1], ms[2], if (length(xr)) min(xr) else NA, if (length(xr)) max(xr) else NA))
+          }
+          paste0(fmt_fix(ms[1]), " ± ", fmt_fix(ms[2]))
         } else {
           q <- if (weighted) .wquantile(x, w[sel], c(.5, .25, .75))
                else c(stats::median(x), stats::quantile(x, .25), stats::quantile(x, .75))
-          paste0(round(q[1], 2), " [", round(q[2], 2), "–", round(q[3], 2), "]")
+          fmt_quartiles(q)
         }
       }, character(1))
       cells <- with_n(cells, nn)
       tt <- if (weighted) .weighted_wald(v_num, gvec, w, ids, "gaussian", ranks = var_type == "ordinal",
                                          unit = cl_unit)
+            else if (clustered_row(fin & !is.na(gvec), ids, unit_tag))
+              .clustered_test(v_num, gvec, ids, var_type, matched = matched)
             else group_test(v_num, gvec, var_type)
       return(mk_row(cells, tt$p, tt$test, note = tt$note))
     }
@@ -320,14 +415,16 @@ create_summary_table <- function(df, params_clean, type_map,
         sel <- present & in_grp(gvec, glev[j])
         if (weighted) {
           wn <- sum(w[sel], na.rm = TRUE); wc <- sum(w[sel & ev], na.rm = TRUE)
-          paste0(.fmt_w(wc), "/", .fmt_w(wn), " (", if (wn > 0) round(100 * wc / wn, 1) else NA, "%)")
+          paste0(.fmt_w(wc), "/", .fmt_w(wn), " (", fmt_pct(wc, wn), ")")
         } else {
           nn <- sum(sel); c_ <- sum(sel & ev)
-          paste0(c_, "/", nn, " (", if (nn > 0) round(100 * c_ / nn, 1) else NA, "%)")
+          paste0(c_, "/", nn, " (", fmt_pct(c_, nn), ")")
         }
       }, character(1))
       y <- ifelse(present, ev, NA)
       tt <- if (weighted) .weighted_wald(as.numeric(y), gvec, w, ids, "binomial", unit = cl_unit)
+            else if (clustered_row(present & !is.na(gvec), ids, unit_tag))
+              .clustered_test(y, gvec, ids, "dichotomous", matched = matched)
             else group_test(y, gvec, "dichotomous")
       return(mk_row(cells, tt$p, tt$test, param_label = paste0(pl, " (", lev, ")"), note = tt$note))
     }
@@ -342,7 +439,9 @@ create_summary_table <- function(df, params_clean, type_map,
       # no weighted test for more than two levels - and every untested row
       # states its true reason (a constant variable is "constant" here too)
       why_w <- if (weighted) p_value_guard(vv, gvec, "categorical") else ""
-      tt <- if (!weighted) group_test(vv, gvec, "categorical")
+      tt <- if (!weighted && clustered_row(!is.na(vv) & !is.na(gvec), ids, unit_tag))
+              .clustered_test(vv, gvec, ids, "categorical", matched = matched)
+            else if (!weighted) group_test(vv, gvec, "categorical")
             else if (nzchar(why_w)) list(p = NA_real_, test = p_guard_label(why_w), note = why_w)
             else if (length(levs) == 2)
               .weighted_wald(ifelse(is.na(vv), NA, as.numeric(vv == levs[2])), gvec, w, ids, "binomial",
@@ -355,10 +454,10 @@ create_summary_table <- function(df, params_clean, type_map,
           sel <- !is.na(vv) & in_grp(gvec, glev[j])
           if (weighted) {
             wn <- sum(w[sel], na.rm = TRUE); wc <- sum(w[sel & vv == lev], na.rm = TRUE)
-            paste0(.fmt_w(wc), "/", .fmt_w(wn), " (", if (wn > 0) round(100 * wc / wn, 1) else NA, "%)")
+            paste0(.fmt_w(wc), "/", .fmt_w(wn), " (", fmt_pct(wc, wn), ")")
           } else {
             nn <- sum(sel); c_ <- sum(sel & vv == lev)
-            paste0(c_, "/", nn, " (", if (nn > 0) round(100 * c_ / nn, 1) else NA, "%)")
+            paste0(c_, "/", nn, " (", fmt_pct(c_, nn), ")")
           }
         }, character(1))
         r <- mk_row(cells, if (i == 1) tt$p else NA_real_,
@@ -381,6 +480,31 @@ create_summary_table <- function(df, params_clean, type_map,
 }
 
 safe_colname_vec <- function(x, max_chars = 60) vapply(x, safe_colname, character(1), max_chars = max_chars)
+
+# The table tests a configuration runs (decision D12): "classical" when
+# cfg$table_tests is "classical" or the patient clustering is switched off
+# (cluster_by_patient = FALSE, which leaves the figures unclustered too, so a
+# table and a figure still agree); otherwise "auto" (the default; a missing or
+# unknown value reads as "auto").
+table_tests_of <- function(cfg) {
+  if (!isTRUE(as.logical(unlist(cfg$cluster_by_patient %||% TRUE))[1])) return("classical")
+  tt <- tolower(trimws(as.character(unlist(cfg$table_tests %||% "auto"))[1]))
+  if (identical(tt, "classical")) "classical" else "auto"
+}
+# The same in words, for the run log and the Manifest.
+table_tests_text <- function(cfg, has_pid = TRUE) {
+  classical <- "Welch t-test / Welch ANOVA, Wilcoxon / Kruskal-Wallis, chi-squared / Fisher's exact"
+  if (table_tests_of(cfg) == "classical")
+    return(paste0("classical (", classical, ") for every unweighted row",
+                  if (!isTRUE(as.logical(unlist(cfg$cluster_by_patient %||% TRUE))[1]))
+                    " - patient clustering is switched off" else ""))
+  if (!isTRUE(has_pid))
+    return(paste0("classical (", classical, ") - no patient ID is mapped, so eyes are treated as independent"))
+  paste0("auto - patient-clustered GEE (continuous: Gaussian; ordinal: on ranks; dichotomous: ",
+         "binomial; categorical: stacked level indicators; more than two groups: joint test) for ",
+         "every per-eye row in which a patient has two analysed eyes; classical (", classical,
+         ") for one eye per patient and for per-patient rows")
+}
 
 # ------------------------------------------------------------
 # Initial summary (patients, eyes, age, follow-up, sex, groups)
@@ -417,11 +541,13 @@ make_initial_summary <- function(df, patient_id_clean, age_clean, fu_clean, sex_
     }
   }
 
-  age_mean <- ifelse(is.finite(mean(age, na.rm = TRUE)), round(mean(age, na.rm = TRUE), 2), NA)
-  age_sd   <- ifelse(is.finite(sd(age, na.rm = TRUE)),   round(sd(age, na.rm = TRUE), 2), NA)
+  # fixed decimals (D24): two for means and SDs, as in the summary tables
+  fx <- function(v) if (is.finite(v)) fmt_fix(v) else NA
+  age_mean <- fx(mean(age, na.rm = TRUE))
+  age_sd   <- fx(suppressWarnings(sd(age, na.rm = TRUE)))
   age_min  <- suppressWarnings(min(age, na.rm = TRUE)); age_max <- suppressWarnings(max(age, na.rm = TRUE))
-  fu_mean  <- ifelse(is.finite(mean(fu, na.rm = TRUE)), round(mean(fu, na.rm = TRUE), 2), NA)
-  fu_sd    <- ifelse(is.finite(sd(fu, na.rm = TRUE)),   round(sd(fu, na.rm = TRUE), 2), NA)
+  fu_mean  <- fx(mean(fu, na.rm = TRUE))
+  fu_sd    <- fx(suppressWarnings(sd(fu, na.rm = TRUE)))
   fu_med   <- ifelse(is.finite(median(fu, na.rm = TRUE)), round(median(fu, na.rm = TRUE), 2), NA)
   fu_q1    <- ifelse(any(is.finite(fu)), round(quantile(fu, .25, na.rm = TRUE), 2), NA)
   fu_q3    <- ifelse(any(is.finite(fu)), round(quantile(fu, .75, na.rm = TRUE), 2), NA)
@@ -435,8 +561,9 @@ make_initial_summary <- function(df, patient_id_clean, age_clean, fu_clean, sex_
     Value = c(num_patients, num_eyes, age_mean, age_sd,
               ifelse(is.finite(age_min) && is.finite(age_max), paste(age_min, "-", age_max), NA),
               fu_mean, fu_sd,
+              # fixed decimals like every median [IQR] cell (fmt_quartiles, D24)
               ifelse(is.finite(fu_med) && is.finite(fu_q1) && is.finite(fu_q3),
-                     paste0(fu_med, " [", fu_q1, "–", fu_q3, "]"), NA)),
+                     fmt_quartiles(c(fu_med, fu_q1, fu_q3)), NA)),
     stringsAsFactors = FALSE
   )
 
@@ -646,16 +773,25 @@ make_binary_01 <- function(x, positive_level = NULL, logger = NULL, var = "") {
 
 # TRUE when matching weights are applied to the clustered models of `df` and
 # are not all 1: those models are weighted fits with an INDEPENDENCE working
-# correlation (contract R4-1, the MatchIt-recommended estimator); every other
-# clustered model keeps the exchangeable working correlation.
+# correlation (contract R4-1, the MatchIt-recommended estimator). Every model
+# of a matched cohort uses the independence working correlation too, weighted
+# or not (decision D18: robust SE clustered by patient; matched sets are not
+# clusters); the unmatched models keep the exchangeable one.
 gee_weighted_independence <- function(df, use_weights = FALSE) {
   isTRUE(use_weights) && "weights" %in% names(df) && weights_nonunit(df$weights)
 }
 # The working correlation of those models, for the GEE sheets' note and the
-# Manifest: "independence (weighted)" or "exchangeable".
-gee_corstr_label <- function(df, use_weights = FALSE) {
-  if (gee_weighted_independence(df, use_weights)) "independence (weighted)" else "exchangeable"
+# Manifest: "independence (weighted)", "independence (matched cohort)" or
+# "exchangeable".
+gee_corstr_label <- function(df, use_weights = FALSE, matched = FALSE) {
+  if (gee_weighted_independence(df, use_weights)) "independence (weighted)"
+  else if (isTRUE(matched)) "independence (matched cohort)"
+  else "exchangeable"
 }
+# The output-note sentence of decision D18.
+MATCHED_ANALYSIS_NOTE <- paste0(
+  "Matched analyses use an independence working correlation with robust standard errors ",
+  "clustered by patient; matched sets (pairs) are not used as clusters.")
 
 # The reference (baseline) level the model of a group factor uses.
 .ref_level <- function(g) {
@@ -724,35 +860,94 @@ gee_corstr_label <- function(df, use_weights = FALSE) {
   }))
 }
 
+# Every term of a fitted GEE with its robust SE, test and 95% CI, in the run's
+# small-sample inference (decision D11; helpers.R gee_vcov):
+#   "md"   (default): Mancl-DeRouen SE; statistic = estimate / SE with a t
+#          reference on df = patients - coefficients; CI = estimate +- t(.975,
+#          df) SE;
+#   "none": geepack's uncorrected SE, its Wald chi-square statistic and P, and
+#          CI = estimate +- 1.96 SE (v1.0.0).
+# The columns df (NA for "none") and Inference ("robust SE (Mancl-DeRouen), t
+# reference" / "robust SE") name it on the GEE and regression sheets.
+# unit: what a cluster is, for the reason below. When the corrected covariance
+# cannot be computed, or the model has no more patients than coefficients
+# (no t reference), the SE, P and CI are NA and attr "why" says why; the
+# callers report the model as not estimable.
 extract_gee_tidy <- function(fit, family_name = c("gaussian","binomial"),
-                             outcome_name = NA_character_) {
+                             outcome_name = NA_character_, unit = "patient") {
   family_name <- match.arg(family_name)
-  sm <- summary(fit)
-  cf <- as.data.frame(sm$coefficients)
-  cf$term <- rownames(cf); rownames(cf) <- NULL
-  est_col  <- grep("Estimate", names(cf), value = TRUE)[1]
-  se_col   <- grep("Std", names(cf), value = TRUE)[1]
-  stat_col <- grep("Wald|Robust z|z value|t value", names(cf), value = TRUE)[1]
-  p_col    <- grep("Pr\\(", names(cf), value = TRUE)[1]
-  out <- tibble::tibble(
-    Outcome = outcome_name, term = cf$term,
-    estimate  = suppressWarnings(as.numeric(cf[[est_col]])),
-    std.error = suppressWarnings(as.numeric(cf[[se_col]])),
-    statistic = suppressWarnings(as.numeric(cf[[stat_col]])),
-    p.value   = suppressWarnings(as.numeric(cf[[p_col]]))
-  )
+  mode <- gee_small_sample()
+  why <- ""
+  lone_attr <- character(0)
+  if (identical(mode, "none")) {
+    sm <- summary(fit)
+    cf <- as.data.frame(sm$coefficients)
+    cf$term <- rownames(cf); rownames(cf) <- NULL
+    est_col  <- grep("Estimate", names(cf), value = TRUE)[1]
+    se_col   <- grep("Std", names(cf), value = TRUE)[1]
+    stat_col <- grep("Wald|Robust z|z value|t value", names(cf), value = TRUE)[1]
+    p_col    <- grep("Pr\\(", names(cf), value = TRUE)[1]
+    out <- tibble::tibble(
+      Outcome = outcome_name, term = cf$term,
+      estimate  = suppressWarnings(as.numeric(cf[[est_col]])),
+      std.error = suppressWarnings(as.numeric(cf[[se_col]])),
+      statistic = suppressWarnings(as.numeric(cf[[stat_col]])),
+      p.value   = suppressWarnings(as.numeric(cf[[p_col]])),
+      df = NA_real_)
+  } else {
+    b <- stats::coef(fit)
+    out <- tibble::tibble(Outcome = outcome_name, term = names(b), estimate = unname(b),
+                          std.error = NA_real_, statistic = NA_real_, p.value = NA_real_,
+                          df = NA_real_)
+    nd <- gee_df_note(length(unique(fit$id)), length(b), unit, mode)
+    V <- if (is.null(nd)) gee_vcov(fit, mode) else NULL
+    why <- if (!is.null(nd)) nd else if (is.null(V)) .gee_inf$err else ""
+    if (!is.null(V)) {
+      dfr <- gee_ref_df(fit)
+      se <- sqrt(pmax(diag(V), 0))
+      out$std.error <- unname(se)
+      out$statistic <- unname(b / se)
+      out$df <- dfr
+      out$p.value <- 2 * stats::pt(-abs(out$statistic), dfr)
+      # the term of a level held by one patient (leverage 1; helpers.R
+      # gee_lone_terms) has a degenerate SE: no SE, P or CI; attr "lone" names
+      # them for the callers' notes (a one-patient group's term is blanked by
+      # the callers' own rule)
+      lone <- intersect(gee_lone_terms(fit), out$term)
+      if (length(lone)) {
+        k <- out$term %in% lone
+        out$std.error[k] <- NA_real_; out$statistic[k] <- NA_real_; out$p.value[k] <- NA_real_
+        lone_attr <- lone
+      }
+    }
+  }
+  mult <- gee_ci_mult(out$df[1], mode)
+  # CI: the effect as the tables print it (decision D24), "β = 30.93 (95% CI,
+  # 29.95 to 31.91)" / "OR = 3.02 (95% CI, 1.21 to 7.57)", on the sheet under
+  # the header "Effect (95% CI)"; the numeric columns stay for machine reading
+  eff_txt <- function(kind, v, lo, hi) ifelse(is.finite(v), fmt_effect(kind, v, lo, hi), NA_character_)
   if (family_name == "binomial") {
     out <- out %>% dplyr::mutate(
       Effect = "OR", EffectValue = exp(estimate),
-      CI_low = exp(estimate - 1.96 * std.error), CI_high = exp(estimate + 1.96 * std.error),
-      CI = fmt_ci(CI_low, CI_high, 3))
+      CI_low = exp(estimate - mult * std.error), CI_high = exp(estimate + mult * std.error),
+      CI = eff_txt("OR", EffectValue, CI_low, CI_high))
   } else {
     out <- out %>% dplyr::mutate(
-      Effect = "Beta", EffectValue = estimate,
-      CI_low = estimate - 1.96 * std.error, CI_high = estimate + 1.96 * std.error,
-      CI = fmt_ci(CI_low, CI_high, 3))
+      Effect = "β", EffectValue = estimate,
+      CI_low = estimate - mult * std.error, CI_high = estimate + mult * std.error,
+      CI = eff_txt("beta", EffectValue, CI_low, CI_high))
   }
+  out$Inference <- gee_se_label(1, mode)
+  if (nzchar(why)) attr(out, "why") <- why
+  if (length(lone_attr)) attr(out, "lone") <- lone_attr
   out
+}
+
+# The model note of a covariate term held by one patient (extract_gee_tidy
+# attr "lone"): its estimate stays, its SE, P and CI are not reported.
+GEE_LONE_NOTE <- "SE not estimable - this level is held by 1 patient"
+.lone_note <- function(unit = "patient") {
+  if (identical(unit, "eye")) sub("1 patient", "1 eye", GEE_LONE_NOTE, fixed = TRUE) else GEE_LONE_NOTE
 }
 
 # Clustered GEE of each outcome on the predictors (the group factor and any
@@ -774,11 +969,15 @@ extract_gee_tidy <- function(fit, family_name = c("gaussian","binomial"),
 # use_weights: fit with the matching weights when the data carry them; weights
 # that are not all 1 make the model a weighted fit with an INDEPENDENCE working
 # correlation (R4-1, see gee_weighted_independence), otherwise exchangeable.
+# matched = TRUE: a matched cohort - independence working correlation whether
+# weighted or not, robust SE clustered by patient (decision D18).
+# SE, P and CI take the run's small-sample inference (extract_gee_tidy; D11).
 # display_names: optional clean key -> original header map (R4-3) for the
 # Outcome and Covariates columns, the model notes and the covariate terms.
 run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clean,
                            patient_id_clean, dicho_pref_clean = list(),
-                           use_weights = FALSE, logger = message, display_names = NULL) {
+                           use_weights = FALSE, logger = message, display_names = NULL,
+                           matched = FALSE) {
   dn <- function(x) disp_name(x, display_names)
   cs <- .cluster_setup(df, patient_id_clean, logger)
   df <- cs$df
@@ -793,14 +992,15 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
   grp_all <- if (has_g) .groups_with_data(df$GroupLabel) else character(0)
   lev_all <- if (has_g) levels(df$GroupLabel) else character(0)
   w_ind <- gee_weighted_independence(df, use_weights)
+  ind <- w_ind || isTRUE(matched)
   res_list <- list()
   # Covariates = the adjustment set actually in that row's model; Note = the
   # few-patients caution of a reported comparison (see helpers.R)
   na_row <- function(outc, eff, model) tibble::tibble(
     Outcome = dn(outc), term = NA_character_, estimate = NA_real_, std.error = NA_real_,
-    statistic = NA_real_, p.value = NA_real_, Effect = eff, EffectValue = NA_real_,
-    CI_low = NA_real_, CI_high = NA_real_, CI = NA_character_, Model = model,
-    Covariates = NA_character_, Note = NA_character_)
+    statistic = NA_real_, p.value = NA_real_, df = NA_real_, Effect = eff, EffectValue = NA_real_,
+    CI_low = NA_real_, CI_high = NA_real_, CI = NA_character_, Inference = NA_character_,
+    Model = model, Covariates = NA_character_, Note = NA_character_)
   # one row per comparison `cmp` (term GroupLabel<g>), all with the same text
   cmp_rows <- function(outc, eff, why, cmp) {
     if (!length(cmp)) return(na_row(outc, eff, why))
@@ -828,7 +1028,7 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
     preds <- setdiff(preds, outc)
     if (length(preds) == 0) next
     bin <- out_type == "dichotomous"
-    eff <- if (bin) "OR" else "Beta"
+    eff <- if (bin) "OR" else "β"
     fam <- if (bin) "binomial" else "gaussian"
     grp_in <- has_g && "GroupLabel" %in% preds
     cmp_all <- if (grp_in) setdiff(grp_all, ref_g) else character(0)
@@ -951,16 +1151,29 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
       next
     }
     fit <- fit_gee(f, df2, id_col, fam, use_weights,
-                   corstr = if (w_ind) "independence" else "exchangeable")
+                   corstr = if (ind) "independence" else "exchangeable")
     if (is.null(fit)) {
       res_list[[outc]] <- dplyr::bind_rows(na_row(outc, eff, paste0(note, "Model failed: ",
         if (nzchar(.gee_err$msg %||% "")) .gee_err$msg else "did not converge")), left_out, empty_rows)
       next
     }
-    t <- extract_gee_tidy(fit, fam, dn(outc))
+    t <- extract_gee_tidy(fit, fam, dn(outc), cs$unit)
+    # covariate levels held by one patient: estimate only (extract_gee_tidy)
+    lone <- setdiff(attr(t, "lone") %||% character(0), paste0("GroupLabel", names(one_pt)))
+    # no corrected covariance or no t reference (too few patients for the
+    # coefficients): no comparison of this outcome is estimated, and every
+    # row says why
+    why_t <- attr(t, "why") %||% ""
+    if (nzchar(why_t)) {
+      res_list[[outc]] <- dplyr::bind_rows(skip_all(why_t, except = c(empty, names(un$out))),
+                                           left_out, empty_rows)
+      next
+    }
     t$Model <- paste0(note,
                       if (w_ind) paste0(if (bin) "GEE Binomial" else "GEE Gaussian",
                                         ", working correlation: independence (weighted)")
+                      else if (ind) paste0(if (bin) "GEE Binomial" else "GEE Gaussian",
+                                           ", working correlation: independence (matched cohort)")
                       else if (bin) "GEE Binomial (exchangeable)" else "GEE Gaussian (exchangeable)",
                       cl_note)
     adj <- setdiff(preds, "GroupLabel")
@@ -976,8 +1189,9 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
       big <- abs(t$estimate) > log(1e4) & !(t$term %in% c(num_p, paste0("`", num_p, "`")))
       unrep <- !is.finite(t$EffectValue) | !is.finite(t$CI_low) | !is.finite(t$CI_high) |
         t$EffectValue <= 0 | t$CI_low <= 0
+      # (a level held by one patient has no SE by design: only its size counts)
       bad <- !is.na(t$term) & t$term != "(Intercept)" &
-        (!is.finite(t$estimate) | !is.finite(t$std.error) | big | unrep)
+        (big | (!(t$term %in% lone) & (!is.finite(t$estimate) | !is.finite(t$std.error) | unrep)))
       bad[is.na(bad)] <- FALSE
       if (any(bad)) {
         t$statistic[bad] <- NA_real_; t$p.value[bad] <- NA_real_
@@ -987,6 +1201,8 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
       }
     }
     t$Note <- NA_character_
+    k_lone <- !is.na(t$term) & t$term %in% lone & is.finite(t$EffectValue)
+    if (any(k_lone)) t$Model[k_lone] <- paste0(t$Model[k_lone], ". ", .lone_note(cs$unit))
     if ("GroupLabel" %in% preds) {
       # the comparison with a one-patient group is not reported (the other
       # terms of the same fit are, unchanged)
@@ -1017,11 +1233,11 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
 
 .gee_err <- new.env(parent = emptyenv())
 
-# corstr: the working correlation - "exchangeable" (default: unweighted and
-# unit-weight models) or "independence" (models weighted by matching weights
-# that are not all 1, R4-1). The fit's console output never reaches stdout
-# (quiet_eval); a failure's message, with what geepack printed, is left in
-# .gee_err$msg on one line.
+# corstr: the working correlation - "exchangeable" (default: unmatched models)
+# or "independence" (every model of a matched cohort, D18, and models weighted
+# by matching weights that are not all 1, R4-1). The fit's console output never
+# reaches stdout (quiet_eval); a failure's message, with what geepack printed,
+# is left in .gee_err$msg on one line.
 fit_gee <- function(f, df2, patient_id_clean, family_name, use_weights, corstr = "exchangeable") {
   .gee_err$msg <- ""
   fam <- if (family_name == "binomial") binomial else gaussian
@@ -1046,7 +1262,7 @@ fit_gee <- function(f, df2, patient_id_clean, family_name, use_weights, corstr =
           invokeRestart("muffleWarning"))
     } else {
       geepack::geeglm(formula = f, data = df2, id = .gee_id,
-                      family = fam, corstr = "exchangeable")
+                      family = fam, corstr = corstr)
     }
   })
   if (is.null(q$value)) .gee_err$msg <- quiet_error_text(q)
@@ -1055,20 +1271,35 @@ fit_gee <- function(f, df2, patient_id_clean, family_name, use_weights, corstr =
 
 # Effect + p label per outcome for the group term(s). group_term may name
 # several terms (e.g. c("GroupLabelB", "GroupLabelC") with > 2 groups): each
-# outcome then gets one line per comparison, prefixed with the group name.
+# outcome then gets one line per comparison, prefixed with the group name, and
+# its P values are Holm-adjusted across that outcome's comparisons with the
+# reference and tagged "[Holm]" (decision D14), as on the figures; an outcome
+# with a single estimable comparison prints it as is. The GEE sheets keep the
+# nominal P.
 build_gee_lookup <- function(gee_df, group_term) {
   empty <- tibble::tibble(Outcome = character(0), gee_effect_label = character(0),
                           gee_p_label = character(0))
   if (is.null(gee_df) || nrow(gee_df) == 0 || !("term" %in% names(gee_df))) return(empty)
   rows <- gee_df %>%
-    dplyr::filter(!is.na(Outcome), !is.na(term), term %in% group_term) %>%
+    dplyr::filter(!is.na(Outcome), !is.na(term), term %in% group_term)
+  p_shown <- rows$p.value
+  holm <- rep(FALSE, nrow(rows))
+  if (length(group_term) > 1) for (oc in unique(rows$Outcome)) {
+    k <- which(rows$Outcome == oc & is.finite(rows$p.value) & !is.na(rows$EffectValue))
+    if (length(k) >= 2) {
+      p_shown[k] <- stats::p.adjust(rows$p.value[k], method = "holm")
+      holm[k] <- TRUE
+    }
+  }
+  rows <- rows %>%
     dplyr::mutate(
+      # one effect style for every table (D24): "β = -9.98 (95% CI, -29.04
+      # to 9.08)" / "OR = 3.02 (95% CI, 1.21 to 7.57)"
       gee_effect_label = dplyr::case_when(
         is.na(EffectValue) ~ "not estimable",
-        Effect == "OR" ~ paste0("OR = ", fmt_num(EffectValue, 3), " ", CI),
-        Effect %in% c("Beta","β") ~ paste0("β = ", fmt_num(EffectValue, 3), " ", CI),
-        TRUE ~ paste0(fmt_num(EffectValue, 3), " ", CI)),
-      gee_p_label = dplyr::coalesce(fmt_p(p.value), ""))
+        Effect == "OR" ~ fmt_effect("OR", EffectValue, CI_low, CI_high),
+        TRUE ~ fmt_effect("beta", EffectValue, CI_low, CI_high)),
+      gee_p_label = paste0(dplyr::coalesce(fmt_p(p_shown), ""), ifelse(holm, " [Holm]", "")))
   if (length(group_term) > 1 && nrow(rows) > 0) {
     rows <- rows %>%
       dplyr::mutate(.cmp = sub("^GroupLabel", "", term), .ord = match(term, group_term)) %>%
@@ -1129,13 +1360,27 @@ merge_gee_into_summary_table <- function(summary_tbl, gee_lookup) {
 #   outcome ~ GroupLabel (factor) + covariates
 # Continuous outcome -> linear GEE (beta); dichotomous -> logistic
 # GEE (OR). Ordinal/categorical outcomes are skipped with a note.
+# SE, P and CI take the run's small-sample inference (extract_gee_tidy; D11).
+# Every adjusted comparison also gets the crude (unadjusted) GEE estimate
+# fitted on the SAME complete-case eyes (decision D17: "Crude effect, same
+# eyes (95% CI)", "Crude P, same eyes"), so the crude-versus-adjusted contrast
+# shows confounding, not case selection; "n" is the adjusted model's eyes.
+# With more than two groups the column "P value (Holm)" adjusts each outcome's
+# comparisons with the reference (decision D14; blank when fewer than two of
+# them are estimable); "P value" stays nominal. The crude P values get their
+# own Holm column, "Crude P (Holm), same eyes", on the same footing.
+# matched = TRUE: a matched cohort - independence working correlation (D18).
 # Returns list(pub = publish-ready table, full = all model terms,
 #              n_flagged = # models with a small-sample warning).
 # ------------------------------------------------------------
+REG_CRUDE_EFF <- "Crude effect, same eyes (95% CI)"
+REG_CRUDE_P <- "Crude P, same eyes"
+REG_HOLM_P <- "P value (Holm)"
+REG_CRUDE_HOLM_P <- "Crude P (Holm), same eyes"
 run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_clean,
                                   patient_id_clean, dicho_pref_clean = list(),
                                   glevels, use_weights = FALSE, logger = message,
-                                  display_names = NULL) {
+                                  display_names = NULL, matched = FALSE) {
   dn <- function(x) disp_name(x, display_names)
   ref <- glevels[1]
   pub <- list(); full <- list(); n_flagged <- 0
@@ -1149,6 +1394,11 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
   lev_all <- unique(c(as.character(glevels), sort(grp_present)))
   cmp_all <- setdiff(intersect(lev_all, grp_present), ref)
   w_ind <- gee_weighted_independence(df, use_weights)
+  ind <- w_ind || isTRUE(matched)
+  multi_cmp <- length(cmp_all) > 1
+  pub_cols <- c("Outcome", "Comparison", "Adjusted effect (95% CI)", "P value",
+                if (multi_cmp) REG_HOLM_P, REG_CRUDE_EFF, REG_CRUDE_P,
+                if (multi_cmp) REG_CRUDE_HOLM_P, "n", "Note")
   skip_row <- function(outc, n, why) data.frame(
     Outcome = dn(outc), Comparison = "", `Adjusted effect (95% CI)` = "", `P value` = "",
     n = as.character(n), Note = why, check.names = FALSE)
@@ -1159,7 +1409,9 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
     `Adjusted effect (95% CI)` = "not estimable", `P value` = "",
     n = n_txt, Note = why, check.names = FALSE, row.names = NULL)
   # the rows of one outcome: a row for the whole outcome first, then one per
-  # comparison in the order of the groups
+  # comparison in the order of the groups; Holm across the outcome's estimable
+  # comparisons (the nominal P of each is in its hidden .p_num; the crude one's
+  # in .cp_num, adjusted the same way)
   add_rows <- function(rows) {
     rows <- Filter(function(r) !is.null(r) && nrow(r) > 0, rows)
     if (!length(rows)) return(invisible(NULL))
@@ -1167,6 +1419,17 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
     o <- match(r$Comparison, paste(cmp_all, "vs", ref))
     r <- r[order(!is.na(o), o), , drop = FALSE]
     rownames(r) <- NULL
+    num <- function(col) if (col %in% names(r)) suppressWarnings(as.numeric(r[[col]])) else rep(NA_real_, nrow(r))
+    if (multi_cmp) {
+      for (hp in list(c(".p_num", REG_HOLM_P), c(".cp_num", REG_CRUDE_HOLM_P))) {
+        pn <- num(hp[1])
+        ok <- is.finite(pn)
+        r[[hp[2]]] <- ""
+        if (sum(ok) >= 2) r[[hp[2]]][ok] <- fmt_p(stats::p.adjust(pn[ok], method = "holm"))
+      }
+    }
+    r$.p_num <- NULL
+    r$.cp_num <- NULL
     pub[[length(pub) + 1]] <<- r
     invisible(NULL)
   }
@@ -1332,8 +1595,9 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
     }
     note <- paste0(drop_note, caution)
 
-    fit <- fit_gee(fmla, df2, id_col, if (dich) "binomial" else "gaussian", use_weights,
-                   corstr = if (w_ind) "independence" else "exchangeable")
+    fam_r <- if (dich) "binomial" else "gaussian"
+    cstr <- if (ind) "independence" else "exchangeable"
+    fit <- fit_gee(fmla, df2, id_col, fam_r, use_weights, corstr = cstr)
     # one count per model, whether it carries a caution, failed, or both
     if (nzchar(caution) || is.null(fit)) n_flagged <- n_flagged + 1
     if (is.null(fit)) {
@@ -1343,9 +1607,32 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
         unest_rows(), empty_rows))
       next
     }
-    td <- extract_gee_tidy(fit, if (dich) "binomial" else "gaussian", dn(outc))
-    td$Model <- paste0(if (dich) "Logistic GEE (OR)" else "Linear GEE (beta)",
-                       if (w_ind) ", working correlation: independence (weighted)" else "")
+    td <- extract_gee_tidy(fit, fam_r, dn(outc), cs$unit)
+    # no corrected covariance, or too few patients for the t reference: the
+    # model is fitted but none of its comparisons can be tested (D11)
+    why_t <- attr(td, "why") %||% ""
+    if (nzchar(why_t)) {
+      add_rows(list(whole(paste0(drop_note, "Skipped: not estimable - ", why_t), n_txt,
+                          except = c(empty, names(un$out))), unest_rows(), empty_rows))
+      next
+    }
+    td$Model <- paste0(if (dich) "Logistic GEE (OR)" else "Linear GEE (β)",
+                       if (w_ind) ", working correlation: independence (weighted)"
+                       else if (ind) ", working correlation: independence (matched cohort)" else "")
+    # covariate levels held by one patient: estimate only (extract_gee_tidy)
+    k_lone <- !is.na(td$term) & td$term %in% setdiff(attr(td, "lone") %||% character(0),
+                                                     paste0("GroupLabel", names(one_pt)))
+    if (any(k_lone)) td$Model[k_lone] <- paste0(td$Model[k_lone], ". ", .lone_note(cs$unit))
+    # the crude comparison on the SAME eyes (decision D17): the group alone, on
+    # the adjusted model's complete cases, with its weights and working
+    # correlation; NULL when it cannot be fitted or tested
+    tcr <- NULL
+    fit_c <- fit_gee(as.formula(paste0("`", outc, "` ~ GroupLabel")), df2, id_col, fam_r,
+                     use_weights, corstr = cstr)
+    if (!is.null(fit_c)) {
+      tcr <- extract_gee_tidy(fit_c, fam_r, dn(outc), cs$unit)
+      if (nzchar(attr(tcr, "why") %||% "")) tcr <- NULL
+    }
     # the term of a one-patient group is not reported (the other terms are)
     for (gn in names(one_pt)) {
       k <- !is.na(td$term) & td$term == paste0("GroupLabel", gn)
@@ -1384,35 +1671,59 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
       unstable <- dich && (!is.finite(row$estimate[1]) || !is.finite(row$std.error[1]) ||
                              abs(row$estimate[1]) > log(1e4))
       eff <- if (unstable) "not estimable"
-             else sprintf("%s = %s %s", ifelse(dich, "OR", "beta"),
-                          fmt_num(row$EffectValue[1], 2), fmt_ci(row$CI_low[1], row$CI_high[1], 2))
+             else fmt_effect(if (dich) "OR" else "beta", row$EffectValue[1], row$CI_low[1], row$CI_high[1])
       # a reported comparison involving a group of few patients carries the caution
       few <- if (unstable || !is.finite(row$p.value[1])) "" else .pair_caution(df2, id_col, ref, g, cs$unit)
       if (nzchar(few)) few_flag <- TRUE
+      # the crude estimate on the same eyes, with the same backstop
+      crow <- if (is.null(tcr)) NULL else tcr[tcr$term == paste0("GroupLabel", g), , drop = FALSE]
+      c_ok <- !is.null(crow) && nrow(crow) == 1 && is.finite(crow$estimate[1]) &&
+        is.finite(crow$std.error[1]) && !(dich && abs(crow$estimate[1]) > log(1e4))
       rows[[length(rows) + 1]] <- data.frame(
         Outcome = dn(outc), Comparison = paste(g, "vs", ref),
         `Adjusted effect (95% CI)` = eff, `P value` = if (unstable) "" else fmt_p(row$p.value[1]),
+        .p_num = if (unstable) NA_real_ else row$p.value[1],
+        crude_eff = if (!c_ok) "not estimable"
+                    else fmt_effect(if (dich) "OR" else "beta", crow$EffectValue[1],
+                                    crow$CI_low[1], crow$CI_high[1]),
+        crude_p = if (c_ok) fmt_p(crow$p.value[1]) else "",
+        .cp_num = if (c_ok) crow$p.value[1] else NA_real_,
         n = n_txt,
         Note = if (unstable) paste0(note, if (nzchar(caution)) ". " else "",
                                     "Unstable estimate (quasi-separation) - effect not reported")
                else .join_note(note, few), check.names = FALSE)
+      names(rows[[length(rows)]])[match(c("crude_eff", "crude_p"), names(rows[[length(rows)]]))] <-
+        c(REG_CRUDE_EFF, REG_CRUDE_P)
     }
     add_rows(rows)
     # the few-patients caution is a small-sample caution too (counted once per model)
     if (few_flag && !nzchar(caution)) n_flagged <- n_flagged + 1
   }
-  list(pub = if (length(pub)) dplyr::bind_rows(pub) else data.frame(),
+  pub_df <- if (length(pub)) dplyr::bind_rows(pub) else data.frame()
+  if (nrow(pub_df)) {
+    # one column order for every row; a cell a row does not fill is blank
+    for (cc in setdiff(pub_cols, names(pub_df))) pub_df[[cc]] <- ""
+    for (cc in c(REG_HOLM_P, REG_CRUDE_EFF, REG_CRUDE_P, REG_CRUDE_HOLM_P))
+      if (cc %in% names(pub_df)) pub_df[[cc]][is.na(pub_df[[cc]])] <- ""
+    pub_df <- pub_df[, c(pub_cols, setdiff(names(pub_df), pub_cols)), drop = FALSE]
+  }
+  list(pub = pub_df,
        full = if (length(full)) dplyr::bind_rows(full) else data.frame(),
        n_flagged = n_flagged)
 }
 
-# Merge the adjusted-regression results into a summary table as two extra
-# columns (one line per group comparison when there are >2 groups).
+# Merge the adjusted-regression results into a summary table as extra columns
+# (one line per group comparison when there are >2 groups): the effect, its P
+# - Holm-adjusted across the outcome's comparisons with the reference and
+# tagged "[Holm]" when two or more are estimable (decision D14) - and the
+# number of eyes of the adjusted model (decision D17: the crude columns of the
+# same table may count more eyes).
 merge_regression_into_summary <- function(summary_tbl, reg_pub) {
   if (is.null(summary_tbl) || nrow(summary_tbl) == 0) return(summary_tbl)
   out <- summary_tbl
   out[["Adjusted effect (95% CI)"]] <- ""
   out[["Adjusted P"]] <- ""
+  out[["Adjusted model n (eyes)"]] <- ""
   if (is.null(reg_pub) || nrow(reg_pub) == 0 || !("Outcome" %in% names(reg_pub))) return(out)
   rp <- reg_pub[nzchar(reg_pub$Comparison %||% ""), , drop = FALSE]
   if (nrow(rp) == 0) return(out)
@@ -1421,9 +1732,18 @@ merge_regression_into_summary <- function(summary_tbl, reg_pub) {
     rows <- rp[rp$Outcome == oc, , drop = FALSE]
     pre <- if (multi) paste0(rows$Comparison, ": ") else ""
     eff <- paste0(pre, rows[["Adjusted effect (95% CI)"]], collapse = "\n")
-    pv  <- paste0(pre, rows[["P value"]], collapse = "\n")
+    ph <- if (REG_HOLM_P %in% names(rows)) as.character(rows[[REG_HOLM_P]]) else rep("", nrow(rows))
+    ph[is.na(ph)] <- ""
+    pv  <- paste0(pre, ifelse(nzchar(ph), paste0(ph, " [Holm]"), rows[["P value"]]), collapse = "\n")
+    # the eyes of the adjusted model: the n of its estimated comparisons
+    pvv <- as.character(rows[["P value"]])
+    est <- !is.na(pvv) & nzchar(pvv)
+    nn <- unique(as.character(rows$n[est & !is.na(rows$n)]))
     hit <- .rows_for(out, oc)
-    if (length(hit)) { out[hit, "Adjusted effect (95% CI)"] <- eff; out[hit, "Adjusted P"] <- pv }
+    if (length(hit)) {
+      out[hit, "Adjusted effect (95% CI)"] <- eff; out[hit, "Adjusted P"] <- pv
+      out[hit, "Adjusted model n (eyes)"] <- paste(nn, collapse = "; ")
+    }
   }
   out
 }
@@ -1445,6 +1765,77 @@ merge_regression_into_summary <- function(summary_tbl, reg_pub) {
 # pairing label -> the method each matched pairing ran).
 # ------------------------------------------------------------
 PSM_DEFAULT_SEED <- 20250601L
+
+# ---- propensity-score scale (decision D13) -------------------
+# psm_distance names a MatchIt distance as v1.0.0 did; the links are handed to
+# matchit() the way MatchIt 4 asks for them (distance = "glm", link = ...), and
+# the run and the live match preview (engine/match_preview.R) make the same
+# call:
+#   "linear.logit" (the default) -> glm, link "linear.logit": the score on
+#       the LOGIT scale, so the default caliper is 0.2 SD of the logit of the
+#       propensity score (Austin 2011);
+#   "logit" / "probit" / "cloglog" / "cauchit", and "glm" -> glm with that
+#       link (glm: logit): the score on the probability scale;
+#   "linear.probit" ... -> the linear predictor of that link;
+#   any other distance (gam, rpart, Mahalanobis, ...) as it is, with
+#       MatchIt's default link; NULL (exact / cem) stays NULL.
+PSM_DEFAULT_DISTANCE <- "linear.logit"
+PSM_LINKS <- c("logit", "probit", "cloglog", "cauchit")
+PSM_NON_SCORE <- c("mahalanobis", "robust_mahalanobis", "euclidean", "scaled_euclidean")
+.psm_distance_args <- function(distance) {
+  if (is.null(distance)) return(list(distance = NULL, link = "logit"))
+  d <- tolower(trimws(as.character(distance)[1]))
+  if (is.na(d) || !nzchar(d)) d <- PSM_DEFAULT_DISTANCE
+  if (d == "glm") return(list(distance = "glm", link = "logit"))
+  if (d %in% c(PSM_LINKS, paste0("linear.", PSM_LINKS))) return(list(distance = "glm", link = d))
+  list(distance = d, link = "logit")
+}
+
+# The scale of the score a distance matches on, in words: "logit of the
+# propensity score" (linear.logit), "linear predictor (probit link) of the
+# propensity score", "propensity score on the probability scale"; NA for a
+# distance that is not a propensity score (Mahalanobis, Euclidean ...).
+psm_score_scale <- function(distance) {
+  d <- tolower(trimws(as.character(distance %||% PSM_DEFAULT_DISTANCE)[1]))
+  if (is.na(d) || !nzchar(d)) d <- PSM_DEFAULT_DISTANCE
+  if (d %in% PSM_NON_SCORE) return(NA_character_)
+  if (startsWith(d, "linear.")) {
+    lk <- sub("^linear\\.", "", d)
+    return(if (lk == "logit") "logit of the propensity score"
+           else paste0("linear predictor (", lk, " link) of the propensity score"))
+  }
+  "propensity score on the probability scale"
+}
+
+# The propensity-score row of the balance table and love plot (cobalt calls it
+# "distance"): "Propensity score (logit)", "Propensity score (probability
+# scale)", "Propensity score (probit linear predictor)"; "distance" when the
+# distance is not a propensity score.
+psm_score_label <- function(distance) {
+  s <- psm_score_scale(distance)
+  if (is.na(s)) return("distance")
+  if (startsWith(s, "logit")) return("Propensity score (logit)")
+  if (startsWith(s, "linear predictor"))
+    return(paste0("Propensity score (", sub("^linear predictor \\((.*) link\\).*$", "\\1", s),
+                  " linear predictor)"))
+  "Propensity score (probability scale)"
+}
+
+# The caliper in words, for the PSM sheet and the Manifest:
+#   "0.2 SD of the logit of the propensity score" (standardized; raw = the
+#   width on that scale, MatchIt's m.out$caliper: " (= 0.185 on that scale)")
+#   "0.2 on the logit of the propensity score"     (not standardized)
+#   "none"                                         (no caliper)
+psm_caliper_text <- function(caliper, std_caliper = TRUE, distance = NULL, raw = NULL) {
+  cal <- suppressWarnings(as.numeric(unlist(caliper))[1])
+  if (!length(cal) || !is.finite(cal)) return("none")
+  s <- psm_score_scale(distance)
+  if (is.na(s)) s <- "distance"
+  r <- suppressWarnings(as.numeric(unlist(raw))[1])
+  paste0(format(cal), if (isTRUE(std_caliper)) " SD of the " else " on the ", s,
+         if (isTRUE(std_caliper) && length(r) && is.finite(r))
+           paste0(" (= ", format(signif(r, 3)), " on that scale)") else "")
+}
 
 # Matching settings as matchit() needs them. A blank / non-numeric ratio
 # (e.g. a cleared GUI box) becomes 1 and a blank caliper means no caliper;
@@ -1483,14 +1874,16 @@ PSM_DEFAULT_SEED <- 20250601L
     cal <- NA_real_
   }
   out["caliper"] <- list(if (is.finite(cal)) cal else NULL)
-  if (blank(psm$distance)) out$distance <- "glm"
+  # blank distance = the default: the logit of the propensity score (D13)
+  out$distance <- if (blank(psm$distance)) PSM_DEFAULT_DISTANCE else tolower(txt1(psm$distance))
   if (blank(psm$m_order)) out["m_order"] <- list(NULL)
   out$replace <- isTRUE(as.logical(psm$replace))
   out$std_caliper <- if (blank(psm$std_caliper)) TRUE else isTRUE(as.logical(psm$std_caliper))
 
-  # settings the user actually set (a value other than matchit()'s default)
-  # that this method ignores: named once in the log
-  set <- c(distance = !blank(psm$distance) && !identical(tolower(txt1(psm$distance)), "glm"),
+  # settings the user actually set (a value other than the default) that this
+  # method ignores: named once in the log
+  set <- c(distance = !blank(psm$distance) &&
+             !(tolower(txt1(psm$distance)) %in% c("glm", PSM_DEFAULT_DISTANCE)),
            ratio = !blank(psm$ratio) && !identical(num1(psm$ratio), 1),
            replace = isTRUE(out$replace),
            caliper = !blank(psm$caliper),
@@ -1575,9 +1968,11 @@ run_reference_pairwise_matching <- function(dat, glevels, reference_group,
                                paste0("'", disp_name(covs, display_names), "'", collapse = ", "),
                                PSM_CEM_AS_EXACT))
     err <- ""
+    # the score's scale (D13): "linear.logit" -> distance "glm", link "linear.logit"
+    da <- .psm_distance_args(psm$distance)
     m.out <- with_local_seed(psm$seed, tryCatch(
       MatchIt::matchit(formula = f_ps, data = sub_ps,
-                       method = meth, distance = psm$distance, ratio = psm$ratio,
+                       method = meth, distance = da$distance, link = da$link, ratio = psm$ratio,
                        replace = psm$replace, caliper = psm$caliper,
                        std.caliper = psm$std_caliper, m.order = psm$m_order),
       error = function(e) { err <<- conditionMessage(e); NULL }))

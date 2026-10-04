@@ -42,7 +42,7 @@ group_palette <- function(glv, cfg) {
 
 gr_theme <- function() {
   # MATLAB-like: full black panel box, inward ticks, bold text, light y-grid
-  ggplot2::theme_bw(base_size = 12.5) +
+  th <- ggplot2::theme_bw(base_size = 12.5) +
     ggplot2::theme(
       plot.title = ggplot2::element_text(face = "bold", hjust = .5, size = 13),
       axis.title = ggplot2::element_text(face = "bold", size = 11),
@@ -57,7 +57,13 @@ gr_theme <- function() {
       legend.background = ggplot2::element_rect(colour = "grey20", linewidth = .4),
       plot.background = ggplot2::element_rect(fill = "white", colour = NA),
       plot.margin = ggplot2::margin(6, 10, 4, 6))
+  # journal style (D20): no box around the plotting area, open L-shaped axes
+  # as on the bar panels
+  if (isTRUE(.gr_opts$journal)) th + gr_journal_axes() else th
 }
+gr_journal_axes <- function() ggplot2::theme(
+  panel.border = ggplot2::element_blank(),
+  axis.line = ggplot2::element_line(colour = "black", linewidth = .7))
 
 # ------------------------------------------------------------
 # Writing figure files. Every write is checked: an error, or a device that
@@ -82,7 +88,230 @@ gr_write_failed <- function(fn, why, logger = NULL, what = "Figure", count = TRU
   lg(sprintf("%s NOT written: %s (%s%s)", what, full, why, hint))
 }
 
-GR_FORMATS <- c("png", "tiff", "jpeg", "pdf")
+GR_FORMATS <- c("png", "tiff", "jpeg", "pdf", "eps")
+
+# ------------------------------------------------------------
+# Figure style and size of a run (decisions D20, D21), read once from cfg:
+#   figure_style "journal" (default): white background everywhere, no frame
+#     around a figure or a section, no section title bands or captions, no
+#     title line or method paragraph inside the double-angle / semicircle
+#     images, no shaded wedges; the method text, the panel titles and the
+#     abbreviations go to a legend file <figure>_legend.txt beside each
+#     figure (gr_write_legend). Text is never smaller than 6 pt at the width
+#     the figure is written at (GR_MIN_TEXT_PT).
+#   figure_style "annotated": the v1.0.0 look (frames, bands, in-image text).
+#   figure_width_cm: blank = the current sizes; a width (8.76, 12.69 and 17.77
+#     cm are the journal's column widths) lays every figure out AT that
+#     physical width - the composites with as many panels per row as fit
+#     (gr_composite_cols) - so the text keeps its point size; nothing is
+#     shrunk after drawing.
+#   graph_formats: png, tiff, jpeg, pdf, eps (vector); graph_dpi up to
+#     GR_DPI_MAX. Colour stays RGB: R cannot write CMYK files, so a journal's
+#     CMYK conversion is done outside the app.
+# ------------------------------------------------------------
+GR_FIGURE_STYLES <- c("journal", "annotated")
+GR_DPI_MAX <- 1200
+GR_DPI_MIN <- 50
+GR_MIN_TEXT_PT <- 6
+GR_WIDTH_CM_MAX <- 60
+gr_figure_settings <- function(cfg, logger = NULL) {
+  say <- function(m) if (!is.null(logger)) log_once(logger, m)
+  st <- tolower(trimws(as.character(unlist(cfg$figure_style %||% "journal"))[1]))
+  if (is.na(st) || !nzchar(st)) st <- "journal"
+  if (!(st %in% GR_FIGURE_STYLES)) {
+    say(sprintf("Figure style '%s' is not known (use journal or annotated) - journal is used.",
+                as.character(unlist(cfg$figure_style))[1]))
+    st <- "journal"
+  }
+  wr <- unlist(cfg$figure_width_cm)
+  wcm <- if (is.null(wr) || !length(wr) || is.na(wr[1]) || !nzchar(trimws(as.character(wr[1])))) NA_real_
+         else suppressWarnings(as.numeric(as.character(wr[1])))
+  if (length(wr) && !is.null(wr) && !is.na(wr[1]) && nzchar(trimws(as.character(wr[1]))) &&
+      (!is.finite(wcm) || wcm <= 0 || wcm > GR_WIDTH_CM_MAX)) {
+    say(sprintf("Figure width '%s' cm is not a width between 0 and %d cm - the figures keep their own sizes.",
+                as.character(wr[1]), GR_WIDTH_CM_MAX))
+    wcm <- NA_real_
+  }
+  dpi <- suppressWarnings(as.numeric(unlist(cfg$graph_dpi %||% 300))[1])
+  if (!is.finite(dpi)) { say("Graph resolution is not a number - 300 dpi is used."); dpi <- 300 }
+  if (dpi > GR_DPI_MAX) {
+    say(sprintf("Graph resolution %s dpi is above %d - %d dpi is used.", format(dpi), GR_DPI_MAX, GR_DPI_MAX))
+    dpi <- GR_DPI_MAX
+  } else if (dpi < GR_DPI_MIN) {
+    say(sprintf("Graph resolution %s dpi is below %d - %d dpi is used.", format(dpi), GR_DPI_MIN, GR_DPI_MIN))
+    dpi <- GR_DPI_MIN
+  }
+  list(style = st, journal = identical(st, "journal"), width_cm = wcm,
+       width_in = if (is.finite(wcm)) wcm / 2.54 else NA_real_,
+       formats = gr_normalise_formats(cfg$graph_formats %||% list("png"), if (is.null(logger)) function(m) NULL
+                                      else function(m) log_once(logger, m)),
+       dpi = dpi)
+}
+# The settings in words, for the run log and the Manifest.
+gr_figure_settings_text <- function(fs) {
+  paste0(if (fs$journal) "journal style (no frames, section bands, captions or shaded wedges; titles, method text and abbreviations in <figure>_legend.txt)"
+         else "annotated style (the v1.0.0 look)",
+         "; width ", if (is.finite(fs$width_cm))
+           paste0(format(fs$width_cm), " cm (laid out at that width; a combined figure taller than ",
+                  GR_PAGE_MAX_H_CM, " cm is split into pages _1, _2 ...)") else "as designed",
+         "; ", paste(toupper(fs$formats), collapse = ", "), " at ", format(fs$dpi), " dpi",
+         if ("eps" %in% fs$formats)
+           paste0(" (EPS vector; its semi-transparent points and regions are embedded as images at ",
+                  format(gr_eps_fallback_dpi(fs$dpi)), " dpi)") else "",
+         "; RGB color")
+}
+
+# ------------------------------------------------------------
+# Legend files (decision D20). In the journal style the text that is not drawn
+# inside a figure - its title, the method text of the double-angle and
+# semicircle plots, the panel titles of a composite, notes - is written to
+# <figure>_legend.txt beside it, followed by every abbreviation and symbol the
+# figure shows, defined, in alphabetical order and separated by semicolons
+# (the journal's legend format). The abbreviations are read from the text
+# actually drawn (gr_figure_texts), so the list never names one the figure
+# does not use.
+# ------------------------------------------------------------
+GR_ABBREV <- c(
+  "AoE" = "angle of error", "|AoE|" = "absolute angle of error",
+  "CDVA" = "corrected distance visual acuity", "CI" = "correction index",
+  "Cyl" = "refractive cylinder",
+  "d" = "Cohen's d (standardized mean difference)", "DEQ" = "defocus equivalent",
+  "N" = "number of eyes", "n" = "number of eyes",
+  "R²" = "coefficient of determination of the regression line",
+  "y and x (y = ax + b)" = "vertical-axis and horizontal-axis values of a group's least-squares regression line",
+  "DV" = "difference vector", "ESS" = "effective sample size",
+  "GEE" = "generalized estimating equations",
+  "logMAR" = "logarithm of the minimum angle of resolution", "med" = "median",
+  "B" = "number of bootstrap resamples",
+  "PE" = "prediction error of refractive astigmatism (postoperative - target)",
+  "Postop" = "postoperative", "Preop" = "preoperative", "RA" = "refractive astigmatism",
+  "RMS" = "root mean square", "SD" = "standard deviation", "SE" = "standard error",
+  "SEQ" = "spherical equivalent refraction", "SIA" = "surgically induced astigmatism",
+  "TIA" = "target induced astigmatism", "UDVA" = "uncorrected distance visual acuity",
+  "VA" = "visual acuity",
+  "x, y" = "doubled-angle components of the centroid, M cos 2θ and M sin 2θ (θ = plus axis)")
+GR_ABBREV_RE <- c("d" = "\\(d = |\\bd = -?[0-9]", "B" = "\\bB = [0-9]", "x, y" = "\\(x -?[0-9.]+; y ",
+                  "|AoE|" = "\\|AoE\\|", "N" = "(?<![A-Za-z])N( UDVA| CDVA)? ?= ?[0-9]",
+                  "n" = "(?<![A-Za-z])n ?= ?[0-9]|\\bn per group",
+                  "y and x (y = ax + b)" = "(?<![A-Za-z])y ?= ?-?[0-9.]+x")
+GR_SYMBOLS <- c("●" = "eyes of a group (and its color key)", "◆" = "centroid (mean vector)",
+                "[Holm]" = "P values Holm-adjusted for the comparisons with the reference group")
+
+# Method lines a panel's legend carries whatever its text (journal style): the
+# reference lines of the two scatters, and the bin rules of the two histograms
+# (decisions D20, D27), so an eye on a bin edge can be placed from the legend.
+GR_PANEL_NOTES <- list(
+  scatter = paste0("Solid blue line, y = x (attempted equals achieved); green lines, ±0.50 D; ",
+                   "magenta lines, ±1.00 D; dotted line, the least-squares regression line of each group."),
+  "10_CIhist" = paste0("Correction index bins are closed on the right: a bin labelled 0.16 to 0.30 holds ",
+                       "0.15 < CI ≤ 0.30, so a ratio of 0.153 is in it."),
+  "11_AEhist" = paste0("Angle-of-error bins include the edge nearer zero: 5° and -5° are in -5 to 5, ",
+                       "15° is in 5 to 15 and -15° in -15 to -5; the angle is positive when the SIA lies counterclockwise of the TIA."))
+gr_panel_notes <- function(nm) {
+  key <- if (nm %in% c("05_SEQregress", "09_CYLregress")) "scatter" else nm
+  if (key == "scatter" && nm == "09_CYLregress")
+    return(sub("attempted equals achieved", "SIA equals TIA", GR_PANEL_NOTES$scatter, fixed = TRUE))
+  GR_PANEL_NOTES[[key]] %||% character(0)
+}
+
+# the sort key of an abbreviation: its letters and digits, lower case
+gr_abbrev_key <- function(ab) tolower(gsub("[^A-Za-z0-9]", "", ab))
+
+# "Abbreviations: ...; Symbols: ..." for the texts `txt` (NULL when none occurs)
+gr_abbrev_line <- function(txt) {
+  txt <- as.character(unlist(txt)); txt <- txt[!is.na(txt) & nzchar(txt)]
+  if (!length(txt)) return(NULL)
+  all <- paste(txt, collapse = "\n")
+  has <- vapply(names(GR_ABBREV), function(a) {
+    re <- if (a %in% names(GR_ABBREV_RE)) GR_ABBREV_RE[[a]] else paste0("(?<![A-Za-z])", a, "(?![A-Za-z])")
+    grepl(re, all, perl = TRUE)
+  }, logical(1))
+  ab <- names(GR_ABBREV)[has]
+  # alphabetical by letters, case and signs ignored ("|AoE|" beside "AoE")
+  ab <- ab[order(gr_abbrev_key(ab))]
+  sy <- names(GR_SYMBOLS)[vapply(names(GR_SYMBOLS), function(s) grepl(s, all, fixed = TRUE), logical(1))]
+  parts <- c(if (length(ab)) paste0("Abbreviations: ", paste(sprintf("%s = %s", ab, GR_ABBREV[ab]), collapse = "; "), "."),
+             if (length(sy)) paste0("Symbols: ", paste(sprintf("%s = %s", sy, GR_SYMBOLS[sy]), collapse = "; "), "."))
+  if (length(parts)) parts else NULL
+}
+
+# Every text a figure draws (axis titles and labels, header lines, value
+# labels, N boxes): the labels of its text grobs, read from the built grob tree.
+gr_figure_texts <- function(p) {
+  g <- if (inherits(p, "ggplot")) tryCatch(ggplot2::ggplotGrob(p), error = function(e) NULL) else p
+  out <- character(0)
+  walk <- function(x, depth = 0) {
+    if (is.null(x) || depth > 60) return(invisible())
+    if (inherits(x, "mheader_fit"))
+      out <<- c(out, unlist(lapply(x$spec, function(cl) lapply(cl$lines, function(l)
+        paste(vapply(l, function(s) as.character(s$text), character(1)), collapse = "")))))
+    if (inherits(x, "stab_axis")) out <<- c(out, as.character(x$labs), unlist(x$nrows))
+    if (inherits(x, "stab_labels")) out <<- c(out, as.character(x$lab$lab))
+    # the header markers (HDR_MARKS) and the points of a group are drawn as
+    # symbols, not text: a filled circle (header marker, or plotted eyes) is
+    # "●", a pch-23 diamond "◆", so the legend's Symbols line defines them
+    if (inherits(x, "circle")) out <<- c(out, "●")
+    if (inherits(x, "points")) {
+      pch <- suppressWarnings(as.integer(unlist(x$pch)))
+      if (any(pch %in% 23L)) out <<- c(out, "◆")
+      if (any(pch %in% c(16L, 19L, 20L, 21L))) out <<- c(out, "●")
+    }
+    lab <- tryCatch(x$label, error = function(e) NULL)
+    if (is.character(lab)) out <<- c(out, lab)
+    if (inherits(x, "gtable")) for (k in x$grobs) walk(k, depth + 1)
+    kids <- tryCatch(x$children, error = function(e) NULL)
+    if (length(kids)) for (k in kids) walk(k, depth + 1)
+  }
+  tryCatch(walk(g), error = function(e) NULL)
+  unique(out[!is.na(out) & nzchar(out)])
+}
+
+# Write <base>_legend.txt (journal style only): the title, the method lines and
+# the abbreviations / symbols of `texts` (the figure's drawn text, e.g.
+# gr_figure_texts()) and of the method lines. cfg: optional, to read the style
+# when it is not the current figure pass's. Never stops a run: a failure is
+# logged. Returns the file written, or NULL.
+gr_write_legend <- function(base, title, lines = character(0), texts = character(0), cfg = NULL,
+                            logger = NULL) {
+  journal <- if (!is.null(cfg)) gr_figure_settings(cfg)$journal else isTRUE(.gr_opts$journal)
+  if (!journal) return(invisible(NULL))
+  lines <- as.character(unlist(lines)); lines <- lines[!is.na(lines) & nzchar(lines)]
+  # "95% CI" (a confidence interval) in the method text is not the correction index
+  scan <- c(texts, gsub("95% CI", "95% interval", lines, fixed = TRUE))
+  body <- c(as.character(title)[1], lines, gr_abbrev_line(scan))
+  fn <- paste0(base, "_legend.txt")
+  ok <- tryCatch({
+    con <- file(fn, open = "w", encoding = "UTF-8")
+    on.exit(close(con), add = TRUE)
+    writeLines(body, con)
+    TRUE
+  }, error = function(e) {
+    lg <- if (is.function(logger)) logger else message
+    lg(sprintf("Figure legend NOT written: %s (%s)", normalizePath(fn, winslash = "\\", mustWork = FALSE),
+               conditionMessage(e)))
+    FALSE
+  })
+  if (isTRUE(ok)) invisible(fn) else invisible(NULL)
+}
+
+# The legend lines that name the inference behind a figure's P values (decision
+# D11; D18), from its drawn text `texts`: "GEE P values: clustered by patient;
+# <gee_inference_text>." when a GEE P value is printed (a label that only says
+# "GEE not fitted" does not count), and on a matched pass the matched-analysis
+# note. Without patient ids in scope a (weighted) GEE has each eye as its own
+# cluster, and the line says so.
+gr_gee_legend_lines <- function(texts) {
+  t <- gsub("GEE not fitted", "", as.character(unlist(texts)), fixed = TRUE)
+  out <- character(0)
+  if (any(grepl("GEE", t, fixed = TRUE))) {
+    eye <- is.null(.gr_opts$cluster_id)
+    out <- paste0("GEE P values: ", if (eye) "each eye its own cluster (no patient ID)" else "clustered by patient",
+                  "; ", gee_inference_text(unit = if (eye) "eye" else "patient"), ".")
+  }
+  if (isTRUE(.gr_opts$matched))
+    out <- c(out, get0("MATCHED_ANALYSIS_NOTE", ifnotfound = character(0)))
+  out
+}
 
 # PDF device. grDevices::pdf() is a single-byte Type-1 device: every glyph
 # outside Latin-1 (Hebrew group names, ≥ ≤ ±²) is replaced by a dot. cairo_pdf
@@ -95,6 +324,23 @@ gr_pdf_device <- function() {
     grDevices::cairo_pdf else grDevices::pdf
 }
 
+# EPS (vector, decision D21): cairo_ps embeds real fonts like cairo_pdf (the
+# header markers are plotted symbols either way). PostScript has no
+# transparency, so cairo embeds each semi-transparent point or region as an
+# image: at GR_EPS_MIN_DPI at least (the journals' resolution for line art),
+# or the run's resolution when that is higher; the Manifest's Figures row and
+# the README say so. Without cairo: postscript(), whose Latin-1 fonts lose
+# glyphs such as ≤ (the run log says so once).
+GR_EPS_MIN_DPI <- 1200
+gr_eps_fallback_dpi <- function(dpi) max(as.numeric(dpi)[1], GR_EPS_MIN_DPI, na.rm = TRUE)
+gr_eps_open <- function(fn, w, h, dpi) {
+  if (isTRUE(tryCatch(capabilities("cairo"), error = function(e) FALSE)))
+    grDevices::cairo_ps(fn, width = w, height = h, onefile = FALSE, bg = "white",
+                        fallback_resolution = gr_eps_fallback_dpi(dpi))
+  else grDevices::postscript(fn, width = w, height = h, onefile = FALSE, horizontal = FALSE,
+                             paper = "special", bg = "white")
+}
+
 # open a graphics device for `fm`; returns the device number
 gr_open_device <- function(fn, fm, w, h, dpi) {
   switch(fm,
@@ -102,7 +348,8 @@ gr_open_device <- function(fn, fm, w, h, dpi) {
     tiff = grDevices::tiff(fn, width = w, height = h, units = "in", res = dpi, compression = "lzw", bg = "white"),
     jpeg = grDevices::jpeg(fn, width = w, height = h, units = "in", res = dpi, quality = 95, bg = "white"),
     pdf  = gr_pdf_device()(fn, width = w, height = h, bg = "white"),
-    stop("unsupported graph format '", fm, "' (use png, tiff, jpeg or pdf)"))
+    eps  = gr_eps_open(fn, w, h, dpi),
+    stop("unsupported graph format '", fm, "' (use png, tiff, jpeg, pdf or eps)"))
   grDevices::dev.cur()
 }
 
@@ -113,10 +360,10 @@ gr_open_device <- function(fn, fm, w, h, dpi) {
 gr_normalise_formats <- function(formats, logger = message) {
   f <- tolower(trimws(as.character(unlist(formats))))
   f <- f[!is.na(f) & nzchar(f)]
-  f[f == "jpg"] <- "jpeg"; f[f == "tif"] <- "tiff"
+  f[f == "jpg"] <- "jpeg"; f[f == "tif"] <- "tiff"; f[f == "ps"] <- "eps"
   bad <- unique(setdiff(f, GR_FORMATS))
   if (length(bad))
-    logger(sprintf("Unsupported graph format(s) ignored: %s (use png, tiff, jpeg or pdf).",
+    logger(sprintf("Unsupported graph format(s) ignored: %s (use png, tiff, jpeg, pdf or eps).",
                    paste(bad, collapse = ", ")))
   f <- unique(intersect(f, GR_FORMATS))
   if (!length(f)) {
@@ -178,9 +425,11 @@ save_graph <- function(p, base, formats, dpi, w = 6.5, h = 5.4, logger = NULL,
       ggplot2::ggsave(fn, p, width = w, height = h, dpi = dpi, compression = "lzw", bg = "white")
     else if (fm == "pdf") function()
       ggplot2::ggsave(fn, p, device = gr_pdf_device(), width = w, height = h, bg = "white")
+    else if (fm == "eps") function()
+      gr_draw_to(fn, fm, w, h, dpi, function() print(p))
     else if (fm %in% GR_FORMATS) function()
       ggplot2::ggsave(fn, p, width = w, height = h, dpi = dpi, bg = "white")
-    else function() stop("unsupported graph format '", fm, "' (use png, tiff, jpeg or pdf)")
+    else function() stop("unsupported graph format '", fm, "' (use png, tiff, jpeg, pdf or eps)")
     if (gr_write_file(fn, write, logger, what, count)) out <- c(out, fn)
   }
   out
@@ -200,6 +449,7 @@ gr_short_test <- function(lab) {
   lab <- as.character(lab)
   switch(lab,
     "GEE (clustered by patient)"          = "GEE (clustered)",
+    "GEE on ranks (clustered by patient)" = "GEE on ranks (clustered)",
     "Weighted GEE (clustered by patient)" = "Weighted GEE (clustered)",
     "Weighted GEE (robust SE)"            = "Weighted GEE",
     "Welch t-test"                        = "Welch t",
@@ -254,12 +504,23 @@ msd <- function(x, d = 2) {
   sprintf(paste0(fm, " ± ", fm), gr_round0(mean(x), d), stats::sd(x))
 }
 
+# Mean acuity of logMAR values for a header (decision D16): "20/20 (0.00 ±
+# 0.05 logMAR)" - the Snellen geometric mean with the logMAR mean ± SD, as in
+# the tables (helpers.R fmt_va); "n/a" without a usable value
+gr_va_text <- function(lm) {
+  lm <- gr_num(lm); lm <- lm[is.finite(lm)]
+  if (!length(lm)) return("n/a")
+  fmt_va(mean(lm), if (length(lm) > 1) stats::sd(lm) else NA_real_, range = FALSE)
+}
+
 # one number for a header; "n/a" when it is undefined (an SD of one eye)
 f2 <- function(v, d = 2) if (length(v) == 1 && is.finite(v)) sprintf(paste0("%.", d, "f"), v) else "n/a"
 
-# "84%": the share of TRUE among the eyes where `cond` is defined; "n/a" when no
-# eye has it defined (a group without a single usable value), never "NaN%"
-gr_pct <- function(cond, d = 0) {
+# "84.2%": the share of TRUE among the eyes where `cond` is defined; "n/a" when
+# no eye has it defined (a group without a single usable value), never "NaN%".
+# One decimal by default: every header percentage of every panel has the same
+# precision as the tables (D24), whatever the number of groups
+gr_pct <- function(cond, d = 1) {
   cond <- cond[!is.na(cond)]
   if (!length(cond)) "n/a" else sprintf(paste0("%.", d, "f%%"), mean(cond) * 100)
 }
@@ -333,12 +594,16 @@ p_d_lines <- function(x, gl, glv, pp = NULL) {
 #   ordinal     -> two groups: wilcox.test; more: kruskal.test
 #   proportion  -> chi-squared; Fisher's exact when any expected count < 5
 #                  (seeded Monte-Carlo Fisher, labelled, when FEXACT fails)
-# With clustering on (the default) figure P values are GEE (clustered by
-# patient), not the eye-level table test: with two groups the P equals the
-# table's GEE column; with three or more the omnibus line is the joint Wald
-# test of all group terms and each "vs reference" line is that pair's own GEE.
-# On a matched cohort with non-unit matching weights they are weighted GEE Wald
-# tests (independence working correlation), like the matched summary tables.
+# With clustering on (the default) and at least one patient with two usable
+# eyes, figure P values are GEE (clustered by patient) - the same model the
+# summary table's clustered test runs (helpers.R gee_group_p, decision D12), so
+# the figure's P equals the table's P column; with three or more groups the
+# omnibus line is the joint Wald test of all group terms and each "vs
+# reference" line is that pair's own GEE. Every GEE P value takes the run's
+# small-sample inference (helpers.R gee_wald: Mancl-DeRouen, F reference, by
+# default; decision D11). On a matched cohort the working correlation is
+# independence (decision D18); with non-unit matching weights the tests are
+# weighted GEE Wald tests, like the matched summary tables.
 # Every P printed names its test, the two-group headers included; a GEE that
 # was fitted but failed (no convergence, a numerically singular covariance)
 # falls back to the classical test, labelled "(GEE not fitted)" and counted in
@@ -356,12 +621,15 @@ p_d_lines <- function(x, gl, glv, pp = NULL) {
 # (gr_bars; under the N-boxes on the rotated two-group panels), and is named in
 # the run log.
 # Multiplicity: each "vs reference" line is Holm-adjusted within its panel and
-# tagged [Holm] when it holds two or more comparisons; the omnibus P and the
-# tables are not adjusted.
+# tagged [Holm] when it holds two or more comparisons, as the tables' columns
+# of comparisons with the reference are (decision D14); the omnibus P is not
+# adjusted.
 # ============================================================
+# "P = .03" / "P < .001" / "P > .99" - the run's P style (helpers.R p_eq,
+# decision D15); the classic style keeps the v1.0.0 "P = 0.0312" of the panels
 p_text <- function(p) {
   if (!is.finite(p)) return("")
-  if (p < 0.0001) "P < 0.0001" else sprintf("P = %.4f", p)
+  p_eq(p, where = "figure")
 }
 
 # group_test's label, shortened for a figure header ("Kruskal-Wallis test" ->
@@ -428,7 +696,8 @@ p_omnibus <- function(v, gl, glv, kind = c("continuous", "ordinal", "proportion"
     # a group of one patient has no between-patient variance to estimate
     why_c <- if (!is.null(cid)) cluster_guard_note(idw[use], g[use]) else ""
     if (nzchar(why_c)) { out$reason <- why_c; return(out) }
-    pw <- gee_group_p(x, g, idw, kind, event, w = wts[keep], unit = unit_w)
+    pw <- gee_group_p(x, g, idw, kind, event, w = wts[keep], unit = unit_w,
+                      ranks = identical(kind, "ordinal"))
     if (is.finite(pw)) {
       out$p <- pw; out$text <- p_text(pw)
       # without patient ids each eye is its own cluster: the caution counts eyes
@@ -444,20 +713,29 @@ p_omnibus <- function(v, gl, glv, kind = c("continuous", "ordinal", "proportion"
   }
 
   # Eyes of the same patient are correlated. When a cluster id is in scope
-  # (patient clustering on) use a GEE with robust SE instead of a test that assumes
-  # independent eyes. A group whose eyes all belong to one patient gets no P at
-  # all (cluster_guard_note), nor do data below the minimum for any clustered
-  # model ("too few eyes for this model (n = 5)", helpers.R model_data_guard),
-  # as in the GEE tables and the weighted tests. A GEE that was fitted but failed
-  # (no convergence, a numerically singular covariance) falls through to the
-  # classical test, labelled "(GEE not fitted)" and counted.
-  if (!is.null(cid)) {
+  # (patient clustering on) and at least one patient has two usable eyes, use a
+  # GEE with robust SE instead of a test that assumes independent eyes - the
+  # clustered table test runs the same model (helpers.R gee_group_p, decision
+  # D12), so a table and a figure of one outcome give one P value. With one
+  # eye per patient the classical test below runs, as in the tables (not a
+  # fallback). An ordinal variable is tested on its ranks; a matched cohort
+  # uses an independence working correlation (decision D18). A group whose
+  # eyes all belong to one patient gets no P at all (cluster_guard_note), nor
+  # do data below the minimum for any clustered model ("too few eyes for this
+  # model (n = 5)", helpers.R model_data_guard), as in the GEE tables and the
+  # weighted tests. A GEE that was fitted but failed (no convergence, a
+  # numerically singular covariance) falls through to the classical test,
+  # labelled "(GEE not fitted)" and counted.
+  gee_tried <- !is.null(cid) && fellow_eyes_present(cid[keep][use])
+  if (gee_tried) {
     why_c <- cluster_guard_note(cid[keep][use], g[use])
     if (nzchar(why_c)) { out$reason <- why_c; return(out) }
-    pc <- gee_group_p(x, g, cid[keep], kind, event)
+    pc <- gee_group_p(x, g, cid[keep], kind, event, ranks = identical(kind, "ordinal"),
+                      corstr = if (isTRUE(.gr_opts$matched)) "independence")
     if (is.finite(pc)) {
       out$p <- pc
       out$test <- if (kind == "proportion") "GEE (binomial, clustered by patient)"
+                  else if (kind == "ordinal") "GEE on ranks (clustered by patient)"
                   else "GEE (clustered by patient)"
       out$text <- p_text(pc)
       out$few <- few_patient_groups(cid[keep][use], g[use])
@@ -479,8 +757,9 @@ p_omnibus <- function(v, gl, glv, kind = c("continuous", "ordinal", "proportion"
   # clustering was requested but the GEE could not be fitted (no convergence, a
   # numerically singular covariance, a group of a 0/1 outcome without events):
   # the classical test that ran instead says so in its label, and the run log
-  # counts these (see generate_standard_graphs)
-  if (!is.null(cid) && nzchar(out$text)) {
+  # counts these (see generate_standard_graphs); with one eye per patient no
+  # GEE was needed and the classical test is simply the test (no label)
+  if (gee_tried && nzchar(out$text)) {
     out$test <- paste0(out$test, " (GEE not fitted)")
     .gr_opts$n_gee_fallback <- (.gr_opts$n_gee_fallback %||% 0L) + 1L
   }
@@ -491,7 +770,13 @@ p_omnibus <- function(v, gl, glv, kind = c("continuous", "ordinal", "proportion"
   out
 }
 
-# Each group against the REFERENCE group (glv[1]), same test on the pair.
+# Each group against the REFERENCE group (glv[1]). When the omnibus test is a
+# clustered or weighted GEE (p_omnibus), each comparison is the Wald test of
+# that group's coefficient in the SAME model of all groups (gee_group_p, each =
+# TRUE) - the model whose coefficients the tables' GEE column reports, so a
+# table and its figure print one number per comparison (decision D14).
+# Otherwise - or when that model cannot be fitted, or for a comparison it
+# cannot test - the same test as p_omnibus runs on the pair.
 # Returns the RAW numeric P per comparison (NA when not testable), named by
 # group; the caller adjusts for multiplicity (stat_footer: Holm). attr
 # "fallback": the comparisons whose clustered GEE could not be fitted, so the
@@ -499,7 +784,10 @@ p_omnibus <- function(v, gl, glv, kind = c("continuous", "ordinal", "proportion"
 p_vs_reference <- function(v, gl, glv, kind = "continuous", event = NULL) {
   if (length(glv) < 2) return(numeric(0))
   ref <- glv[1]
+  jt <- gr_vs_ref_joint(v, gl, glv, kind, event)
   res <- lapply(glv[-1], function(g) {
+    if (!is.null(jt) && is.finite(jt$p[[g]]))
+      return(list(p = jt$p[[g]], test = jt$test, few = jt$few[[g]]))
     keep <- !is.na(gl) & gl %in% c(ref, g)
     restore <- gr_narrow_scope(gl, keep)       # cluster ids / weights stay aligned
     on.exit(restore(), add = TRUE)
@@ -510,6 +798,48 @@ p_vs_reference <- function(v, gl, glv, kind = "continuous", event = NULL) {
     is.finite(o$p) && grepl("(GEE not fitted)", o$test, fixed = TRUE), logical(1))]
   attr(out, "few") <- do.call(gr_few_merge, lapply(res, function(o) if (is.finite(o$p)) o$few))
   out
+}
+
+# The comparisons with the reference from ONE GEE of all groups (three or
+# more), when p_omnibus's test of these groups is a GEE - weighted (matching
+# weights in scope) or clustered (cluster ids in scope and a patient with two
+# usable eyes), with p_omnibus's model, working correlation and unit.
+# list(p = nominal P per group, test = p_omnibus's label, few = per group the
+# few-patients record of its pair); NULL when p_omnibus would run a classical
+# test or the model of all groups cannot be fitted (the pairwise tests then
+# run, as before).
+gr_vs_ref_joint <- function(v, gl, glv, kind = "continuous", event = NULL) {
+  if (length(glv) < 3) return(NULL)
+  keep <- !is.na(gl) & gl %in% glv
+  if (!any(keep)) return(NULL)
+  g <- factor(as.character(gl[keep]), levels = glv)
+  x <- v[keep]
+  cid <- gr_cluster_of(gl)
+  wts <- gr_weights_of(gl)
+  y <- gr_test_y(x, kind, event)
+  use <- (if (identical(kind, "proportion")) !is.na(y) else is.finite(y))
+  ord <- identical(kind, "ordinal")
+  if (!is.null(wts)) {
+    wk <- suppressWarnings(as.numeric(wts[keep]))
+    use <- use & is.finite(wk) & wk > 0
+    idk <- if (!is.null(cid)) cid[keep] else paste0("row ", which(keep))
+    unit <- if (is.null(cid)) "eye" else "patient"
+    p <- gee_group_p(x, g, idk, kind, event, w = wts[keep], unit = unit, ranks = ord, each = TRUE)
+    test <- if (!is.null(cid)) "Weighted GEE (clustered by patient)" else "Weighted GEE (robust SE)"
+  } else if (!is.null(cid) && fellow_eyes_present(cid[keep][use])) {
+    idk <- cid[keep]
+    unit <- "patient"
+    p <- gee_group_p(x, g, idk, kind, event, ranks = ord, each = TRUE,
+                     corstr = if (isTRUE(.gr_opts$matched)) "independence")
+    test <- if (kind == "proportion") "GEE (binomial, clustered by patient)"
+            else if (ord) "GEE on ranks (clustered by patient)" else "GEE (clustered by patient)"
+  } else return(NULL)
+  if (is.null(names(p))) return(NULL)            # nothing fitted
+  few <- lapply(stats::setNames(glv[-1], glv[-1]), function(o) {
+    k <- use & as.character(g) %in% c(glv[1], o)
+    few_patient_groups(idk[k], droplevels(g[k]), unit)
+  })
+  list(p = p, test = test, few = few)
 }
 
 # One header line per group, tinted with the group colour, plus optional footer
@@ -552,7 +882,7 @@ wrap_vs <- function(prefix, parts, per = 3) {
 }
 
 # "Welch ANOVA: P < 0.0001"
-# "vs Control: Diabetes P = 0.0064, Autoimmune P = 0.4100  [Holm]"
+# "vs Reference: Cohort A P = .006, Cohort B P = .41  [Holm]"
 # An omnibus that cannot run (e.g. one group has a single eye) says why ("P not
 # computed: C has n = 1"), and the pairwise lines that CAN be computed are still
 # shown. A comparison whose clustered GEE could not be fitted (the classical
@@ -697,9 +1027,19 @@ build_header_grob <- function(spec, fit = FALSE, slack = 4) {
 attach_header <- function(p, spec, fit = FALSE) {
   gt <- ggplot2::ggplotGrob(p)
   pan <- gt$layout[gt$layout$name == "panel", ]
-  gtable::gtable_add_grob(gt, build_header_grob(spec, fit = fit), t = 1, b = min(pan$t) - 1,
-                          l = min(pan$l), r = max(pan$r), clip = "off",
-                          name = "mheader", z = Inf)
+  gr_widen_legend(gtable::gtable_add_grob(gt, build_header_grob(spec, fit = fit), t = 1, b = min(pan$t) - 1,
+                                          l = min(pan$l), r = max(pan$r), clip = "off",
+                                          name = "mheader", z = Inf))
+}
+
+# A group key above or below the plot is centred on the WHOLE figure, not on
+# the plotting panel: ggplot centres it on the panel, which the axis title and
+# the rotated stat columns push to the right, so a key that fits the figure
+# (gr_fit_legend) still ran past its right edge (decisions D20, D21).
+gr_widen_legend <- function(gt) {
+  k <- gt$layout$name %in% c("guide-box-top", "guide-box-bottom")
+  if (any(k)) { gt$layout$l[k] <- 1L; gt$layout$r[k] <- ncol(gt) }
+  gt
 }
 
 # ------------------------------------------------------------
@@ -711,7 +1051,13 @@ attach_header <- function(p, spec, fit = FALSE) {
 # colours, a legend swatch) is drawn in a smaller font instead, at draw time.
 # ------------------------------------------------------------
 HDR_FIT_SEPS <- c("\\s+\u00b7\\s+", ",\\s+", "(?<=\\S)\\s{2,}(?=\\S)")
+# the double-angle / semicircle headers (hdr_fit_spec) break last after a
+# colon: "Centroid comparison: P not computed: ..." has no other break, and at
+# a journal column width it is wider than the frame
+HDR_POLAR_SEPS <- c(HDR_FIT_SEPS, ":\\s+")
 HDR_FIT_MIN <- 0.6     # smallest font factor a too-wide line is drawn at
+# ... in the journal style never below GR_MIN_TEXT_PT (decision D20)
+gr_fit_min <- function() if (isTRUE(.gr_opts$journal)) max(HDR_FIT_MIN, GR_MIN_TEXT_PT / MHDR_FS) else HDR_FIT_MIN
 
 # rendered width (pt) of one header line at font size fs, on the current device
 hdr_line_pt <- function(segs, fs = MHDR_FS) {
@@ -732,8 +1078,10 @@ hdr_wrap_text <- function(txt, avail, wfun, indent = "   ", seps = HDR_FIT_SEPS)
   for (i in seq_along(pieces)[-1]) {
     cand <- paste0(cur, sepv[i - 1], pieces[i])
     if (wfun(cand) <= avail) { cur <- cand; next }
-    # a list keeps its comma at the end of the broken line; a " · " is dropped
-    out <- c(out, paste0(cur, if (startsWith(sepv[i - 1], ",")) "," else ""))
+    # a list keeps its comma (a label its colon) at the end of the broken
+    # line; a " · " is dropped
+    out <- c(out, paste0(cur, if (startsWith(sepv[i - 1], ",")) ","
+                              else if (startsWith(sepv[i - 1], ":")) ":" else ""))
     cur <- paste0(indent, pieces[i])
   }
   out <- c(out, cur)
@@ -744,7 +1092,13 @@ hdr_wrap_text <- function(txt, avail, wfun, indent = "   ", seps = HDR_FIT_SEPS)
 hdr_wrap_line <- function(line, avail, seps = HDR_FIT_SEPS) {
   if (hdr_line_pt(line) <= avail) return(list(line))
   cols <- unique(vapply(line, function(s) as.character(s$col), character(1)))
-  if (length(cols) != 1 || any(vapply(line, function(s) !is.null(s$sw), logical(1))))
+  has_sw <- any(vapply(line, function(s) !is.null(s$sw), logical(1)))
+  # a line in several colours ("Label: <v1> vs. <v2>") breaks after its
+  # leading label, the coloured values going to an indented line of their own
+  if (length(cols) != 1 && !has_sw && length(line) > 2 && identical(line[[1]]$col, "black"))
+    return(c(hdr_wrap_line(line[1], avail, seps),
+             list(c(list(seg("   ")), line[-1]))))
+  if (length(cols) != 1 || has_sw)
     return(list(line))
   txt <- paste(vapply(line, function(s) s$text, character(1)), collapse = "")
   lapply(hdr_wrap_text(txt, avail, function(t) hdr_line_pt(list(seg(t))), seps = seps),
@@ -773,7 +1127,7 @@ hdr_fit_spec <- function(spec, width_pt, slack = 4) {
     out <- list()
     for (l in spec[[k]]$lines) {
       av <- hdr_line_avail(spec, k, length(out) + 1, width_pt, slack)
-      out <- c(out, if (is.na(av)) list(l) else hdr_wrap_line(l, av))
+      out <- c(out, if (is.na(av)) list(l) else hdr_wrap_line(l, av, HDR_POLAR_SEPS))
     }
     spec[[k]]$lines <- out
   }
@@ -786,7 +1140,7 @@ hdr_fit_scales <- function(spec, width_pt, slack = 4) {
     av <- hdr_line_avail(spec, k, j, width_pt, slack)
     if (is.na(av)) return(1)
     w <- hdr_line_pt(spec[[k]]$lines[[j]])
-    if (w <= av || w <= 0) 1 else max(HDR_FIT_MIN, av / w)
+    if (w <= av || w <= 0) 1 else max(gr_fit_min(), av / w)
   }, numeric(1)))
 }
 
@@ -823,8 +1177,15 @@ gr_with_measure_device <- function(w, h, fun) {
 #  2. reserve top margin for the header as wrapped;
 #  3. when the panel is height-limited (coord_fixed), widen the x range so the
 #     panel - and with it the frame and the header's room - fills the width,
-#     instead of the header running past a frame that hugs the circle.
+#     instead of the header running past a frame that hugs the circle;
+#  4. never let the header squeeze the diagram: at a narrow width (a journal
+#     column, figure_width_cm) the header wraps to many more lines, so when
+#     less than GR_POLAR_MIN_PLOT_IN (at most 90% of the panel width) is left
+#     for the diagram the figure is made taller instead. The height laid out
+#     is returned as attr "fig_h" (fig_h, or more): the caller saves the file
+#     and sizes the composite row at it.
 # Any line still too wide is drawn smaller at draw time (fit = TRUE).
+GR_POLAR_MIN_PLOT_IN <- 3.0     # the least width (inches) of the drawn diagram
 gr_polar_finish <- function(p, hs, xlim, ylim, fig_w, fig_h) {
   build <- function(spec, xl) p +
     ggplot2::coord_fixed(xlim = xl, ylim = ylim, clip = "off") +
@@ -839,13 +1200,20 @@ gr_polar_finish <- function(p, hs, xlim, ylim, fig_w, fig_h) {
     pw <- fig_w * 72.27 - fixed_pt(gt$widths, grid::convertWidth)
     hs2 <- hdr_fit_spec(hs, pw)
     gt <- ggplot2::ggplotGrob(build(hs2, xlim))
-    ph <- fig_h * 72.27 - fixed_pt(gt$heights, grid::convertHeight)
+    fh <- fixed_pt(gt$heights, grid::convertHeight)
+    ph <- fig_h * 72.27 - fh
+    # the diagram's least width, and the panel height that gives it
+    min_ph <- min(0.9 * pw, GR_POLAR_MIN_PLOT_IN * 72.27) * diff(ylim) / diff(xlim)
+    h_out <- fig_h
+    if (pw > 0 && ph < min_ph) { ph <- min_ph; h_out <- (fh + min_ph) / 72.27 }
     xl <- xlim
     if (ph > 0 && pw / ph > diff(xlim) / diff(ylim))
       xl <- mean(xlim) + c(-0.5, 0.5) * diff(ylim) * pw / ph
-    list(hs = hs2, xlim = xl)
-  }), error = function(e) list(hs = hs, xlim = xlim))
-  attach_header(build(fitted$hs, fitted$xlim), fitted$hs, fit = TRUE)
+    list(hs = hs2, xlim = xl, fig_h = h_out)
+  }), error = function(e) list(hs = hs, xlim = xlim, fig_h = fig_h))
+  out <- attach_header(build(fitted$hs, fitted$xlim), fitted$hs, fit = TRUE)
+  attr(out, "fig_h") <- fitted$fig_h
+  out
 }
 hdr_nlines <- function(spec) if (is.null(spec)) 0 else
   max(vapply(spec, function(c) length(c$lines), integer(1)))
@@ -886,12 +1254,17 @@ nbox_stack_grob <- function(nbox) {
 # to the figure's width (gr_hbar_caution), drawn under the N-boxes across the
 # whole figure, left-aligned (contract R4-6: the rotated panels carry it too).
 GR_HBAR_CAU_PAD <- 6     # pt between the figure's left edge and the caution
+# left_segs: one line (a list of segments) or several lines (a list of such
+# lists), each drawn rotated in a column of its own, the first on the left.
 attach_hbar <- function(p, left_segs, right_text, nbox, caution = character(0)) {
   gt <- ggplot2::ggplotGrob(p)
   pan <- gt$layout[gt$layout$name == "panel", ]
-  gt <- gtable::gtable_add_cols(gt, grid::unit(1.5, "lines"), pos = 0)
-  gt <- gtable::gtable_add_grob(gt, rot_line_grob(left_segs), t = pan$t, b = pan$b,
-                                l = 1, r = 1, clip = "off", name = "hstat", z = Inf)
+  left_lines <- if (length(left_segs) && is.null(left_segs[[1]]$text)) left_segs else list(left_segs)
+  for (ln in rev(left_lines)) {
+    gt <- gtable::gtable_add_cols(gt, grid::unit(1.5, "lines"), pos = 0)
+    gt <- gtable::gtable_add_grob(gt, rot_line_grob(ln), t = pan$t, b = pan$b,
+                                  l = 1, r = 1, clip = "off", name = "hstat", z = Inf)
+  }
   pan <- gt$layout[gt$layout$name == "panel", ]
   gt <- gtable::gtable_add_cols(gt, grid::unit(1.3, "lines"), pos = ncol(gt))
   gt <- gtable::gtable_add_grob(gt, grid::textGrob(right_text, rot = 90,
@@ -900,8 +1273,12 @@ attach_hbar <- function(p, left_segs, right_text, nbox, caution = character(0)) 
   if (!is.null(nbox) && length(nbox)) {
     pan <- gt$layout[gt$layout$name == "panel", ]
     gt <- gtable::gtable_add_rows(gt, grid::unit(2.1, "lines"), pos = nrow(gt))
+    # under the panel; across the whole figure when the panel is narrow (a
+    # journal column width), so the "N = ... of ... eyes" text stays in its box
+    wide <- (.gr_opts$cell_w %||% GR_BAR_MIN_W) < GR_HDR_STACK_W
     gt <- gtable::gtable_add_grob(gt, nbox_stack_grob(nbox), t = nrow(gt), b = nrow(gt),
-                                  l = pan$l, r = pan$r, clip = "off", name = "nbox", z = Inf)
+                                  l = if (wide) 1 else pan$l, r = if (wide) ncol(gt) else pan$r,
+                                  clip = "off", name = "nbox", z = Inf)
   }
   caution <- as.character(caution)
   caution <- caution[!is.na(caution) & nzchar(caution)]
@@ -914,7 +1291,7 @@ attach_hbar <- function(p, left_segs, right_text, nbox, caution = character(0)) 
       just = c("left", "top"), gp = grid::gpar(fontface = "bold", fontsize = MHDR_FS)),
       t = nrow(gt), b = nrow(gt), l = 1, r = ncol(gt), clip = "off", name = "hcaution", z = Inf)
   }
-  gt
+  gr_widen_legend(gt)
 }
 
 # The caution of a rotated two-group panel as lines no wider than the figure
@@ -942,6 +1319,10 @@ gr_hbar_caution <- function(caution, fig_w = .gr_opts$cell_w %||% GR_BAR_MIN_W) 
 # The narrowest a bar panel is ever drawn (inches): a cell of a four-across row
 # of the composite (compose_panels: three 5.6-inch columns shared by four).
 GR_BAR_MIN_W <- 5.6 * 3 / 4
+# Below this width (inches) a bar panel's side-by-side header columns are
+# stacked into one column, and a scatter's per-group header columns into one
+# line per group (gr_bars, scatter_ind)
+GR_HDR_STACK_W <- 4.0
 
 # fun(<width of the plotting panel in pt>) for ggplot `p` drawn `w` inches wide,
 # run on a measuring device like the polar headers (gr_with_measure_device), so
@@ -982,6 +1363,33 @@ gr_fit_bar_header <- function(spec, pw) {
   spec
 }
 
+# The group key of bar panel `p` (ns entries, first laid out in ncol0 columns)
+# measured on a measuring device at the width w_in (inches) the panel is drawn
+# at: with fewer columns, down to one, until it fits the figure (inside = the
+# key over the bars: the plotting panel's width, about three quarters of it); a
+# key that had to be narrowed is left-aligned. As built when nothing can be
+# measured.
+gr_fit_legend <- function(p, ns, w_in, inside = FALSE, ncol0 = ns) {
+  if (ns < 1) return(p)
+  avail <- w_in * 72.27 * (if (inside) 0.75 else 1) - 8
+  key_w <- function(q) gr_with_measure_device(w_in, 4.9, function() {
+    gt <- ggplot2::ggplotGrob(q)
+    k <- grep("^guide-box", gt$layout$name)
+    if (!length(k)) return(0)
+    max(0, vapply(gt$grobs[k], function(g) if (inherits(g, "zeroGrob")) 0
+                  else grid::convertWidth(grid::grobWidth(g), "pt", valueOnly = TRUE), numeric(1)))
+  })
+  left <- if (inside) NULL else ggplot2::theme(legend.justification = "left")
+  q <- p
+  for (k in seq(max(1L, as.integer(ncol0)), 1L)) {
+    q <- p + ggplot2::guides(fill = ggplot2::guide_legend(ncol = k, byrow = TRUE))
+    w <- tryCatch(key_w(q), error = function(e) NA_real_)
+    if (!is.finite(w)) return(p)
+    if (w <= avail) return(if (k < ncol0 && !is.null(left)) q + left else q)
+  }
+  if (is.null(left)) q else q + left
+}
+
 # Every stat line of a bar panel ends inside the narrowest width the panel is
 # drawn at (.gr_opts$cell_w, set by generate_standard_graphs from the planned
 # composite; GR_BAR_MIN_W otherwise), so its composite cell and its own file
@@ -1002,38 +1410,120 @@ gr_bars <- function(dfb, pal, xlab, ylab, title, ann = list(), horizontal = FALS
   # look the builders reproduce: OPEN (no full box) + N-boxes off the right edge.
   is_meyestro <- is.null(box_left) && is.null(box_right)
   meyestro_v <- is_meyestro && !horizontal      # vertical mEYEstro bar panel
+  # The N-boxes are rotated labels stacked down the right edge; past four groups
+  # they overprint each other into an unreadable smear. Drop the boxes and fold
+  # the counts into the stat lines instead, which stack and wrap cleanly.
+  # (only reachable with >4 superimposed groups)
+  if (!horizontal && !is.null(nbox) && length(nbox) > 4) {
+    cnt <- if (!is.null(attr(nbox, "n"))) as.character(attr(nbox, "n"))
+           else sub("^N = ([0-9]+).*$", "\\1", names(nbox))
+    ann <- c(ann, list(list(col = "black",
+      text = paste0("n per group, in the order above: ", paste(cnt, collapse = ", ")))))
+    nbox <- NULL
+  }
+  # Three or more groups: the stat lines (`ann`) go through the same grid
+  # header as the two-group panels - one line each, spaced in points
+  # (MHDR_LS) in the margin reserved above the panel - so they never overprint
+  # however short the panel is drawn (decision D20); never at data-unit heights.
+  if (meyestro_v && is.null(header_spec) && length(ann))
+    header_spec <- list(list(x = 0.01, lines = lapply(ann, function(a) list(seg(a$text, a$col)))))
   use_hdr <- meyestro_v && !is.null(header_spec)  # grid inline-colored header
   use_hbar <- is_meyestro && horizontal && !is.null(hbar_left)  # rotated side stats
   if (use_hbar) xlab <- ""                       # rotated stat replaces the category title
+  cell_w <- .gr_opts$cell_w %||% GR_BAR_MIN_W    # the narrowest width this panel is drawn at
+  # a header of side-by-side columns needs a wide panel: in a narrow one (a
+  # figure laid out at a journal column width) its columns are stacked into one
+  if (use_hdr && cell_w < GR_HDR_STACK_W && length(header_spec) > 1) {
+    lines <- unlist(lapply(header_spec, function(cl) cl$lines), recursive = FALSE)
+    header_spec <- list(list(x = 0.01, lines = lines))
+  }
   dfb$label <- factor(dfb$label, levels = unique(dfb$label))
   dfb$series <- factor(dfb$series, levels = names(pal))
   ymax <- max(dfb$pct, na.rm = TRUE)
   # mEYEstro puts the stat text ABOVE the panel and the legend INSIDE, so the
   # interior only needs room for the legend (not the annotation lines).
   headroom <- if (meyestro_v) 1.30 else 1 + 0.09 * (length(ann) + 1)
-  # Each bar's value label is rotated 90 deg, so it consumes its FONT HEIGHT of
-  # horizontal slot. Slot width shrinks as 1/(categories x series): past a point
-  # the labels overprint into an unreadable smear. Drop them rather than lie.
-  # (Physical geometry - raising the DPI cannot fix it.)
-  slot_pt <- (5.6 * 72 * 0.82) / max(1, length(unique(dfb$label)) * length(unique(dfb$series)))
+  # Each value label takes its FONT HEIGHT of the bar's slot (across the bars
+  # when rotated 90 deg; along the categories on a horizontal panel). The slot
+  # shrinks as 1/(categories x series), measured at the width (height) the
+  # panel is really drawn at: the labels are made smaller to fit, never below
+  # GR_MIN_TEXT_PT, and dropped when even that would overprint - with three or
+  # more groups they must never collide (decision D22). 0% labels are not
+  # printed. (Physical geometry - raising the DPI cannot fix it.)
+  # The category axis spans the categories plus the room the panel adds to it
+  # (the N boxes on the right of a vertical panel; the stat lines above the
+  # bars of a horizontal one); a bar gets 0.8 / series of a category, and a
+  # label needs about 0.75 of its font size across (the height of its digits).
+  nlev0 <- length(unique(dfb$label)); nser0 <- length(unique(dfb$series))
+  span_pt <- if (horizontal) (.gr_opts$cell_h %||% 4.9) * 72 * 0.62 else (cell_w - 0.75) * 72
+  n_cat <- nlev0 + if (horizontal) 0.6 + (if (is_meyestro && !use_hbar) 0.9 + 0.85 * length(ann) else 0)
+                   else 0.6 + (if (!is.null(nbox) && length(nbox) && length(nbox) <= 4) 1.7 else 0)
+  slot_pt <- span_pt / max(1, n_cat) * 0.8 / max(1, nser0)
   PT_PER_MM <- 72.27 / 25.4          # ggplot2's .pt, which is not exported
-  show_val <- slot_pt >= (label_size + 0.3) * PT_PER_MM + 1.5
+  val_size <- min(label_size + 0.3, (slot_pt - 1) / 0.75 / PT_PER_MM)
+  # Value labels are chosen BAR BY BAR (decision D22: labels never overlap,
+  # but a panel does not lose them all): every non-zero bar when its slot holds
+  # a label of at least GR_MIN_TEXT_PT; otherwise labels of GR_MIN_TEXT_PT,
+  # the tallest bars first, each kept only where it is a label height clear of
+  # every label already kept along the category axis. A bar under 0.5% reads
+  # "<1%", a bar of 0% has none. Panels that lost labels are counted for the
+  # run log (generate_standard_graphs).
+  dfb$vlab <- ifelse(!is.finite(dfb$pct) | dfb$pct <= 0, "",
+                     ifelse(round(dfb$pct) < 1, "<1%", sprintf("%.0f%%", dfb$pct)))
+  show_val <- any(nzchar(dfb$vlab))
+  if (show_val && val_size * PT_PER_MM < GR_MIN_TEXT_PT) {
+    val_size <- GR_MIN_TEXT_PT / PT_PER_MM
+    need_pt <- 0.75 * GR_MIN_TEXT_PT + 1
+    cat_pt0 <- span_pt / max(1, n_cat)
+    lv_c <- unique(as.character(dfb$label)); lv_s <- levels(droplevels(factor(dfb$series, levels = names(pal))))
+    m <- max(1, length(lv_s))
+    xpt <- (match(as.character(dfb$label), lv_c) +
+            (match(as.character(dfb$series), lv_s) - (m + 1) / 2) * 0.8 / m) * cat_pt0
+    keep <- logical(nrow(dfb))
+    for (i in order(-dfb$pct)) {
+      if (!nzchar(dfb$vlab[i]) || !is.finite(xpt[i])) next
+      # nor may it run into a TALLER bar beside it (the label is wider than
+      # its own bar here)
+      near <- setdiff(which(abs(xpt - xpt[i]) < need_pt - 1e-9), i)
+      if (any(dfb$pct[near] > dfb$pct[i], na.rm = TRUE)) next
+      if (!any(keep) || all(abs(xpt[keep] - xpt[i]) >= need_pt - 1e-9)) keep[i] <- TRUE
+    }
+    if (any(nzchar(dfb$vlab) & !keep))
+      .gr_opts$n_label_thin <- (.gr_opts$n_label_thin %||% 0L) + 1L
+    dfb$vlab[!keep] <- ""
+    show_val <- any(keep)
+  }
+  # a long axis title is wrapped in a narrow panel instead of running off it
+  if (cell_w < GR_HDR_STACK_W && nchar(xlab) > 30) xlab <- paste(strwrap(xlab, 30), collapse = "\n")
+  # Category labels that would run into each other at this width (a panel laid
+  # out at a journal column width) are turned: 45 degrees, on one line each,
+  # or upright (90) when even that is too tight for their line height.
+  if (!horizontal) {
+    cat_pt <- span_pt / max(1, n_cat)
+    labw <- max(nchar(unlist(strsplit(levels(dfb$label), "\n", fixed = TRUE)))) * 0.52 * 9.5
+    if (x_angle == 0 && labw > cat_pt) {
+      lv <- gsub("\n", " ", levels(dfb$label), fixed = TRUE)
+      dfb$label <- factor(gsub("\n", " ", as.character(dfb$label), fixed = TRUE), levels = unique(lv))
+      x_angle <- 45
+    }
+    if (x_angle > 0 && x_angle < 90 && 11 / sin(x_angle * pi / 180) > cat_pt) x_angle <- 90
+  }
   p <- ggplot2::ggplot(dfb, ggplot2::aes(x = label, y = pct, fill = series)) +
     ggplot2::geom_col(position = ggplot2::position_dodge(width = .8), colour = "grey20",
                       width = .72, linewidth = .25)
   if (show_val)
-    p <- p + ggplot2::geom_text(ggplot2::aes(label = sprintf("%.0f%%", pct)),
+    p <- p + ggplot2::geom_text(ggplot2::aes(label = vlab),
                        position = ggplot2::position_dodge(width = .8),
                        angle = if (horizontal) 0 else label_angle,
                        vjust = if (horizontal || label_angle == 0) -0.45 * (label_angle == 0) + 0.35 * (label_angle != 0 || horizontal) else 0.35,
                        hjust = if (horizontal) -0.15 else if (label_angle == 0) 0.5 else -0.12,
-                       size = label_size + 0.3, fontface = "bold")
+                       size = val_size, fontface = "bold")
   p <- p +
     ggplot2::scale_fill_manual(values = pal) +
     ggplot2::labs(x = xlab, y = ylab, title = if (meyestro_v || use_hbar) NULL else title) + gr_theme()
   if (x_angle != 0)
     p <- p + ggplot2::theme(axis.text.x = ggplot2::element_text(
-      angle = x_angle, hjust = 1, vjust = 1, face = "bold", size = 8.5))
+      angle = x_angle, hjust = 1, vjust = if (x_angle == 90) 0.5 else 1, face = "bold", size = 8.5))
   caution <- as.character(caution %||% "")[1]
   has_caution <- !is.na(caution) && nzchar(caution)
   if (is_meyestro && !use_hbar && (use_hdr || length(ann) || has_caution)) {
@@ -1065,18 +1555,8 @@ gr_bars <- function(dfb, pal, xlab, ylab, title, ann = list(), horizontal = FALS
     }
   }
   nlev <- length(levels(dfb$label))
+  # (more than four N-boxes were folded into the stat lines at the top)
   has_nbox <- !horizontal && !is.null(nbox) && length(nbox)
-  # The N-boxes are rotated labels stacked down the right edge; past four groups
-  # they overprint each other into an unreadable smear. Drop the boxes and fold
-  # the counts into the stat lines instead, which stack and wrap cleanly.
-  # (only reachable with >4 superimposed groups)
-  if (has_nbox && length(nbox) > 4) {
-    cnt <- if (!is.null(attr(nbox, "n"))) as.character(attr(nbox, "n"))
-           else sub("^N = ([0-9]+).*$", "\\1", names(nbox))
-    ann <- c(ann, list(list(col = "black",
-      text = paste0("n per group, in the order above: ", paste(cnt, collapse = ", ")))))
-    has_nbox <- FALSE
-  }
   # mEYEstro panels are OPEN (no full box): only horizontal grid + L-shaped
   # axes, so the "N = x eyes" boxes can float just off the right of the bars.
   if (is_meyestro) {
@@ -1087,8 +1567,13 @@ gr_bars <- function(dfb, pal, xlab, ylab, title, ann = list(), horizontal = FALS
       panel.grid.major.y = if (horizontal) ggplot2::element_blank() else ggplot2::element_line(colour = "grey85", linewidth = .35))
     # widen the plotting range on the right so the N-boxes sit fully inside
     # the canvas (no clipping) yet clearly to the right of the last bar
+    # Two or more boxes stand side by side (decision D22: stacked one above
+    # the other they ran into each other in a short panel), each a box height
+    # (~14 pt) apart, so the room on the right grows with their number.
+    nb_sp <- if (has_nbox) 14 / max(1, span_pt / max(1, n_cat)) else 0
     if (has_nbox)
-      p <- p + ggplot2::scale_x_discrete(expand = ggplot2::expansion(add = c(0.6, 1.7)))
+      p <- p + ggplot2::scale_x_discrete(expand = ggplot2::expansion(
+        add = c(0.6, max(1.7, 0.75 + length(nbox) * nb_sp))))
     if (meyestro_v) {
       # legend INSIDE the plot (upper-left) + tall top margin for the stat text.
       # top margin reserves room for the grid header (or the annotate fallback)
@@ -1099,6 +1584,8 @@ gr_bars <- function(dfb, pal, xlab, ylab, title, ann = list(), horizontal = FALS
         legend.key.size = grid::unit(10, "pt"),
         legend.margin = ggplot2::margin(1, 4, 1, 4),
         plot.margin = ggplot2::margin(t = 8 + MHDR_LS * nlh, r = if (has_nbox) 8 else 10, b = 4, l = 6))
+      # a narrow panel has no room for the key over the bars: below them
+      if (identical(legend_pos, "inside") && cell_w < GR_HDR_STACK_W) legend_pos <- "bottom"
       if (identical(legend_pos, "inside"))
         p <- p + ggplot2::theme(legend.position = "inside",
           legend.position.inside = c(0.005, 0.99), legend.justification = c(0, 1))
@@ -1107,6 +1594,12 @@ gr_bars <- function(dfb, pal, xlab, ylab, title, ann = list(), horizontal = FALS
     }
   }
   ylim_top <- ymax * headroom + 6
+  # a percentage axis ends at 100 (decision D22): its breaks stop at 100 and the
+  # axis line is capped at the last break; the room above it holds the value
+  # labels and the legend, not a scale running to 120%
+  brk <- pretty(c(0, min(100, ylim_top)), n = 5)
+  brk <- brk[brk >= 0 & brk <= min(100, ylim_top)]
+  p <- p + ggplot2::scale_y_continuous(breaks = brk, guide = ggplot2::guide_axis(cap = "upper"))
   if (horizontal) {
     # the horizontal panels need room (and unclipped drawing) above the top
     # category for the stat lines
@@ -1120,13 +1613,13 @@ gr_bars <- function(dfb, pal, xlab, ylab, title, ann = list(), horizontal = FALS
     p <- p + ggplot2::coord_cartesian(ylim = c(0, ylim_top), clip = "off")
   }
   # mEYEstro rotated "N = x eyes" boxes, fully OUTSIDE the bars on the right,
-  # black + stacked at two levels (matches the reference; never clipped)
+  # side by side (never clipped, never overlapping)
   if (has_nbox) {
     kk <- length(nbox)
-    ys <- if (kk == 1) 0.55 * ylim_top else ylim_top * seq(0.76, 0.30, length.out = kk)
+    xs <- if (kk == 1) nlev + 0.98 else nlev + 0.6 + (seq_len(kk) - 0.5) * nb_sp
     for (i in seq_len(kk))
       # colour per group so the reader can tell which N is which (matches ref)
-      p <- p + ggplot2::annotate("label", x = nlev + 0.98, y = ys[i],
+      p <- p + ggplot2::annotate("label", x = xs[i], y = 0.55 * ylim_top,
                                  label = names(nbox)[i], colour = unname(nbox[i]),
                                  fill = "white", angle = 90, size = 2.7,
                                  fontface = "bold", linewidth = .5)
@@ -1177,9 +1670,20 @@ gr_bars <- function(dfb, pal, xlab, ylab, title, ann = list(), horizontal = FALS
   if (!horizontal && !is.null(box_right))
     p <- p + ggplot2::annotate("label", x = nlev + 0.45, y = ylim_top * .999, label = box_right,
                                hjust = 1, vjust = 1, size = 2.8, fontface = "bold")
-  if (use_hdr) attach_header(p, header_spec)
+  # the group key must fit the width the panel is drawn at (decisions D20,
+  # D21): measured, and laid out in fewer columns - down to one, left-aligned -
+  # until it does; on a rotated two-group panel it goes under the plot
+  if (is_meyestro && !identical(legend_pos, "none")) {
+    if (use_hbar && cell_w < GR_HDR_STACK_W) p <- p + ggplot2::theme(legend.position = "bottom")
+    p <- gr_fit_legend(p, ns, cell_w, inside = meyestro_v && identical(legend_pos, "inside"),
+                       ncol0 = if (ns > 2) 2 else ns)
+  }
+  # (fit = TRUE: a line that would still run past the panel at draw time is
+  # drawn smaller, never below GR_MIN_TEXT_PT in the journal style)
+  if (use_hdr) attach_header(p, header_spec, fit = TRUE)
   else if (use_hbar) attach_hbar(p, hbar_left, hbar_right, nbox,
                                  caution = if (has_caution) gr_hbar_caution(caution) else character(0))
+  else if (is_meyestro && !identical(legend_pos, "none")) gr_widen_legend(ggplot2::ggplotGrob(p))
   else p
 }
 
@@ -1222,22 +1726,36 @@ pct_by_group <- function(v, gl, glv, breaks, labels, symmetric = FALSE) {
 }
 
 # ------------------------------------------------------------
-# Alpins vectors against an EXPLICIT target (intended postop astigmatism).
-# All arithmetic happens in double-angle space:
-#   P = preop vector, Q = postop vector, T = target vector
-#   TIA = P - T   the change that was intended
-#   SIA = P - Q   the change that was achieved
-#   DV  = Q - T   what is left relative to the intention
-# With no target supplied this reduces to the classic target-of-zero case
-# (TIA = preop, DV = postop); that branch reuses pm/qm/pa/qa directly rather
-# than recomputing them through sqrt/atan2, so it introduces no floating-point
-# drift.
-# Also returns the scalar indices Alpins defines alongside the vectors.
+# Astigmatism vectors (JCRS 2025 standard, decisions D1-D2), all in PLUS-
+# cylinder format: every refraction is converted sign-aware (helpers.R
+# astig_plus - a minus cylinder at axis a is the plus cylinder at a + 90), so
+# the switch "standardize to minus cylinder", a row typed half plus and half
+# minus, or a target typed in either form never changes a vector. In double-
+# angle space (x = M cos 2θ, y = M sin 2θ, θ = plus axis):
+#   P = preoperative, Q = postoperative, T = target refractive astigmatism
+#   PRE  = P                  preoperative refractive astigmatism
+#   POST = Q                  postoperative refractive astigmatism
+#   SIA  = Q - P              surgically induced astigmatism
+#   PE   = Q - T              prediction error (= POST when the target is plano)
+# and the Alpins quantities of the standard graphs, unchanged in value:
+#   TIA  = T - P              the change that was intended
+#   DV   = T - Q = -PE        the difference vector
+# Every "axis" returned is the plus axis of that vector, in [0, 180), so the
+# double-angle plots put with-the-rule (plus axis 90) on the LEFT.
+# With no target (or a plano one) the plano branch reuses the magnitudes and
+# axes directly rather than recomputing them through sqrt/atan2, so it
+# introduces no floating-point drift. A blank or zero target cylinder is plano;
+# a non-zero target cylinder without an axis leaves PE, TIA, DV and the indices
+# of that eye missing (n_target_noaxis). pre_noaxis / post_noaxis mark the
+# eyes whose refraction has a non-zero cylinder but no axis (no vector).
+# Also returns the scalar indices Alpins defines alongside the vectors, and
+# n_target_nonplano: the eyes whose target is not plano (decision D3: only
+# then is POST a panel of its own).
 # ------------------------------------------------------------
 alpins_vectors_target <- function(pre_cyl, pre_ax, post_cyl, post_ax,
                                   tgt_cyl = NULL, tgt_ax = NULL) {
-  pm <- abs(gr_num(pre_cyl)); pa <- gr_num(pre_ax) %% 180
-  qm <- abs(gr_num(post_cyl)); qa <- gr_num(post_ax) %% 180
+  P <- astig_plus(pre_cyl, pre_ax); Q <- astig_plus(post_cyl, post_ax)
+  pm <- P$mag; pa <- P$axis; qm <- Q$mag; qa <- Q$axis
   px <- pm * cos(2 * pa * pi / 180); py <- pm * sin(2 * pa * pi / 180)
   qx <- qm * cos(2 * qa * pi / 180); qy <- qm * sin(2 * qa * pi / 180)
 
@@ -1250,48 +1768,83 @@ alpins_vectors_target <- function(pre_cyl, pre_ax, post_cyl, post_ax,
     a[bad] <- fallback[bad]
     a
   }
+  turn <- function(a) (a + 90) %% 180               # the plus axis of the opposite vector
 
   has_t <- !is.null(tgt_cyl) && !is.null(tgt_ax)
+  n <- max(length(pm), length(qm))
+  n_noaxis_t <- 0L
   if (has_t) {
-    tm <- abs(gr_num(tgt_cyl)); ta <- gr_num(tgt_ax) %% 180
-    tm[!is.finite(tm)] <- 0; ta[!is.finite(ta)] <- 0
+    # a blank or zero target cylinder is plano (as the mEYEstro tab reads it),
+    # its axis irrelevant; a non-zero target cylinder WITHOUT an axis is no
+    # target - PE, TIA, DV and the indices are missing for that eye, never
+    # computed against a plano target (resolve_astig_vectors logs the count)
+    tc <- gr_num(tgt_cyl); ta0 <- gr_num(tgt_ax)
+    blank <- !is.finite(tc) | tc == 0
+    tc[blank] <- 0; ta0[blank] <- 0
+    Tt <- astig_plus(tc, ta0)
+    tm <- Tt$mag; ta <- Tt$axis
+    n_noaxis_t <- sum(Tt$noaxis)
     tx <- tm * cos(2 * ta * pi / 180); ty <- tm * sin(2 * ta * pi / 180)
   } else {
-    tx <- 0; ty <- 0
+    tm <- rep(0, n); ta <- rep(0, n); tx <- 0; ty <- 0
   }
+  plano <- is.finite(tm) & tm == 0
+  no_t <- !is.finite(tm)                             # a target without an axis
+  n_nonplano <- if (has_t) sum(!plano & !no_t) else 0L
 
-  sx <- px - qx; sy <- py - qy                       # SIA, target-independent
+  sx <- qx - px; sy <- qy - py                       # SIA = POST - PRE, target-independent
   sia <- sqrt(sx^2 + sy^2)
   sax <- (atan2(sy, sx) * 180 / pi / 2) %% 180
 
-  if (has_t) {
-    ix <- px - tx; iy <- py - ty                     # TIA
-    dx <- qx - tx; dy <- qy - ty                     # DV
-    tia <- sqrt(ix^2 + iy^2); dv <- sqrt(dx^2 + dy^2)
-    tax <- ax_of(ix, iy, pa);  dax <- ax_of(dx, dy, qa)
-  } else {
-    tia <- pm; dv <- qm; tax <- pa; dax <- qa
-    ix <- px; iy <- py
-  }
+  # TIA = T - P and PE = Q - T; DV = -PE. Eyes with a plano target take the
+  # exact branch (TIA = -P: |P| at the plus axis + 90; PE = Q)
+  ix <- tx - px; iy <- ty - py
+  ex <- qx - tx; ey <- qy - ty
+  tia <- sqrt(ix^2 + iy^2); tax <- ax_of(ix, iy, turn(pa))
+  pe <- sqrt(ex^2 + ey^2);  pex <- ax_of(ex, ey, qa)
+  tia[plano] <- pm[plano]; tax[plano] <- turn(pa[plano])
+  pe[plano] <- qm[plano];  pex[plano] <- qa[plano]
+  tia[no_t] <- NA; tax[no_t] <- NA; pe[no_t] <- NA; pex[no_t] <- NA
+  dv <- pe; dax <- turn(pex)
 
   aoe <- (atan2(sy, sx) - atan2(iy, ix)) * 180 / pi / 2
   aoe <- ((aoe + 90) %% 180) - 90
   undef <- !is.finite(tia) | tia == 0                # every index divides by TIA
   aoe[undef] <- NA
+  # no surgically induced change: the SIA has no meridian, so there is no
+  # angle of error either (decision D27; atan2(0, 0) would give minus the TIA
+  # meridian)
+  aoe[!is.finite(sia) | sia < 1e-12] <- NA
   ci <- sia / tia; ci[undef] <- NA                   # correction index
   me <- sia - tia                                    # magnitude of error
   ios <- dv / tia; ios[undef] <- NA                  # index of success
-  list(tia = tia, tax = tax, sia = sia, sax = sax, dv = dv, dax = dax,
-       aoe = aoe, ci = ci, me = me, ios = ios, has_target = has_t)
+  list(pre = pm, pre_ax = pa, post = qm, post_ax = qa, pe = pe, pe_ax = pex,
+       tia = tia, tax = tax, sia = sia, sax = sax, dv = dv, dax = dax,
+       aoe = aoe, ci = ci, me = me, ios = ios, has_target = has_t,
+       n_target_nonplano = n_nonplano, n_target_noaxis = n_noaxis_t,
+       pre_noaxis = P$noaxis, post_noaxis = Q$noaxis)
 }
 
+# The Alpins TIA threshold of the correction-index and angle-of-error panels
+# (0.25 D), with a floating-point guard: against a non-plano target |T - P|
+# can fall a few ulps below 0.25 for an eye whose TIA is exactly 0.25 D
+# (validation.md V19)
+TIA_MIN <- 0.25
+tia_ok <- function(tia) is.finite(tia) & tia >= TIA_MIN - 1e-9
+
 # ------------------------------------------------------------
-# Resolve the Alpins vectors for a run, PER VECTOR, logging the provenance of
-# each so a reader can always tell whether a number came from the user's
-# spreadsheet or from the engine. Precedence, independently for TIA / SIA / DV:
+# Resolve the astigmatism vectors for a run, PER VECTOR, logging the provenance
+# of each so a reader can always tell whether a number came from the user's
+# spreadsheet or from the engine. Precedence, independently for TIA / SIA / DV
+# / PE:
 #   1. magnitude AND axis columns mapped and present -> use them as given
 #   2. else a target cylinder + axis mapped          -> compute against that target
 #   3. else                                          -> compute with target = 0
+# Supplied columns are read in the plus-cylinder convention of the computed
+# vectors (magnitude >= 0, the vector's plus axis; v1.0.0 columns of TIA, SIA
+# and DV mean the same points). PE and DV are one vector with opposite signs:
+# when only one of them is supplied the other is derived from it (PE = -DV),
+# and the log says so. PRE and POST are the refractions themselves.
 # When a vector is supplied AND computable, the computed value is produced anyway
 # and the largest disagreement is reported, so the two can be reconciled.
 # ------------------------------------------------------------
@@ -1300,7 +1853,9 @@ alpins_vectors_target <- function(pre_cyl, pre_ax, post_cyl, post_ax,
 resolve_astig_vectors <- function(df, pre_cyl, pre_ax, post_cyl, post_ax,
                                   vec_cols = list(), target = list(), logger = NULL,
                                   display_names = NULL) {
-  say <- function(...) if (!is.null(logger)) logger(paste0(...))
+  # once per run: the figures of every cohort and the astigmatism sheet
+  # resolve the same vectors
+  say <- function(...) if (!is.null(logger)) log_once(logger, paste0(...))
   dn <- function(k) disp_name(k, display_names)
   usable <- function(x) !is.null(x) && !is.na(x) && nzchar(x) && x %in% names(df)
   gcol <- function(k) { v <- vec_cols[[k]]; if (usable(v)) v else NULL }
@@ -1313,25 +1868,57 @@ resolve_astig_vectors <- function(df, pre_cyl, pre_ax, post_cyl, post_ax,
                               if (has_t) df[[ta]] else NULL)
   base <- if (has_t) sprintf("computed vs mapped target ('%s', '%s')", dn(tc), dn(ta))
           else "computed (target = 0)"
+  say("Astigmatism vectors: plus-cylinder format (JCRS 2025; each refraction converted by the sign of ",
+      "its cylinder) - with-the-rule astigmatism on the left of the double-angle plots; SIA = ",
+      "postoperative - preoperative, PE = postoperative - target.")
   if (has_t)
-    say("Astigmatism: a target refraction is mapped, so TIA is the intended CHANGE, ",
-        "not the preoperative astigmatism - values will differ from a target-of-zero run.")
+    say("Astigmatism: a target refraction is mapped, so TIA is the intended CHANGE (target - preoperative) ",
+        "and PE is postoperative - target - values will differ from a target-of-zero run",
+        if (av$n_target_nonplano > 0) sprintf(" (%d eye(s) with a target that is not plano).", av$n_target_nonplano)
+        else " (every target is plano, so PE equals the postoperative astigmatism).")
+  if (has_t && isTRUE(av$n_target_noaxis > 0))
+    say(sprintf("Astigmatism target: %d eye(s) have a target cylinder without an axis - PE/TIA/DV not computed for them.",
+                av$n_target_noaxis))
+  # a refraction whose cylinder is not zero but whose axis is blank has no
+  # vector: those eyes are left out of the vectors that need it, never silently
+  # (a zero cylinder with a blank axis is plano, and kept)
+  inrun <- if ("GroupLabel" %in% names(df)) !is.na(df$GroupLabel) else TRUE
+  n_pre_na <- sum(av$pre_noaxis & inrun); n_post_na <- sum(av$post_noaxis & inrun)
+  if (n_pre_na + n_post_na > 0)
+    say(sprintf(paste0("Astigmatism: %d analysed eye(s) have a preoperative and %d a postoperative cylinder without an axis - ",
+                       "no vector for that refraction, so those eyes are left out of PRE, SIA and TIA (preoperative) or of ",
+                       "POST, SIA, PE and DV (postoperative) and of their tests."), n_pre_na, n_post_na))
 
   spec <- list(list("tia", "tax", "tia_mag", "tia_axis", "TIA"),
                list("sia", "sax", "sia_mag", "sia_axis", "SIA"),
-               list("dv",  "dax", "dv_mag",  "dv_axis",  "DV"))
+               list("dv",  "dax", "dv_mag",  "dv_axis",  "DV"),
+               list("pe",  "pe_ax", "pe_mag", "pe_axis", "PE"))
   changed <- FALSE
+  got <- character(0)
   for (v in spec) {
     cm <- gcol(v[[3]]); ca <- gcol(v[[4]])
-    if (is.null(cm) || is.null(ca)) { say("Astigmatism ", v[[5]], ": ", base, "."); next }
+    if (is.null(cm) || is.null(ca)) next
     sm <- abs(gr_num(df[[cm]])); sa <- gr_num(df[[ca]]) %% 180
     d <- abs(sm - av[[v[[1]]]]); d <- d[is.finite(d)]
     say(sprintf("Astigmatism %s: supplied from '%s' / '%s' (%d eyes); max difference vs %s = %s D.",
                 v[[5]], dn(cm), dn(ca), sum(is.finite(sm)), base,
                 if (length(d)) sprintf("%.4f", max(d)) else "n/a"))
     av[[v[[1]]]] <- sm; av[[v[[2]]]] <- sa
+    got <- c(got, v[[5]])
     changed <- TRUE
   }
+  # PE and DV are the same vector with opposite signs: one supplied, the
+  # other follows it, so the PE plot and the Alpins panels never disagree
+  if ("DV" %in% got && !("PE" %in% got)) {
+    av$pe <- av$dv; av$pe_ax <- (av$dax + 90) %% 180
+    say("Astigmatism PE: derived from the supplied DV columns (PE = -DV).")
+    got <- c(got, "PE")
+  } else if ("PE" %in% got && !("DV" %in% got)) {
+    av$dv <- av$pe; av$dax <- (av$pe_ax + 90) %% 180
+    say("Astigmatism DV: derived from the supplied PE columns (DV = -PE).")
+    got <- c(got, "DV")
+  }
+  for (v in spec) if (!(v[[5]] %in% got)) say("Astigmatism ", v[[5]], ": ", base, ".")
 
   # every index is a function of the RESOLVED vectors, so recompute them only if
   # a vector was actually overridden (otherwise keep the exact original values)
@@ -1345,6 +1932,7 @@ resolve_astig_vectors <- function(df, pre_cyl, pre_ax, post_cyl, post_ax,
     aoe <- (atan2(sy, sx) - atan2(ty, tx)) * 180 / pi / 2
     av$aoe <- ((aoe + 90) %% 180) - 90
     av$aoe[undef] <- NA
+    av$aoe[!is.finite(av$sia) | av$sia < 1e-12] <- NA      # no SIA, no angle of error (D27)
   }
   av
 }
@@ -1398,8 +1986,8 @@ g_cumulative_va <- function(pu, pc, gl, glv, pal, second_col = NULL, nb = TRUE,
       pct = cum_pct(c_), series = nm_c)
     pal2[nm_u] <- pal[[g]]; pal2[nm_c] <- second_col %||% lighten_col(pal[[g]])
     ann[[length(ann) + 1]] <- list(col = pal[[g]],
-      text = sprintf("%s: UDVA %s / %s %s LogMAR  (N UDVA = %d, CDVA = %d)", g,
-                     msd(gr_logmar(pu[gl == g])), second_lab, msd(gr_logmar(pc[gl == g])),
+      text = sprintf("%s: UDVA %s · %s %s · N UDVA = %d, CDVA = %d", g,
+                     gr_va_text(gr_logmar(pu[gl == g])), second_lab, gr_va_text(gr_logmar(pc[gl == g])),
                      nu(g), nc(g)))
   }
   dfb <- do.call(rbind, rows)
@@ -1414,7 +2002,10 @@ g_cumulative_va <- function(pu, pc, gl, glv, pal, second_col = NULL, nb = TRUE,
   keep_labs <- labs_all[first_keep:last_keep]
   dfb <- dfb[dfb$label %in% keep_labs, , drop = FALSE]
   # Panel A header (mEYEstro): a 2x2 legend (drawn as swatches) with the postop
-  # UDVA / reference CDVA LogMAR mean±SD beneath, one column per group.
+  # UDVA / reference CDVA mean beneath - the Snellen geometric mean with the
+  # logMAR mean ± SD (decision D16) - one column per group. The text is in the
+  # full group colour (a pale tint is illegible in print; D22): the tints are
+  # for the bars and swatches only.
   hs <- NULL; lpos <- "inside"
   if (length(glv) == 2) {
     col_of <- function(g, light) if (light) (second_col %||% lighten_col(pal[[g]])) else pal[[g]]
@@ -1422,8 +2013,8 @@ g_cumulative_va <- function(pu, pc, gl, glv, pal, second_col = NULL, nb = TRUE,
       list(seg(paste0(g, " Postop UDVA"), "black")),
       list(seg(paste0(g, " ", second_lab,
                       if (nc(g) != nu(g)) sprintf(" (n = %d)", nc(g)) else ""), "black")),
-      list(seg(paste0(msd(gr_logmar(pu[gl == g])), " LogMAR"), col_of(g, FALSE))),
-      list(seg(paste0(msd(gr_logmar(pc[gl == g])), " LogMAR"), col_of(g, TRUE)))))
+      list(seg(gr_va_text(gr_logmar(pu[gl == g])), pal[[g]])),
+      list(seg(gr_va_text(gr_logmar(pc[gl == g])), pal[[g]]))))
     # seg() has no swatch arg; attach $sw for the two legend rows
     c1 <- mkcol(glv[1]); c1$lines[[1]][[1]]$sw <- col_of(glv[1], FALSE)
     c1$lines[[2]][[1]]$sw <- col_of(glv[1], TRUE)
@@ -1497,8 +2088,10 @@ g_udva_vs_cdva <- function(pu, pv, gl, glv, pal, eff_num, eff_den, nb = TRUE,
 g_cdva_change <- function(pv_pre, pv_post, gl, glv, pal, saf_num, saf_den, nb = TRUE) {
   lines <- gr_line_diff(pv_pre, pv_post)
   nb <- panel_nbox(nb, is.finite(lines), gl, glv, pal)
-  labs <- c("Loss 2 or\nmore", "Loss 1", "No change", "Gain 1", "Gain 2 or\nmore")
-  dfb <- pct_by_group(lines, gl, glv, c(-Inf, -1.5, -0.5, 0.5, 1.5, Inf), labs)
+  # the seven categories of the standard graph (Dupps 2011): a loss of three
+  # or more lines is shown apart from a loss of two (decision D22)
+  labs <- c("Loss 3\nor more", "Loss 2", "Loss 1", "No change", "Gain 1", "Gain 2", "Gain 3\nor more")
+  dfb <- pct_by_group(lines, gl, glv, c(-Inf, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, Inf), labs)
   si <- gr_ratio(saf_num, saf_den)
   ann <- lapply(glv, function(g) list(col = pal[[g]], text = sprintf(
     "%s: Safety Index %s · 2+ lines lost %s", g, msd(si[gl == g]),
@@ -1518,7 +2111,7 @@ g_cdva_change <- function(pv_pre, pv_post, gl, glv, pal, saf_num, saf_den, nb = 
       vs_line("same or gain lines: ", gain[1], gain[2], cols),
       vs_line("2 or more lines lost: ", lost[1], lost[2], cols)))))
   }
-  gr_bars(dfb, pal[glv], "Change in lines of CDVA", "% of eyes",
+  gr_bars(dfb, pal[glv], "Change in Snellen lines of CDVA", "% of eyes",
           "Change in Corrected Distance Visual Acuity", ann, nbox = nb, header_spec = hs,
           caution = gr_caution(pp))
 }
@@ -1530,9 +2123,10 @@ g_seq_accuracy <- function(poseq, gl, glv, pal, nb = TRUE, has_target = FALSE) {
   err <- gr_num(poseq)
   nb <- panel_nbox(nb, is.finite(err), gl, glv, pal)
   slab <- if (has_target) "SEQ - target" else "SEQ"
-  labs <- c("<-2", "-2 to -1.51", "-1.5 to -1.01", "-1 to -0.51", "-0.5 to -0.14",
-            "-0.13 to +0.13", "+0.14 to +0.5", "+0.51 to +1", "+1.01 to +1.5",
-            "+1.51 to +2", ">+2")
+  # the standard graph's bin labels, two decimals throughout (decision D22)
+  labs <- c("< -2.00", "-2.00 to -1.51", "-1.50 to -1.01", "-1.00 to -0.51", "-0.50 to -0.14",
+            "-0.13 to +0.13", "+0.14 to +0.50", "+0.51 to +1.00", "+1.01 to +1.50",
+            "+1.51 to +2.00", "> +2.00")
   brk <- c(-Inf, -2.005, -1.505, -1.005, -0.505, -0.135, 0.135, 0.505, 1.005, 1.505, 2.005, Inf)
   dfb <- pct_by_group(err, gl, glv, brk, labs)
   ann <- lapply(glv, function(g) list(col = pal[[g]], text = sprintf(
@@ -1596,15 +2190,22 @@ scatter_ind <- function(d, pal, xlab, ylab, title, from_zero = FALSE,
               mean(dd$x), stats::sd(dd$x), rg[1], rg[2])
     short <- sprintf("● %s: y=%.2fx%+.2f · R²=%.2f · %s",
                      g, b[2], b[1], summary(f)$r.squared, stat2)
-    list(col = pal[[g]], lines = ls, short = short)
+    # the same on two lines, for a narrow panel
+    short2 <- c(sprintf("● %s: y=%.2fx%+.2f · R²=%.2f", g, b[2], b[1], summary(f)$r.squared),
+                paste0("    ", stat2))
+    list(col = pal[[g]], lines = ls, short = short, short2 = short2)
   })
   blocks <- Filter(Negate(is.null), blocks)
   # 1-2 groups: classic side-by-side stat columns. 3+ groups: one FULL-WIDTH
   # line per group instead, because thirds of a composite cell are too narrow
-  # and the columns collide.
-  stacked <- length(blocks) > 2
+  # and the columns collide. In a panel narrower than GR_HDR_STACK_W (laid out
+  # at a journal column width) every group gets two full-width lines.
+  narrow <- (.gr_opts$cell_w %||% GR_BAR_MIN_W) < GR_HDR_STACK_W
+  stacked <- length(blocks) > 2 || (narrow && length(blocks) > 1)
   if (stacked)
-    blocks <- lapply(blocks, function(b) list(col = b$col, lines = b$short))
+    blocks <- if (narrow) unlist(lapply(blocks, function(b)
+                lapply(b$short2, function(t) list(col = b$col, lines = t))), recursive = FALSE)
+              else lapply(blocks, function(b) list(col = b$col, lines = b$short))
   nlines <- if (stacked) length(blocks)
             else if (length(blocks)) length(blocks[[1]]$lines) else 0
   # the per-group least-squares line whose equation the header prints: same
@@ -1667,14 +2268,23 @@ scatter_ind <- function(d, pal, xlab, ylab, title, from_zero = FALSE,
                       hjust = 0, vjust = 1, size = 2.9, fontface = "bold") +
     ggplot2::annotate("label", x = dx(0.97), y = dy(0.95), label = corner_labels[2],
                       hjust = 1, vjust = 0, size = 2.9, fontface = "bold")
-  # colored N-boxes inside, stacked under the top-left corner box
-  if (!is.null(nbox) && length(nbox))
+  # Journal style (D20): the colored N-boxes go UNDER the plot, across the
+  # figure (as on the horizontal bar panels, nbox_stack_grob), so they never
+  # cover a data point; the annotated style keeps them inside, stacked under
+  # the top-left corner box
+  journal <- isTRUE(.gr_opts$journal)
+  if (!journal && !is.null(nbox) && length(nbox))
     for (i in seq_along(nbox))
       p <- p + ggplot2::annotate("label", x = dx(0.03), y = dy(0.12 + 0.085 * i),
                                  label = names(nbox)[i], colour = unname(nbox[i]),
                                  fill = "white", hjust = 0, vjust = 1, size = 2.7,
                                  fontface = "bold", linewidth = .5)
-  p + ggplot2::coord_fixed(xlim = lim, ylim = lim, clip = "off")
+  p <- p + ggplot2::coord_fixed(xlim = lim, ylim = lim, clip = "off")
+  if (!journal || is.null(nbox) || !length(nbox)) return(p)
+  gt <- ggplot2::ggplotGrob(p)
+  gt <- gtable::gtable_add_rows(gt, grid::unit(1.05 * length(nbox) + 0.2, "lines"), pos = nrow(gt))
+  gtable::gtable_add_grob(gt, nbox_stack_grob(nbox), t = nrow(gt), b = nrow(gt), l = 1, r = ncol(gt),
+                          clip = "off", name = "nbox", z = Inf)
 }
 
 # attempted = preop SEQ - intended target (tgt: per-eye target SEQ, 0 = plano);
@@ -1740,7 +2350,7 @@ g_deq <- function(poseq, ocyl, gl, glv, pal, nb = TRUE, tgt = 0, has_target = FA
 }
 
 g_astigmatism <- function(pcyl, ocyl, gl, glv, pal, second_col = NULL, nb = TRUE) {
-  labs <- c("<= 0.25", "0.26 to 0.5", "0.51 to 0.75", "0.76 to 1.00", "1.01 to 1.25",
+  labs <- c("≤ 0.25", "0.26 to 0.50", "0.51 to 0.75", "0.76 to 1.00", "1.01 to 1.25",
             "1.26 to 1.50", "1.51 to 2.00", "2.01 to 3.00", "> 3.00")
   brk <- c(-Inf, .255, .505, .755, 1.005, 1.255, 1.505, 2.005, 3.005, Inf)
   rows <- list(); pal2 <- c(); ann <- list()
@@ -1781,7 +2391,7 @@ g_astigmatism <- function(pcyl, ocyl, gl, glv, pal, second_col = NULL, nb = TRUE
 }
 
 g_tia_sia <- function(av, gl, glv, pal) {
-  ok <- is.finite(av$tia) & is.finite(av$sia) & av$tia >= 0.25 & !is.na(gl)
+  ok <- tia_ok(av$tia) & is.finite(av$sia) & !is.na(gl)
   nb <- make_nbox(gl[ok], glv, pal, suffix = "eyes with TIA ≥ 0.25D", total = gl)
   scatter_ind(data.frame(x = av$tia[ok], y = av$sia[ok], Group = factor(gl[ok], levels = glv)),
               pal[glv], "TIA Vector (D)", "SIA Vector (D)",
@@ -1790,12 +2400,15 @@ g_tia_sia <- function(av, gl, glv, pal) {
 }
 
 g_ci_hist <- function(av, gl, glv, pal) {
-  keep <- is.finite(av$tia) & av$tia >= 0.25
+  keep <- tia_ok(av$tia)   # TIA >= 0.25 D (V19 guard)
   ci <- ifelse(keep, av$sia / av$tia, NA)
-  labs <- c("0 to 0.15", "0.15 to 0.3", "0.3 to 0.6", "0.6 to 0.9", "0.9 to 1.1",
-            "1.1 to 1.6", "1.6 to 2.1", "2.1 to 2.5", "> 2.5")
+  # right-closed bins, labelled as such with two decimals (decision D22); a
+  # ratio that lands on an edge (0.30, 0.60 ...) up to floating-point noise is
+  # snapped first, so it falls in the bin its label names (D27)
+  labs <- c("≤ 0.15", "0.16 to 0.30", "0.31 to 0.60", "0.61 to 0.90", "0.91 to 1.10",
+            "1.11 to 1.60", "1.61 to 2.10", "2.11 to 2.50", "> 2.50")
   brk <- c(-Inf, .15, .3, .6, .9, 1.1, 1.6, 2.1, 2.5, Inf)
-  dfb <- pct_by_group(ci, gl, glv, brk, labs)
+  dfb <- pct_by_group(round(ci, 6), gl, glv, brk, labs)
   ann <- lapply(glv, function(g) list(col = pal[[g]], text = sprintf(
     "%s: CI %s (N=%d, TIA≥0.25D)", g, msd(ci[gl == g]), sum(is.finite(ci) & gl == g, na.rm = TRUE))))
   pp <- p_group_text(ci, gl, glv, max_chars = HBAR_MAX_CHARS)
@@ -1814,8 +2427,10 @@ g_ci_hist <- function(av, gl, glv, pal) {
 }
 
 g_angle_of_error <- function(av, gl, glv, pal) {
-  keep <- is.finite(av$tia) & av$tia >= 0.25
-  aoe <- ifelse(keep, av$aoe, NA)
+  keep <- tia_ok(av$tia)   # TIA >= 0.25 D (V19 guard)
+  # snapped to 1e-6 degree (decision D27): whole-degree axes put many eyes
+  # exactly on a bin edge, which must not depend on the last floating-point bit
+  aoe <- round(ifelse(keep, av$aoe, NA), 6)
   labs <- c("< -45", "-45 to -35", "-35 to -25", "-25 to -15", "-15 to -5", "-5 to 5",
             "5 to 15", "15 to 25", "25 to 35", "35 to 45", "> 45")
   brk <- c(-Inf, -45, -35, -25, -15, -5, 5, 15, 25, 35, 45, Inf)
@@ -1827,8 +2442,13 @@ g_angle_of_error <- function(av, gl, glv, pal) {
   for (.t in pp) if (nzchar(.t)) ann <- c(ann, list(list(col = "black", text = .t)))
   hl <- hr <- nb <- NULL
   if (length(glv) == 2) {
-    cols <- unname(pal[glv]); am <- vapply(glv, function(g) msd(aoe[gl == g]), character(1))
-    hl <- vs_line("Angle of Error: ", am[1], am[2], cols)
+    # the two-group form of the header: AoE and |AoE|, with the degree sign,
+    # as the form with more groups (decision D22)
+    cols <- unname(pal[glv])
+    am <- vapply(glv, function(g) paste0(msd(aoe[gl == g], 1), "°"), character(1))
+    ab <- vapply(glv, function(g) paste0(msd(abs(aoe[gl == g]), 1), "°"), character(1))
+    # two rotated lines: one would run past the panel's height
+    hl <- list(vs_line("AoE: ", am[1], am[2], cols), vs_line("|AoE|: ", ab[1], ab[2], cols))
     hr <- p_d_text(aoe, gl, glv, pp)
     nb <- make_nbox(ifelse(is.finite(aoe), gl, NA), glv, pal, suffix = "eyes with TIA ≥ 0.25D",
                     total = gl)
@@ -2055,8 +2675,8 @@ g_stability <- function(df, visits, gl, glv, pal, pre_seq = NULL,
     ggplot2::scale_colour_manual(values = pal[glv]) +
     ggplot2::scale_x_continuous(breaks = xs, labels = labs) +
     ggplot2::scale_y_continuous(expand = ggplot2::expansion(mult = c(0.01, 0.03))) +
-    ggplot2::labs(x = "Time after surgery (months)",
-                  y = if (rein) "Mean ± SD SEQ (D)" else "SEQ (D)") +
+    # the standard graph's axis title, in every style (decision D22)
+    ggplot2::labs(x = "Time after surgery (months)", y = "Mean ± SD SEQ (D)") +
     gr_theme() +
     ggplot2::theme(legend.position = "none",
                    panel.grid.major.x = ggplot2::element_blank(),
@@ -2098,7 +2718,7 @@ g_stability <- function(df, visits, gl, glv, pal, pre_seq = NULL,
     lines <- lapply(seq_along(glv), function(j) {
       g <- glv[j]; gcol <- unname(pal[g]); c1 <- chg[[g]]
       list(seg(if (is.null(c1)) paste0("● ", g)
-               else sprintf("● %s: %.2f%% changed > %.2f D (%s)",
+               else sprintf("● %s: %.1f%% changed > %.2f D (%s)",
                             g, c1$pct, thresh, pair_txt("mo")), gcol))
     })
     hs[[1]] <- list(x = 0.01, lines = lines)
@@ -2108,7 +2728,7 @@ g_stability <- function(df, visits, gl, glv, pal, pre_seq = NULL,
     if (!is.null(c1)) {
       lines <- c(lines, list(
         list(seg(sprintf("%% changed > %.2f D", thresh), gcol)),
-        list(seg(sprintf("%s: %.2f%%", pair_txt("months"), c1$pct), gcol))))
+        list(seg(sprintf("%s: %.1f%%", pair_txt("months"), c1$pct), gcol))))
     }
     hs[[length(hs) + 1]] <- list(x = if (j == 1) 0.01 else "auto", lines = lines)
   }
@@ -2282,26 +2902,27 @@ registerS3method("makeContent", "stab_labels", makeContent.stab_labels,
 # ============================================================
 # JCRS-standard DOUBLE-ANGLE plot, all groups superimposed.
 #
-# Every point is placed at (M cos 2t, M sin 2t), so the DISPLAYED angle is twice
-# the meridian and the plot is a full 360 degrees. This is what makes the vector
-# arithmetic legitimate and groups with-the-rule / against-the-rule data on
-# opposite sides instead of splitting each across the horizontal meridian:
-#   meridian  90 (WTR) -> displayed 180 -> left
-#   meridian 0/180 (ATR) -> displayed 0/360 -> right
-#   meridians 45 / 135 (oblique) -> displayed 90 / 270 -> top / bottom
+# Every point is placed at (M cos 2θ, M sin 2θ) with θ the PLUS axis (plus-
+# cylinder format, decision D1), so the DISPLAYED angle is twice the axis and
+# the plot is a full 360 degrees. This is what makes the vector arithmetic
+# legitimate and groups with-the-rule / against-the-rule data on opposite
+# sides instead of splitting each across the horizontal meridian:
+#   plus axis  90 (WTR; minus axis 180) -> displayed 180 -> left
+#   plus axis 0/180 (ATR; minus axis 90) -> displayed 0/360 -> right
+#   plus axes 45 / 135 (oblique) -> displayed 90 / 270 -> top / bottom
+# The spokes are labelled with the plus axis (half the displayed angle).
 # Required by JCRS 2025 "Standards for analyzing astigmatic outcomes" (Part II).
 # ============================================================
 
-# 95% region for one group's doubled-angle cloud.
-#   "normal"  - bivariate-normal ellipse from the 2x2 covariance:
-#               {u : (u-c)' S^-1 (u-c) <= qchisq(.95, 2)}, drawn from the
-#               eigen-decomposition (semi-axes sqrt(qchisq * lambda_i)).
-#               centroid = TRUE gives the 95% CI of the CENTROID instead
-#               (Hotelling F radius, patient-clustered when `id` is given;
-#               see centroid_region).
-#   "polygon" - distribution-free: convex hull of the floor(95% n) deepest eyes,
-#               found by hull peeling (see astig_region). Makes no normality
-#               assumption (see JCRS Part II).
+# 95% region of the eyes of one cohort (astig_region, decision D5):
+#   "depth"  - distribution-free (default): the convex hull of the floor(95% n)
+#              deepest eyes by a projection-type data depth around the
+#              centroid (see astig_depth). Makes no normality assumption (JCRS
+#              Part II; Holladay et al. 2022).
+#   "normal" - bivariate-normal ellipse from the 2x2 covariance:
+#              {u : (u-c)' S^-1 (u-c) <= qchisq(.95, 2)}, drawn from the
+#              eigen-decomposition (semi-axes sqrt(qchisq * lambda_i)).
+# The 95% confidence region of the CENTROID is astig_centroid_region (D6).
 # ============================================================
 # Cluster-robust p-values for the figures.
 # Two eyes of one patient are NOT independent. `.gr_opts$cluster_id` carries a
@@ -2316,6 +2937,9 @@ registerS3method("makeContent", "stab_labels", makeContent.stab_labels,
 # Matching weights of a matched pass, aligned elementwise with the group vector
 # like the cluster id; NULL unless at least one weight differs from 1.
 .gr_opts$weights <- NULL
+# TRUE during a matched pass: its clustered GEE uses an independence working
+# correlation, weighted or not (decision D18), like the matched tables.
+.gr_opts$matched <- FALSE
 
 # TRUE when a usable, correctly-aligned cluster id is available for `gl`
 gr_cluster_of <- function(gl) {
@@ -2346,105 +2970,24 @@ gr_narrow_scope <- function(gl, keep) {
 # test fewer eyes than the bars and centroids show, and leave it out of every
 # bootstrap resample.
 
-# Joint Wald test of the coefficients `idx` of a fitted geeglm, from their
-# robust (sandwich) covariance. NA - never a P value - when that covariance is
-# numerically singular (contract R4-6; helpers.R gee_vcov_singular, the rule the
-# weighted table test shares): a group of two patients adds only a rank-1 block,
-# a group without between-patient spread adds none, and the statistic would
-# explode into a spurious "P < 0.001". NA too when the statistic is not finite.
-# The NA carries attr "singular" = TRUE for a singular covariance. The caller
-# treats either NA as a model that could not be fitted.
+# Joint Wald test of the coefficients `idx` of a fitted geeglm, with the
+# robust covariance and reference of the run's small-sample setting (helpers.R
+# gee_wald: Mancl-DeRouen + F by default, decision D11; the uncorrected
+# sandwich + chi-square with gee_small_sample "none"). NA - never a P value -
+# when that covariance is numerically singular (contract R4-6; helpers.R
+# gee_vcov_singular, the rule the weighted table test shares): a group of two
+# patients adds only a rank-1 block, a group without between-patient spread
+# adds none, and the statistic would explode into a spurious "P < 0.001". NA
+# too when the statistic is not finite, the covariance cannot be computed or
+# the model has no more patients than coefficients. The NA carries attr
+# "singular" = TRUE for a singular covariance. The caller treats either NA as
+# a model that could not be fitted.
+# The group test of the figures, gee_group_p(), lives in helpers.R: the
+# clustered table tests (analysis.R) run the same function.
 gr_wald_p <- function(fit, idx) {
-  b <- stats::coef(fit)
-  V <- tryCatch(fit$geese$vbeta, error = function(e) NULL)
-  if (is.null(V) || !length(idx) || any(!is.finite(b[idx]))) return(NA_real_)
-  Vg <- V[idx, idx, drop = FALSE]
-  if (any(!is.finite(Vg))) return(NA_real_)
-  if (gee_vcov_singular(fit, idx)) return(structure(NA_real_, singular = TRUE))
-  W <- tryCatch(as.numeric(t(b[idx]) %*% solve(Vg) %*% b[idx]), error = function(e) NA_real_)
-  if (!is.finite(W)) return(NA_real_)
-  stats::pchisq(W, df = length(idx), lower.tail = FALSE)
-}
-
-# Wald p for the group term. kind "proportion" -> binomial, else gaussian.
-# w: optional matching weights (one per element of x); eyes with a missing or
-# non-positive weight are left out, as in analysis.R's weighted tables. With
-# weights that are not all 1 the model is analysis.R's weighted model: an
-# INDEPENDENCE working correlation with the robust SE clustered by `id`, whose
-# estimate is the difference of the weighted means / proportions (contract
-# R4-1); otherwise exchangeable. unit: "eye" when `id` is the row (no patient
-# ids: each eye its own cluster), so the reasons count eyes.
-# Returns the P value, or NA:
-#  - with attr "why" when the data cannot support the model - nothing is fitted
-#    and the reason is the tables' one, checked in .weighted_wald's order:
-#    fewer than two groups / "B has n = 1" (p_value_guard, small_group_note),
-#    "B has 1 patient" (cluster_guard_note), "too few eyes for this model (n =
-#    5)" (model_data_guard: the one minimum-data rule of every clustered model,
-#    contract R4-10) and, on a weighted 0/1 outcome, "no weighted test possible:
-#    no events in B";
-#  - without "why" when a model was fitted but failed (no convergence, a
-#    numerically singular covariance - gr_wald_p) or, unweighted, a group of a
-#    0/1 outcome has no events or only events (no finite estimate): the caller
-#    falls back (unweighted) or says the weighted test could not be computed.
-gee_group_p <- function(x, g, id, kind = "continuous", event = NULL, w = NULL,
-                        unit = "patient") {
-  na_why <- function(why) structure(NA_real_, why = why)
-  if (!requireNamespace("geepack", quietly = TRUE)) return(NA_real_)
-  # the groups in their given order, for the reasons; the model's factor stays
-  # alphabetical (the joint Wald test does not depend on the reference level)
-  glv <- if (is.factor(g)) levels(g) else unique(as.character(g[!is.na(g)]))
-  g <- factor(as.character(g))
-  y <- if (identical(kind, "proportion")) {
-    as.numeric(if (is.null(event)) as.logical(x) else as.character(x) == as.character(event))
-  } else gr_num(x)
-  id <- fill_missing_ids(id)
-  weighted <- !is.null(w)                       # a matched cohort's weighted test
-  cs <- if (weighted && weights_nonunit(w)) "independence" else "exchangeable"
-  wt <- if (is.null(w)) rep(1, length(y)) else suppressWarnings(as.numeric(w))
-  ok <- is.finite(y) & !is.na(g) & is.finite(wt) & wt > 0
-  d <- data.frame(y = y[ok], g = droplevels(g[ok]), .w = wt[ok],
-                  cid = as.integer(factor(as.character(id[ok]))))
-  gtx <- droplevels(factor(as.character(d$g), levels = glv))   # for the texts
-  # never a model for data that cannot support a P value (p_omnibus says why
-  # before it gets here; these are the same guards, in the same order)
-  if (nlevels(d$g) < 2) return(na_why("fewer than two groups have data for this variable"))
-  if (length(unique(d$y)) < 2) return(na_why("variable is constant in this cohort"))
-  # a group of one eye or one patient leaves the sandwich SE nothing to estimate
-  # its variance from, so its mean counts as known exactly (a proportion needs
-  # one eye per group in p_value_guard; its one-eye group is "B has 1 patient")
-  if (!identical(kind, "proportion")) {
-    why <- small_group_note(gtx)
-    if (nzchar(why)) return(na_why(why))
-  }
-  why <- cluster_guard_note(id[ok], gtx, unit)
-  if (nzchar(why)) return(na_why(why))
-  # the minimum data for any clustered model (y ~ group: one coefficient per group)
-  why <- model_data_guard(nrow(d), length(unique(d$cid)), nlevels(d$g), unit)
-  if (!is.null(why)) return(na_why(why))
-  # a 0/1 outcome constant within a group has no finite estimate: a weighted
-  # comparison says which group, as the matched table does; an unweighted one
-  # falls back to the classical test
-  if (identical(kind, "proportion")) {
-    s0 <- tapply(d$y, gtx, function(z) all(z == 0))
-    s1 <- tapply(d$y, gtx, function(z) all(z == 1))
-    sep <- names(s0)[s0 | s1]
-    if (length(sep)) {
-      if (!weighted) return(NA_real_)
-      return(na_why(paste0("no weighted test possible: ",
-                           paste(paste0(ifelse(s0[sep], "no events in ", "only events in "), sep),
-                                 collapse = "; "))))
-    }
-  }
-  d <- d[order(d$cid), , drop = FALSE]          # geepack needs rows sorted by cluster
-  fam <- if (identical(kind, "proportion")) stats::binomial() else stats::gaussian()
-  # anything geepack prints stays off the console (stdout is the engine's LOG
-  # protocol): quiet_eval, helpers.R
-  fit <- quiet_eval(suppressWarnings(
-           if (is.null(w)) geepack::geeglm(y ~ g, id = cid, data = d, family = fam, corstr = cs)
-           else geepack::geeglm(y ~ g, id = cid, data = d, weights = .w, family = fam,
-                                corstr = cs)))$value
-  if (is.null(fit)) return(NA_real_)
-  gr_wald_p(fit, grep("^g", names(stats::coef(fit))))
+  wt <- gee_wald(fit, idx)
+  if (isTRUE(wt$singular)) return(structure(NA_real_, singular = TRUE))
+  wt$p
 }
 
 # ROBUST bivariate centroid comparison in the spirit of JCRS 2025 Part II (not
@@ -2453,10 +2996,28 @@ gee_group_p <- function(x, g, id, kind = "continuous", event = NULL, w = NULL,
 # the grand mean, S = the pooled 20%-winsorized covariance - so outlying eyes
 # cannot drag the centroid, calibrated by B = 999 BOOTSTRAP resamples (each
 # group recentred on its trimmed mean; fixed seed) rather than an F reference.
-# When a cluster id is supplied the bootstrap resamples PATIENTS, so the
-# robustness and the clustering hold at the same time.
+# The bootstrap resamples WITHIN each cohort (statistics.md S12): every resample
+# keeps every cohort with its own number of patients (eyes), so none is skipped
+# for a lost cohort. When a cluster id is supplied it resamples PATIENTS, so
+# the robustness and the clustering hold at the same time. The P value carries
+# attr "B" - the resamples actually used (one whose statistic cannot be
+# computed, e.g. a resample without spread, is skipped and not counted).
 ASTIG_TRIM <- 0.2
 ASTIG_BOOT_B <- 999L
+ASTIG_SEED <- 20250601L
+# A function returning the row indices of one bootstrap resample: whole
+# clusters (patients; each eye its own cluster when id is NULL) drawn with
+# replacement WITHIN each group, as many as the group has. A patient whose
+# eyes are in two groups is one cluster in each.
+astig_resampler <- function(g, id = NULL) {
+  g <- droplevels(factor(g))
+  id <- if (is.null(id)) seq_along(g) else fill_missing_ids(id)
+  cl <- split(seq_along(g), paste(as.integer(g), id, sep = "\r"))
+  first <- vapply(cl, `[`, integer(1), 1)
+  by_g <- split(seq_along(cl), as.integer(g)[first])
+  function() unlist(lapply(by_g, function(k)
+    cl[k[sample.int(length(k), length(k), replace = TRUE)]]), use.names = FALSE)
+}
 winsor <- function(v, trim) {
   if (trim <= 0) return(v)
   q <- stats::quantile(v, c(trim, 1 - trim), names = FALSE, na.rm = TRUE)
@@ -2508,36 +3069,29 @@ astig_robust_biv_p <- function(x, y, g, id = NULL, trim = ASTIG_TRIM, B = ASTIG_
   why <- astig_p_guard(g, if (clustered) id else NULL)
   if (nzchar(why)) return(astig_na(why))
   if (length(x) < 12) return(astig_na("fewer than 12 eyes for the bootstrap test"))
-  # Reproducibility: fix the bootstrap seed locally, restoring the caller's RNG
-  # state afterwards. Without this the same config + data printed a slightly
-  # different p on every run, which contradicts the preset-reproducibility claim.
-  if (exists(".Random.seed", envir = globalenv())) {
-    old_seed <- get(".Random.seed", envir = globalenv())
-    on.exit(assign(".Random.seed", old_seed, envir = globalenv()), add = TRUE)
-  } else {
-    on.exit(rm(".Random.seed", envir = globalenv()), add = TRUE)
-  }
-  set.seed(20250601L)
-  obs <- robust_biv_stat(x, y, g, trim)
-  if (!is.finite(obs)) return(astig_na("the robust statistic could not be computed"))
-  # null: recentre every group on its own trimmed mean, so groups share a centre
-  for (l in levels(g)) {
-    k <- g == l
-    x[k] <- x[k] - mean(x[k], trim = trim); y[k] <- y[k] - mean(y[k], trim = trim)
-  }
-  cl <- split(seq_along(x), id)                 # resample whole patients
-  nc <- length(cl)
-  cnt <- 0L; eff <- 0L
-  for (b in seq_len(B)) {
-    idx <- unlist(cl[sample.int(nc, nc, replace = TRUE)], use.names = FALSE)
-    gb <- droplevels(g[idx])
-    if (nlevels(gb) < nlevels(g)) next
-    st <- robust_biv_stat(x[idx], y[idx], gb, trim)
-    if (!is.finite(st)) next
-    eff <- eff + 1L; if (st >= obs) cnt <- cnt + 1L
-  }
-  if (eff < 50) return(astig_na("too few usable bootstrap resamples"))
-  (cnt + 1) / (eff + 1)
+  # Reproducibility: the bootstrap seed is fixed locally (with_local_seed),
+  # restoring the caller's RNG state afterwards. Without this the same config +
+  # data printed a slightly different p on every run, which contradicts the
+  # preset-reproducibility claim.
+  with_local_seed(ASTIG_SEED, {
+    obs <- robust_biv_stat(x, y, g, trim)
+    if (!is.finite(obs)) return(astig_na("the robust statistic could not be computed"))
+    # null: recentre every group on its own trimmed mean, so groups share a centre
+    for (l in levels(g)) {
+      k <- g == l
+      x[k] <- x[k] - mean(x[k], trim = trim); y[k] <- y[k] - mean(y[k], trim = trim)
+    }
+    draw <- astig_resampler(g, if (clustered) id else NULL)   # within each cohort
+    cnt <- 0L; eff <- 0L
+    for (b in seq_len(B)) {
+      idx <- draw()
+      st <- robust_biv_stat(x[idx], y[idx], g[idx], trim)
+      if (!is.finite(st)) next
+      eff <- eff + 1L; if (st >= obs) cnt <- cnt + 1L
+    }
+    if (eff < 50) return(astig_na("too few usable bootstrap resamples"))
+    structure((cnt + 1) / (eff + 1), B = eff)
+  })
 }
 
 # Bivariate comparison of astigmatism centroids on the DOUBLED-angle components.
@@ -2553,14 +3107,15 @@ astig_robust_biv_p <- function(x, y, g, id = NULL, trim = ASTIG_TRIM, B = ASTIG_
 # for data below the minimum for any clustered model (helpers.R
 # model_data_guard, contract R4-10: "too few eyes for this model (n = 5)").
 # With weights that are not all 1 the GEE uses an independence working
-# correlation, like every weighted model (contract R4-1). A GEE whose
+# correlation, like every weighted model (contract R4-1), and so does every
+# GEE of a matched cohort (matched = TRUE; decision D18), weighted or not. A GEE whose
 # group-term covariance is numerically singular is not reported (gr_wald_p,
 # contract R4-6): a weighted test then says it could not be fitted, a clustered
 # one falls back to Hotelling / Pillai, labelled "GEE not fitted" and counted
 # in the run log's fallback line (.gr_opts$n_gee_fallback), like p_omnibus.
 # The result carries attr "test" - the test that actually ran ("weighted GEE",
 # "clustered GEE", "Hotelling", "Pillai") - and, when it is NA, attr "why".
-astig_bivariate_p <- function(x, y, g, id = NULL, w = NULL) {
+astig_bivariate_p <- function(x, y, g, id = NULL, w = NULL, matched = isTRUE(.gr_opts$matched)) {
   g <- droplevels(factor(as.character(g)))
   ok <- is.finite(x) & is.finite(y) & !is.na(g)
   weighted <- !is.null(w)
@@ -2607,7 +3162,7 @@ astig_bivariate_p <- function(x, y, g, id = NULL, w = NULL) {
         data.frame(v = y[ok], comp = "y", g = droplevels(g[ok]), cid = as.character(idk), .w = wk))
       d2$comp <- factor(d2$comp); d2$cid <- as.integer(factor(d2$cid))
       d2 <- d2[order(d2$cid), , drop = FALSE]
-      cs <- if (weighted && weights_nonunit(wk)) "independence" else "exchangeable"
+      cs <- if (isTRUE(matched) || (weighted && weights_nonunit(wk))) "independence" else "exchangeable"
       f2 <- quiet_eval(suppressWarnings(
               if (weighted) geepack::geeglm(v ~ comp * g, id = cid, data = d2, weights = .w,
                                             corstr = cs)
@@ -2639,13 +3194,14 @@ astig_bivariate_p <- function(x, y, g, id = NULL, w = NULL) {
 # each group vs the reference (first level), Holm-adjusted across the
 # comparisons; attr "fallback": the comparisons whose clustered GEE could not
 # be fitted (the unclustered test ran instead)
-astig_vs_ref <- function(x, y, g, glv, holm = TRUE, id = NULL, w = NULL) {
+astig_vs_ref <- function(x, y, g, glv, holm = TRUE, id = NULL, w = NULL,
+                         matched = isTRUE(.gr_opts$matched)) {
   if (length(glv) < 2) return(NULL)
   ref <- glv[1]; others <- glv[-1]
   res <- lapply(others, function(o) {
     k <- g %in% c(ref, o)
     astig_bivariate_p(x[k], y[k], g[k], id = if (is.null(id)) NULL else id[k],
-                      w = if (is.null(w)) NULL else w[k])
+                      w = if (is.null(w)) NULL else w[k], matched = matched)
   })
   p <- vapply(res, function(r) as.numeric(r)[1], numeric(1))
   fb <- others[vapply(res, function(r) is.finite(r) && isTRUE(attr(r, "fallback")), logical(1))]
@@ -2654,45 +3210,109 @@ astig_vs_ref <- function(x, y, g, glv, holm = TRUE, id = NULL, w = NULL) {
   structure(stats::setNames(p, others), fallback = fb, few = few)
 }
 
-astig_region <- function(x, y, kind = "normal", scale = 1, level = 0.95,
-                         centroid = FALSE, id = NULL) {
+# The 95% region of one cohort's doubled-angle cloud, the ONE place its method
+# is chosen (decision D5), so it can be re-tuned after the comparison with the
+# journal's reference tools:
+#   method "depth" (default) - the convex hull of the floor(level * n) deepest
+#          eyes, depth = the projection-type data depth of astig_depth around
+#          the centre ("mean": the centroid, as Part II's mean polygon; or
+#          "median"). Returns the closed polygon, with attrs "kept" (the eyes
+#          the hull is built from), "inside" (the eyes inside or on it - more
+#          than "kept" only when an eye ties the deepest excluded one, e.g. a
+#          duplicate of a vertex), "n" and "method".
+#   method "normal" - the bivariate-normal ellipse {u : (u-c)' S^-1 (u-c) <=
+#          qchisq(level, 2)}; attr "method".
+# ("polygon", the v1.0.0 name of the hull, is read as "depth".) NULL when the
+# cohort has fewer than 3 eyes or the ellipse's covariance is singular.
+astig_region <- function(x, y, method = "depth", level = 0.95, center = "mean") {
   ok <- is.finite(x) & is.finite(y)
-  if (!is.null(id)) id <- id[ok]
   x <- x[ok]; y <- y[ok]
   n <- length(x)
   if (n < 3) return(NULL)
-  cx <- mean(x); cy <- mean(y)
-  if (isTRUE(centroid)) return(centroid_region(x, y, id, level))
-  if (identical(kind, "polygon")) {
-    # JCRS 2025 Part II: a NONPARAMETRIC 95% boundary based on the depth of each
-    # point in the cloud - peel whole convex hulls while a full layer still
-    # leaves >= floor(95% n) eyes, then finish the last layer vertex by vertex
-    # (most extreme first, by Mahalanobis distance so the elongated WTR/ATR
-    # clouds are trimmed along their real shape) until EXACTLY floor(95% n)
-    # remain, and hull those. Stopping at whole layers kept every eye for any
-    # cohort under ~200, because one layer already holds more than 5% of it.
-    idx <- seq_len(n)
-    target <- max(floor(level * n), 3)
-    while (length(idx) > target) {
-      h <- grDevices::chull(x[idx], y[idx])
-      if (length(idx) - length(h) >= target) { idx <- idx[-h]; next }   # a whole layer
-      xi <- x[idx]; yi <- y[idx]
-      md <- tryCatch(stats::mahalanobis(cbind(xi[h], yi[h]), c(mean(xi), mean(yi)),
-                                        stats::cov(cbind(xi, yi))),
-                     error = function(e) NULL)
-      if (is.null(md) || any(!is.finite(md)))
-        md <- (xi[h] - mean(xi))^2 + (yi[h] - mean(yi))^2
-      idx <- idx[-h[which.max(md)]]
-    }
-    if (length(idx) < 3) return(NULL)
-    xs <- x[idx]; ys <- y[idx]
-    h <- grDevices::chull(xs, ys)
-    out <- data.frame(x = xs[c(h, h[1])], y = ys[c(h, h[1])])
-    attr(out, "kept") <- length(idx); attr(out, "n") <- n
+  if (method %in% c("depth", "polygon")) {
+    o <- astig_depth(x, y, center)
+    k <- min(n, max(floor(level * n + 1e-9), 3L))
+    idx <- order(o)[seq_len(k)]
+    h <- grDevices::chull(x[idx], y[idx])
+    hx <- x[idx][h]; hy <- y[idx][h]
+    out <- data.frame(x = c(hx, hx[1]), y = c(hy, hy[1]))
+    attr(out, "kept") <- k
+    attr(out, "inside") <- sum(in_convex_polygon(x, y, hx, hy))
+    attr(out, "n") <- n
+    attr(out, "method") <- "depth"
     return(out)
   }
-  S <- tryCatch(stats::cov(cbind(x, y)) * scale, error = function(e) NULL)
-  ellipse_path(cx, cy, S, sqrt(stats::qchisq(level, df = 2)))
+  S <- tryCatch(stats::cov(cbind(x, y)), error = function(e) NULL)
+  out <- ellipse_path(mean(x), mean(y), S, sqrt(stats::qchisq(level, df = 2)))
+  if (!is.null(out)) { attr(out, "n") <- n; attr(out, "method") <- "normal" }
+  out
+}
+
+# Projection-type OUTLYINGNESS of every point (its depth is 1 / (1 + it)), in
+# the spirit of the projection depth Wilcox describes and Holladay et al. 2022
+# use for the convex polygon: for each direction u through the centre c and an
+# eye (one direction per distinct eye; u and -u are the same direction), the
+# eyes are projected onto u, z = u . (p - c), and an eye's outlyingness is the
+# largest, over the directions, of |z - z0| / s, with z0 the projected centre
+# (0 for the centroid; the median of z for center = "median") and s the MAD of
+# z (the IQR / 1.349 when the MAD is 0, then the SD: quarter-dioptre data on
+# whole-degree axes can put more than half the eyes on one projection, and a
+# smaller fallback would make every other eye in that direction look extreme;
+# a direction along which every eye projects alike is not used). The
+# outlyingness is a maximum of convex functions of the point, so the eyes
+# below any level form a convex set: no excluded eye lies inside the hull of
+# the deeper ones unless it ties them.
+ASTIG_DEPTH_MAX_DIRS <- 720L
+astig_depth <- function(x, y, center = "mean") {
+  n <- length(x)
+  cx <- if (identical(center, "median")) stats::median(x) else mean(x)
+  cy <- if (identical(center, "median")) stats::median(y) else mean(y)
+  dx <- x - cx; dy <- y - cy
+  L <- sqrt(dx^2 + dy^2)
+  k <- L > 1e-12
+  if (!any(k)) return(rep(0, n))
+  u <- cbind(dx[k] / L[k], dy[k] / L[k])
+  flip <- u[, 1] < -1e-12 | (abs(u[, 1]) <= 1e-12 & u[, 2] < 0)
+  u[flip, ] <- -u[flip, ]
+  u <- unique(round(u, 12))
+  # a large cohort: ASTIG_DEPTH_MAX_DIRS evenly spaced directions instead (the
+  # n x m projection matrix stays small; any fixed set of directions keeps the
+  # region convex)
+  if (nrow(u) > ASTIG_DEPTH_MAX_DIRS) {
+    t0 <- (seq_len(ASTIG_DEPTH_MAX_DIRS) - 1) * pi / ASTIG_DEPTH_MAX_DIRS
+    u <- cbind(cos(t0), sin(t0))
+  }
+  Z <- cbind(dx, dy) %*% t(u)                  # n eyes x m directions
+  z0 <- if (identical(center, "median")) apply(Z, 2, stats::median) else rep(0, ncol(Z))
+  s <- apply(Z, 2, stats::mad)
+  s0 <- s < 1e-12
+  if (any(s0)) s[s0] <- apply(Z[, s0, drop = FALSE], 2, stats::IQR) / 1.349
+  s0 <- s < 1e-12
+  if (any(s0)) s[s0] <- apply(Z[, s0, drop = FALSE], 2, stats::sd)
+  use <- s >= 1e-12
+  if (!any(use)) return(rep(0, n))
+  dev <- abs(sweep(Z[, use, drop = FALSE], 2, z0[use]))
+  apply(sweep(dev, 2, s[use], "/"), 1, max)
+}
+
+# TRUE for each point inside or on the convex polygon with vertices (hx, hy)
+# in hull order (either orientation); a degenerate hull (a segment or one
+# point) contains the points on it.
+in_convex_polygon <- function(x, y, hx, hy, eps = 1e-9) {
+  k <- length(hx)
+  if (k == 0) return(rep(FALSE, length(x)))
+  if (k < 3) {
+    if (k == 1) return(abs(x - hx) <= eps & abs(y - hy) <= eps)
+    cr <- (hx[2] - hx[1]) * (y - hy[1]) - (hy[2] - hy[1]) * (x - hx[1])
+    t <- ((x - hx[1]) * (hx[2] - hx[1]) + (y - hy[1]) * (hy[2] - hy[1])) /
+         max((hx[2] - hx[1])^2 + (hy[2] - hy[1])^2, 1e-300)
+    return(abs(cr) <= eps & t >= -eps & t <= 1 + eps)
+  }
+  j <- c(seq_len(k)[-1], 1)
+  cr <- vapply(seq_len(k), function(i)
+    (hx[j[i]] - hx[i]) * (y - hy[i]) - (hy[j[i]] - hy[i]) * (x - hx[i]), numeric(length(x)))
+  cr <- matrix(cr, nrow = length(x))
+  apply(cr, 1, function(r) all(r <= eps) || all(r >= -eps))
 }
 
 # points of the ellipse {u : (u - c)' S^-1 (u - c) <= r^2}; NULL when S is not
@@ -2738,7 +3358,7 @@ centroid_region <- function(x, y, id = NULL, level = 0.95) {
   out
 }
 
-# Why centroid_region() (via astig_region) drew nothing for these eyes: too few
+# Why astig_centroid_region() drew nothing for these eyes: too few
 # eyes or patients, or a cloud with no spread in some direction (all eyes on one
 # meridian, or identical), whose covariance is singular
 centroid_skip_why <- function(x, y, id = NULL) {
@@ -2753,16 +3373,659 @@ centroid_skip_why <- function(x, y, id = NULL) {
   "no spread in one direction"
 }
 
+# The 95% confidence region of a cohort's CENTROID (decision D6), method:
+#   "bootstrap" (default) - nonparametric: the depth polygon of astig_region
+#              applied to B = 999 bootstrap centroids (patients resampled when
+#              `id` is given, eyes otherwise; fixed seed), so it assumes no
+#              normality; attr "basis" "bootstrap over patients" / "... eyes".
+#   "hotelling" - the Hotelling T² ellipse of centroid_region (clustered
+#              sandwich covariance when `id` is given).
+# NULL when there are fewer than CENTROID_MIN eyes (patients) or no spread.
+ASTIG_CENTROID_SEED <- 20250602L
+astig_centroid_region <- function(x, y, id = NULL, method = "bootstrap", level = 0.95,
+                                  B = ASTIG_BOOT_B) {
+  ok <- is.finite(x) & is.finite(y)
+  x <- x[ok]; y <- y[ok]
+  if (!is.null(id)) id <- id[ok]
+  if (!identical(method, "bootstrap")) return(centroid_region(x, y, id, level))
+  idf <- if (is.null(id)) seq_along(x) else fill_missing_ids(id)
+  G <- length(unique(idf))
+  if (G < CENTROID_MIN) return(NULL)
+  # per-cluster sums: a resample's centroid is the sum of its clusters' sums
+  # over the sum of their eyes
+  sx <- rowsum(x, idf, reorder = FALSE)[, 1]; sy <- rowsum(y, idf, reorder = FALSE)[, 1]
+  nn <- rowsum(rep(1, length(x)), idf, reorder = FALSE)[, 1]
+  I <- with_local_seed(ASTIG_CENTROID_SEED,
+                       matrix(sample.int(G, G * B, replace = TRUE), nrow = B))
+  den <- rowSums(matrix(nn[I], nrow = B))
+  bx <- rowSums(matrix(sx[I], nrow = B)) / den
+  by <- rowSums(matrix(sy[I], nrow = B)) / den
+  # no spread, or spread along one direction only (every eye on one meridian):
+  # a "polygon" of floating-point noise would be drawn - none, as the
+  # centroid-against-zero tests say (centroid_skip_why: "no spread in one
+  # direction"); the check is relative to the spread there is
+  ev <- tryCatch(eigen(stats::cov(cbind(bx, by)), symmetric = TRUE, only.values = TRUE)$values,
+                 error = function(e) c(0, 0))
+  if (!all(is.finite(ev)) || max(ev) < 1e-24 || min(ev) < 1e-10 * max(ev)) return(NULL)
+  out <- astig_region(bx, by, "depth", level = level, center = "mean")
+  if (is.null(out) || nrow(out) < 4) return(NULL)            # a hull needs 3 vertices
+  attr(out, "basis") <- if (is.null(id)) "bootstrap over eyes" else "bootstrap over patients"
+  attr(out, "B") <- B
+  out
+}
+
+# ============================================================
+# JCRS 2025 astigmatism statistics (decisions D4, D7): what a double-angle
+# panel prints and the "Astigmatism (JCRS 2025)" sheet lists, computed ONCE per
+# vector and cohort set (astig_vector_stats) and shared by both, so a figure
+# and its sheet never disagree. Every test names itself; a test that cannot
+# run gives NA with its reason (attr "why"), never a silent substitute.
+# ============================================================
+ASTIG_CUTS <- seq(0.25, 2.00, by = 0.25)     # the cumulative intervals (D) of Part II / WHWK
+ASTIG_TOL <- 1e-9                            # a magnitude on an interval edge counts as within
+
+# The vectors of the standard (D2-D3) for a run's resolved vectors `av`, in
+# panel order: PRE, SIA, PE - and POST only when at least one target is not
+# plano (otherwise POST = PE, and the PE title says so). key: file and sheet
+# name; title: the figure title.
+astig_jcrs_vectors <- function(av) {
+  nonplano <- isTRUE(av$n_target_nonplano > 0)
+  out <- list(
+    PRE = list(key = "PRE", title = "Preoperative refractive astigmatism",
+               mag = av$pre, ax = av$pre_ax),
+    SIA = list(key = "SIA", title = "Surgically induced astigmatism (postoperative - preoperative)",
+               mag = av$sia, ax = av$sax),
+    PE = list(key = "PE", title = if (nonplano)
+                "Prediction error of refractive astigmatism (postoperative - target)"
+              else "Prediction error (= postoperative refractive astigmatism; target plano)",
+              mag = av$pe, ax = av$pe_ax))
+  if (nonplano)
+    out$POST <- list(key = "POST", title = "Postoperative refractive astigmatism",
+                     mag = av$post, ax = av$post_ax)
+  out
+}
+
+# "0.13 D @ 97°": a centroid (or any vector) in polar form, plus axis
+astig_polar_text <- function(m, a, d = 2)
+  if (is.finite(m) && is.finite(a)) sprintf(paste0("%.", d, "f D @ %.0f°"), m, a) else "n/a"
+
+# The summary of one cohort's vector (D4): n eyes and patients, centroid (x,
+# y, magnitude @ plus axis), total SD with the N denominator (Part II
+# equations 6-9: sqrt of the population variances of x and y), magnitude mean
+# ± SD, median, range and root mean square, and the cumulative percentages of
+# eyes with a magnitude <= 0.25 ... 2.00 D and > 1.00 D.
+astig_summary1 <- function(m, a, id = NULL) {
+  ok <- is.finite(m) & is.finite(a)
+  m <- m[ok]; a <- a[ok]
+  n <- length(m)
+  x <- m * cos(2 * a * pi / 180); y <- m * sin(2 * a * pi / 180)
+  cx <- if (n) mean(x) else NA_real_; cy <- if (n) mean(y) else NA_real_
+  list(n = n,
+       n_pat = if (is.null(id)) NA_integer_ else length(unique(fill_missing_ids(id[ok]))),
+       cx = cx, cy = cy, cm = sqrt(cx^2 + cy^2),
+       ca = if (n) (atan2(cy, cx) * 180 / pi / 2) %% 180 else NA_real_,
+       tsd = if (n) sqrt(mean((x - cx)^2) + mean((y - cy)^2)) else NA_real_,
+       mmean = if (n) mean(m) else NA_real_,
+       msd = if (n > 1) stats::sd(m) else NA_real_,
+       mmed = if (n) stats::median(m) else NA_real_,
+       mmin = if (n) min(m) else NA_real_, mmax = if (n) max(m) else NA_real_,
+       rms = if (n) sqrt(mean(m^2)) else NA_real_,
+       cum = vapply(ASTIG_CUTS, function(cc) if (n) 100 * mean(m <= cc + ASTIG_TOL) else NA_real_,
+                    numeric(1)),
+       gt1 = if (n) 100 * mean(m > 1 + ASTIG_TOL) else NA_real_)
+}
+
+# One-sample test of a cohort's centroid against zero (D7a; WHWK "bivariate
+# mean is zero", Eyetemis trueness), by method:
+#   "robust"  - the 20%-trimmed mean vector studentised by the 20%-winsorized
+#               covariance, n t' S^-1 t, calibrated by B bootstrap resamples
+#               of the eyes recentred on the trimmed mean (patients resampled
+#               when `id` is given; fixed seed);
+#   "classic" - one-sample Hotelling T², F = (n - 2) / (2 (n - 1)) T² on (2,
+#               n - 2) df, eyes independent;
+#   "gee"     - both components stacked, intercepts only, independence working
+#               correlation, clustered by patient: joint Wald test of the two
+#               intercepts in the run's small-sample inference (gee_wald).
+# Returns the P value with attr "test" (and "B" for the bootstrap), or NA with
+# attr "why".
+robust_zero_stat <- function(x, y, trim) {
+  mu <- c(mean(x, trim = trim), mean(y, trim = trim))
+  S <- stats::cov(cbind(winsor(x, trim), winsor(y, trim)))
+  Si <- tryCatch(solve(S), error = function(e) NULL)
+  if (is.null(Si) || any(!is.finite(Si))) return(NA_real_)
+  as.numeric(length(x) * t(mu) %*% Si %*% mu)
+}
+astig_zero_p <- function(x, y, id = NULL, method = "robust", trim = ASTIG_TRIM, B = ASTIG_BOOT_B) {
+  ok <- is.finite(x) & is.finite(y)
+  x <- x[ok]; y <- y[ok]
+  if (!is.null(id)) id <- fill_missing_ids(id[ok])
+  n <- length(x)
+  unit <- if (is.null(id)) "eye" else "patient"
+  if (identical(method, "gee")) {
+    tst <- "clustered GEE (intercepts)"
+    if (is.null(id)) id <- paste0("eye ", seq_len(n))
+    G <- length(unique(id))
+    small <- model_data_guard(n, G, 2L, unit)
+    if (!is.null(small)) return(astig_na(small, tst))
+    if (!requireNamespace("geepack", quietly = TRUE)) return(astig_na("geepack is not installed", tst))
+    d2 <- rbind(data.frame(v = x, comp = "x", cid = id), data.frame(v = y, comp = "y", cid = id))
+    d2$comp <- factor(d2$comp); d2$cid <- as.integer(factor(d2$cid))
+    d2 <- d2[order(d2$cid), , drop = FALSE]
+    fit <- quiet_eval(suppressWarnings(
+      geepack::geeglm(v ~ comp - 1, id = cid, data = d2, corstr = "independence")))$value
+    if (is.null(fit)) return(astig_na("the GEE could not be fitted", tst))
+    wt <- gee_wald(fit, 1:2, unit)
+    if (!is.finite(wt$p))
+      return(astig_na(if (nzchar(wt$why)) wt$why else "the GEE covariance is singular (no spread)", tst))
+    return(structure(wt$p, test = tst, few = few_patient_groups(id, rep("cohort", n), unit)))
+  }
+  if (identical(method, "classic")) {
+    tst <- "one-sample Hotelling T²"
+    if (n < 3) return(astig_na(sprintf("too few eyes (n = %d)", n), tst))
+    S <- stats::cov(cbind(x, y)); mu <- c(mean(x), mean(y))
+    Si <- tryCatch(solve(S), error = function(e) NULL)
+    if (is.null(Si) || any(!is.finite(Si))) return(astig_na("the eyes have no spread in one direction", tst))
+    T2 <- as.numeric(n * t(mu) %*% Si %*% mu)
+    Fv <- (n - 2) / (2 * (n - 1)) * T2
+    return(structure(stats::pf(Fv, 2, n - 2, lower.tail = FALSE), test = tst, stat = Fv))
+  }
+  tst <- "robust trimmed T², bootstrap"
+  if (n < 12) return(astig_na("fewer than 12 eyes for the bootstrap test", tst))
+  if (!is.null(id) && length(unique(id)) < 3)
+    return(astig_na(sprintf("%d patients (at least 3 needed to resample patients)", length(unique(id))), tst))
+  obs <- robust_zero_stat(x, y, trim)
+  if (!is.finite(obs)) return(astig_na("the eyes have no spread in one direction", tst))
+  x0 <- x - mean(x, trim = trim); y0 <- y - mean(y, trim = trim)
+  draw <- astig_resampler(rep("cohort", n), id)
+  with_local_seed(ASTIG_SEED, {
+    cnt <- 0L; eff <- 0L
+    for (b in seq_len(B)) {
+      i <- draw()
+      st <- robust_zero_stat(x0[i], y0[i], trim)
+      if (!is.finite(st)) next
+      eff <- eff + 1L; if (st >= obs) cnt <- cnt + 1L
+    }
+  })
+  if (eff < 50) return(astig_na("too few usable bootstrap resamples", tst))
+  structure((cnt + 1) / (eff + 1), test = tst, B = eff,
+            few = if (!is.null(id)) few_patient_groups(id, rep("cohort", n)) else NULL)
+}
+
+# Heteroscedastic comparison of the 20%-trimmed means of a scalar between
+# cohorts (D7b: the precision - each eye's distance to its cohort centroid -
+# and the mean magnitude; the robust t test of Eyetemis): Yuen's statistic for
+# two cohorts and its Welch-type form for more,
+#   Q = sum_j w_j (t_j - t_w)^2,  w_j = 1 / d_j,  t_w = sum w_j t_j / sum w_j,
+#   d_j = (n_j - 1) s_wj^2 / (h_j (h_j - 1)),  h_j = n_j - 2 floor(0.2 n_j),
+# (s_wj^2: the 20%-winsorized variance), calibrated by B bootstrap resamples of
+# the data recentred on each cohort's trimmed mean, patients (eyes) resampled
+# within each cohort; fixed seed. Returns P with attrs "test", "B", "values"
+# (the trimmed mean of each cohort), or NA with "why".
+trim_q_stat <- function(v, g, trim) {
+  lv <- levels(g)
+  tm <- dj <- numeric(length(lv))
+  for (i in seq_along(lv)) {
+    z <- v[g == lv[i]]; nj <- length(z)
+    hj <- nj - 2 * floor(trim * nj)
+    if (hj < 2) return(NA_real_)
+    tm[i] <- mean(z, trim = trim)
+    dj[i] <- (nj - 1) * stats::var(winsor(z, trim)) / (hj * (hj - 1))
+  }
+  if (any(!is.finite(dj)) || any(dj <= 0)) return(NA_real_)
+  w <- 1 / dj
+  tw <- sum(w * tm) / sum(w)
+  sum(w * (tm - tw)^2)
+}
+astig_trimmed_p <- function(v, g, id = NULL, trim = ASTIG_TRIM, B = ASTIG_BOOT_B) {
+  tst <- "robust 20%-trimmed means, bootstrap"
+  g <- droplevels(factor(g))
+  ok <- is.finite(v) & !is.na(g)
+  v <- v[ok]; g <- droplevels(g[ok])
+  clustered <- !is.null(id)
+  if (clustered) id <- fill_missing_ids(id[ok])
+  why <- p_value_guard(v, g, "continuous")
+  if (!nzchar(why)) why <- astig_p_guard(g, if (clustered) id else NULL)
+  if (nzchar(why)) return(astig_na(why, tst))
+  if (length(v) < 12) return(astig_na("fewer than 12 eyes for the bootstrap test", tst))
+  obs <- trim_q_stat(v, g, trim)
+  if (!is.finite(obs)) {
+    flat <- levels(g)[vapply(levels(g), function(l) {
+      z <- v[g == l]
+      length(z) - 2 * floor(trim * length(z)) < 2 || !isTRUE(stats::var(winsor(z, trim)) > 0)
+    }, logical(1))]
+    return(astig_na(paste0(if (length(flat)) paste(flat, collapse = ", ") else "a cohort",
+                           if (length(flat) > 1) " have" else " has",
+                           sprintf(" no spread after %d%% winsorizing", as.integer(trim * 100))), tst))
+  }
+  tms <- tapply(v, g, mean, trim = trim)
+  v0 <- v - tms[as.character(g)]
+  draw <- astig_resampler(g, if (clustered) id else NULL)
+  with_local_seed(ASTIG_SEED, {
+    cnt <- 0L; eff <- 0L
+    for (b in seq_len(B)) {
+      i <- draw()
+      st <- trim_q_stat(v0[i], g[i], trim)
+      if (!is.finite(st)) next
+      eff <- eff + 1L; if (st >= obs) cnt <- cnt + 1L
+    }
+  })
+  if (eff < 50) return(astig_na("too few usable bootstrap resamples", tst))
+  structure((cnt + 1) / (eff + 1), test = tst, B = eff, values = tms,
+            few = if (clustered) few_patient_groups(id, g) else NULL)
+}
+
+# The univariate between-cohort test of the "gee" and "classic" methods (and
+# of the cumulative intervals, D7c): a GEE clustered by patient when `id` is
+# given and a patient contributes two of these eyes (Gaussian; binomial for a
+# 0/1 `y` with kind "proportion"; independence working correlation on a
+# matched cohort, D18) - helpers.R gee_group_p, the figures' and tables' one
+# implementation - else the classical test: Welch t / Welch ANOVA, or Fisher's
+# exact test for a proportion. A GEE that was fitted but failed (a cohort with
+# 0% or 100%: no finite estimate) falls back to the classical test, labelled
+# "(GEE not fitted)". Returns P with attr "test", or NA with "why".
+astig_univ_p <- function(y, g, id = NULL, kind = "continuous", matched = FALSE) {
+  prop <- identical(kind, "proportion")
+  g <- droplevels(factor(g))
+  ok <- (if (prop) !is.na(y) else is.finite(y)) & !is.na(g)
+  y <- y[ok]; g <- droplevels(g[ok])
+  if (!is.null(id)) id <- fill_missing_ids(id[ok])
+  why <- p_value_guard(y, g, if (prop) "dichotomous" else kind)
+  if (nzchar(why)) return(astig_na(why, ""))
+  fb <- FALSE
+  if (!is.null(id) && fellow_eyes_present(id)) {
+    tst <- if (prop) "GEE (binomial, clustered by patient)" else "GEE (clustered by patient)"
+    why <- cluster_guard_note(id, g)
+    if (nzchar(why)) return(astig_na(why, tst))
+    pc <- gee_group_p(y, g, id, kind, corstr = if (isTRUE(matched)) "independence")
+    if (is.finite(pc)) return(structure(as.numeric(pc), test = tst, few = few_patient_groups(id, g)))
+    why_g <- as.character(attr(pc, "why") %||% "")[1]
+    if (!is.na(why_g) && nzchar(why_g)) return(astig_na(why_g, tst))
+    fb <- TRUE
+  }
+  if (prop) {
+    tab <- table(factor(y, levels = c(FALSE, TRUE)), g)
+    p <- tryCatch(stats::fisher.test(tab)$p.value, error = function(e) NULL)
+    tst <- "Fisher's exact test"
+    if (is.null(p)) {
+      p <- with_local_seed(ASTIG_SEED, tryCatch(
+        stats::fisher.test(tab, simulate.p.value = TRUE, B = 20000L)$p.value, error = function(e) NA_real_))
+      tst <- "Fisher's exact test (Monte Carlo, 20,000 replicates)"
+    }
+  } else {
+    gt <- group_test(y, g, "continuous")
+    p <- gt$p; tst <- gr_test_label(gt$test)
+    if (!is.finite(p)) return(astig_na(gt$note %||% "the test could not be computed", tst))
+  }
+  if (fb) {
+    tst <- paste0(tst, " (GEE not fitted)")
+    .gr_opts$n_gee_fallback <- (.gr_opts$n_gee_fallback %||% 0L) + 1L
+  }
+  structure(as.numeric(p), test = tst)
+}
+
+# McNemar's test of the preoperative against the postoperative refractive
+# astigmatism of the same eyes at one interval (D7c): the eyes within `cut` D
+# before and after. `id` (the clustering of the tests; NULL when the tests do
+# not cluster) clusters the test when a patient contributes two discordant
+# eyes. Fewer than 25 discordant eyes: the exact binomial test - on the eyes,
+# or, clustered, the exact sign test on the patients' net changes d_k = b_k -
+# c_k (patients with d_k = 0 drop out); otherwise, clustered, the
+# cluster-adjusted statistic of Durkalski et al. 2003,
+# (sum_k (b_k - c_k))^2 / sum_k (b_k - c_k)^2 over patients k, else McNemar's
+# chi-square (b - c)^2 / (b + c), without continuity correction (the two agree
+# with one eye per patient). b: preop above the interval, postop within it
+# (improved); c: the reverse (worsened). count_id: the patients counted
+# (n_pat; the mapped ID also when the tests do not cluster).
+astig_mcnemar <- function(pre, post, id = NULL, cut = 0.5, count_id = id) {
+  ok <- is.finite(pre) & is.finite(post)
+  a <- pre[ok] <= cut + ASTIG_TOL; b <- post[ok] <= cut + ASTIG_TOL
+  imp <- !a & b; wor <- a & !b
+  out <- list(n = sum(ok), n_pat = if (is.null(count_id)) NA_integer_ else length(unique(fill_missing_ids(count_id[ok]))),
+              pre_pct = if (any(ok)) 100 * mean(a) else NA_real_,
+              post_pct = if (any(ok)) 100 * mean(b) else NA_real_,
+              improved = sum(imp), worsened = sum(wor), test = "", stat = NA_real_, p = NA_real_, why = "")
+  nd <- out$improved + out$worsened
+  if (!any(ok)) { out$why <- "no eye has both refractions"; return(out) }
+  if (nd == 0) {
+    out$why <- "no discordant eyes (every eye on the same side of the interval before and after)"
+    return(out)
+  }
+  idk <- if (is.null(id)) NULL else fill_missing_ids(id[ok])
+  # clustered only when a patient has two discordant eyes: otherwise every
+  # patient's d_k is -1, 0 or 1 and the eye-level test is the patient-level one
+  clus <- !is.null(idk) && fellow_eyes_present(idk[imp | wor])
+  # with clustering on, a single patient is no test (as every other test of
+  # the cohort says)
+  if (!is.null(idk) && length(unique(idk[imp | wor])) < 2) {
+    out$test <- if (clus) "McNemar exact, cluster-level (sign test on patients)" else "McNemar exact (binomial)"
+    out$why <- "the discordant eyes are from 1 patient"
+    return(out)
+  }
+  if (nd < 25 && clus) {
+    out$test <- "McNemar exact, cluster-level (sign test on patients; fewer than 25 discordant eyes)"
+    dk <- rowsum(as.numeric(imp) - as.numeric(wor), idk, reorder = FALSE)[, 1]
+    kk <- sum(dk != 0)
+    if (kk == 0) {
+      out$why <- "no patient has a net change (each patient's improved and worsened eyes cancel)"
+      return(out)
+    }
+    out$p <- min(1, 2 * stats::pbinom(min(sum(dk > 0), sum(dk < 0)), kk, 0.5))
+    return(out)
+  }
+  if (nd < 25) {
+    out$test <- "McNemar exact (binomial; fewer than 25 discordant eyes)"
+    out$p <- min(1, 2 * stats::pbinom(min(out$improved, out$worsened), nd, 0.5))
+    return(out)
+  }
+  if (clus) {
+    dk <- rowsum(as.numeric(imp) - as.numeric(wor), idk, reorder = FALSE)[, 1]
+    out$test <- "McNemar, cluster-adjusted (Durkalski 2003)"
+    if (sum(dk^2) == 0) {
+      out$why <- "no patient has a net change (each patient's improved and worsened eyes cancel)"
+      return(out)
+    }
+    out$stat <- sum(dk)^2 / sum(dk^2)
+  } else {
+    out$stat <- (out$improved - out$worsened)^2 / nd
+    out$test <- "McNemar chi-square (no continuity correction)"
+  }
+  out$p <- stats::pchisq(out$stat, 1, lower.tail = FALSE)
+  out
+}
+
+# The run-level cache of astig_vector_stats: the astigmatism sheet (built with
+# the workbook) and the double-angle figures (drawn after it) ask for the same
+# statistics, which include several bootstrap tests; the second ask is served
+# from here. The key is a fingerprint of everything the result depends on.
+.astig_cache <- new.env(parent = emptyenv())
+astig_cache_reset <- function() rm(list = ls(.astig_cache, all.names = TRUE), envir = .astig_cache)
+astig_key <- function(...) {
+  fp <- function(v) {
+    if (is.null(v)) return("-")
+    if (is.character(v) || is.factor(v)) v <- as.integer(factor(as.character(v), levels = unique(as.character(v))))
+    v <- as.numeric(v); v[!is.finite(v)] <- -7.77
+    i <- seq_along(v)
+    sprintf("%d:%.15g:%.15g", length(v), sum(v * sqrt(i)), sum(v^2 * (1 + i %% 7)))
+  }
+  paste(vapply(list(...), function(z) if (is.list(z)) paste(unlist(z), collapse = "|")
+                                     else if (length(z) == 1 && is.character(z)) z else fp(z),
+               character(1)), collapse = "#")
+}
+
+# Everything the standard asks for ONE vector of one cohort set (D4-D7):
+#   m, a     : magnitude and plus axis of each eye
+#   g, glv   : cohort of each eye and the cohort order (reference first)
+#   id       : patient id of each eye when the tests cluster (NULL: eyes
+#              independent); the "classic" method never clusters
+#   method   : astig_test_method - "robust" (default), "gee" or "classic"
+#   region   : the data region drawn ("polygon" = the depth polygon, "normal",
+#              "both"); centroid_region: "bootstrap" (default) or "hotelling"
+#   matched  : a matched cohort (independence working correlation, D18)
+#   w        : matching weights (the gee / classic centroid test is the
+#              weighted GEE then, as in v1.0.0; the other tests are unweighted)
+#   count_id : patient id of each eye for the patient COUNTS of the summary
+#              (D4: the mapped ID, also when the tests do not cluster);
+#              NULL: counted from `id`
+# Returns list(summary, regions, zero, between, method) - see the sheet writer
+# (export.R astig_jcrs_sections) for how each is printed.
+astig_vector_stats <- function(m, a, g, glv, id = NULL, method = "robust", region = "polygon",
+                               centroid_region = "bootstrap", matched = FALSE, w = NULL, key = "",
+                               logger = NULL, what = key, count_id = NULL) {
+  if (is.null(count_id)) count_id <- id
+  ck <- astig_key(key, method, region, centroid_region, as.character(isTRUE(matched)),
+                  gee_small_sample(), list(glv), m, a, as.character(g), id, w, count_id)
+  hit <- .astig_cache[[ck]]
+  if (!is.null(hit)) return(hit)
+  m <- abs(gr_num(m)); a <- gr_num(a) %% 180
+  ok <- is.finite(m) & is.finite(a) & !is.na(g) & g %in% glv
+  # the bootstrap tests are the slow step of a run: say what is running
+  if (!is.null(logger) && identical(method, "robust") && sum(ok) > 0)
+    logger(sprintf("Astigmatism %s: JCRS 2025 statistics, %d cohort(s), %d eyes - robust tests with B = %d bootstrap resamples each ...",
+                   what, length(unique(as.character(g[ok]))), sum(ok), ASTIG_BOOT_B))
+  m <- m[ok]; a <- a[ok]
+  gg <- factor(as.character(g[ok]), levels = glv)
+  present <- glv[glv %in% levels(droplevels(gg))]
+  gg <- factor(as.character(gg), levels = present)
+  idk <- if (is.null(id)) NULL else fill_missing_ids(id[ok])
+  nidk <- if (is.null(count_id)) NULL else fill_missing_ids(count_id[ok])
+  wk <- if (is.null(w)) NULL else w[ok]
+  x <- m * cos(2 * a * pi / 180); y <- m * sin(2 * a * pi / 180)
+  cid <- if (identical(method, "classic")) NULL else idk   # the clustering of the tests
+  rob <- identical(method, "robust")
+
+  # ---- per cohort: summary, regions, centroid against zero ----
+  summ <- list(); regs <- list(); zero <- list()
+  for (gn in present) {
+    k <- gg == gn
+    s <- astig_summary1(m[k], a[k], nidk[k])
+    reg_m <- if (identical(region, "normal")) "normal" else "depth"
+    dr <- astig_region(x[k], y[k], reg_m)
+    er <- if (identical(region, "both")) astig_region(x[k], y[k], "normal") else NULL
+    cr <- astig_centroid_region(x[k], y[k], if (is.null(cid)) NULL else cid[k], centroid_region)
+    regs[[gn]] <- list(data = dr, ellipse = er, centroid = cr,
+                       centroid_why = if (is.null(cr)) centroid_skip_why(x[k], y[k],
+                                        if (is.null(cid)) NULL else cid[k]) else "")
+    summ[[gn]] <- data.frame(group = gn, n = s$n, n_pat = s$n_pat, cx = s$cx, cy = s$cy, cm = s$cm,
+                             ca = s$ca, tsd = s$tsd, mmean = s$mmean, msd = s$msd, mmed = s$mmed,
+                             mmin = s$mmin, mmax = s$mmax, rms = s$rms,
+                             t(stats::setNames(s$cum, sprintf("le%.2f", ASTIG_CUTS))),
+                             gt1 = s$gt1, check.names = FALSE, stringsAsFactors = FALSE)
+    pz <- astig_zero_p(x[k], y[k], if (is.null(cid)) NULL else cid[k], method)
+    zero[[gn]] <- data.frame(group = gn, n = s$n, n_pat = s$n_pat, test = attr(pz, "test") %||% "",
+                             p = as.numeric(pz), B = attr(pz, "B") %||% NA_integer_,
+                             why = attr(pz, "why") %||% "", stringsAsFactors = FALSE)
+    attr(zero[[gn]], "few") <- attr(pz, "few")
+  }
+  summary <- do.call(rbind, summ)
+  zero_df <- do.call(rbind, zero)
+  # Holm across the cohorts of this vector
+  zero_df$p_holm <- if (sum(is.finite(zero_df$p)) >= 2) stats::p.adjust(zero_df$p, "holm") else NA_real_
+  zero_few <- do.call(gr_few_merge, lapply(zero, function(z) attr(z, "few")))
+
+  # ---- between cohorts (D7b-c) ----
+  dist <- rep(NA_real_, length(x))      # each eye's distance to its cohort centroid
+  for (gn in present) {
+    k <- gg == gn
+    dist[k] <- sqrt((x[k] - mean(x[k]))^2 + (y[k] - mean(y[k]))^2)
+  }
+  measures <- c("Centroid", "Precision", "Mean magnitude", sprintf("<= %.2f D", ASTIG_CUTS))
+  # the cohort values a comparison is about, as text ("Reference 0.31 D;
+  # Cohort A 0.29 D")
+  val_txt <- function(v, gk, f, fmt) {
+    tv <- tapply(v, gk, f)
+    paste(sprintf(paste0("%s ", fmt), names(tv), tv), collapse = "; ")
+  }
+  one_cmp <- function(keep, lv) {
+    gk <- droplevels(factor(as.character(gg[keep]), levels = lv))
+    ik <- if (is.null(cid)) NULL else cid[keep]
+    res <- list()
+    pc <- if (rob) astig_robust_biv_p(x[keep], y[keep], gk, id = ik)
+          else astig_bivariate_p(x[keep], y[keep], gk, id = if (identical(method, "gee")) ik else NULL,
+                                 w = if (is.null(wk)) NULL else wk[keep], matched = matched)
+    if (rob) attr(pc, "test") <- "robust 20%-trimmed T², bootstrap"
+    res[[1]] <- pc
+    sc <- function(v) if (rob) astig_trimmed_p(v[keep], gk, ik)
+                      else astig_univ_p(v[keep], gk, ik, "continuous", matched)
+    res[[2]] <- sc(dist)
+    res[[3]] <- sc(m)
+    for (cc in ASTIG_CUTS) {
+      yk <- m[keep] <= cc + ASTIG_TOL
+      r <- astig_univ_p(yk, gk, ik, "proportion", matched)
+      # the same interval for every eye: no test, said in the interval's words
+      if (identical(attr(r, "why"), "variable is constant in this cohort"))
+        attr(r, "why") <- if (all(yk)) sprintf("every eye is within %.2f D", cc)
+                          else sprintf("no eye is within %.2f D", cc)
+      res[[length(res) + 1]] <- r
+    }
+    tmf <- if (rob) function(z) mean(z, trim = ASTIG_TRIM) else mean
+    tml <- if (rob) "20%-trimmed mean: " else "mean: "
+    vals <- c(paste(vapply(lv, function(l) {
+                  k <- gk == l
+                  paste0(l, " ", astig_polar_text(sqrt(mean(x[keep][k])^2 + mean(y[keep][k])^2),
+                                                  (atan2(mean(y[keep][k]), mean(x[keep][k])) * 180 / pi / 2) %% 180))
+                }, character(1)), collapse = "; "),
+              paste0(tml, val_txt(dist[keep], gk, tmf, "%.2f D")),
+              paste0(tml, val_txt(m[keep], gk, tmf, "%.2f D")),
+              vapply(ASTIG_CUTS, function(cc)
+                val_txt(m[keep] <= cc + ASTIG_TOL, gk, function(z) 100 * mean(z), "%.1f%%"), character(1)))
+    out <- data.frame(measure = measures,
+                      test = vapply(res, function(r) as.character(attr(r, "test") %||% "")[1], character(1)),
+                      p = vapply(res, function(r) as.numeric(r)[1], numeric(1)),
+                      B = vapply(res, function(r) as.numeric(attr(r, "B") %||% NA)[1], numeric(1)),
+                      fallback = vapply(res, function(r) isTRUE(attr(r, "fallback")), logical(1)),
+                      why = vapply(res, function(r) as.character(attr(r, "why") %||% "")[1], character(1)),
+                      values = vals, stringsAsFactors = FALSE)
+    attr(out, "few") <- do.call(gr_few_merge, lapply(res, function(r) if (is.finite(r)) attr(r, "few")))
+    out
+  }
+  between <- NULL; bfew <- NULL
+  if (length(present) >= 2) {
+    blocks <- list()
+    if (length(present) > 2) {
+      om <- one_cmp(rep(TRUE, length(x)), present)
+      om$group <- NA_character_; om$ref <- present[1]; om$cmp <- "omnibus"
+      blocks[[1]] <- om
+    }
+    for (o in present[-1]) {
+      vs <- one_cmp(as.character(gg) %in% c(present[1], o), c(present[1], o))
+      vs$group <- o; vs$ref <- present[1]; vs$cmp <- "vs"
+      blocks[[length(blocks) + 1]] <- vs
+    }
+    bfew <- do.call(gr_few_merge, lapply(blocks, function(b) attr(b, "few")))
+    between <- do.call(rbind, blocks)
+    # Holm (D7d): across the cohorts compared with the reference, per measure
+    # (the figures' "vs reference" lines, as v1.0.0), and across the family of
+    # this vector within ONE comparison - every measure of the omnibus test, or
+    # every measure of one cohort against the reference (each comparison is a
+    # family of its own; the adjustment across cohorts is the column above)
+    between$p_holm_ref <- NA_real_
+    if (length(present) > 2)
+      for (ms in measures) {
+        k <- between$cmp == "vs" & between$measure == ms
+        if (sum(is.finite(between$p[k])) >= 2) between$p_holm_ref[k] <- stats::p.adjust(between$p[k], "holm")
+      }
+    between$p_holm_fam <- NA_real_
+    fam <- paste(between$cmp, between$group)
+    for (ff in unique(fam)) {
+      k <- fam == ff
+      if (sum(is.finite(between$p[k])) >= 2) between$p_holm_fam[k] <- stats::p.adjust(between$p[k], "holm")
+    }
+  }
+  out <- list(summary = summary, regions = regs, zero = zero_df, between = between,
+              method = method, region = region, centroid_region = centroid_region,
+              clustered = !is.null(cid), present = present,
+              few = gr_few_merge(zero_few, bfew))
+  assign(ck, out, envir = .astig_cache)
+  out
+}
+
+# The cluster ids of the astigmatism tests of a cohort `df` (the figures' rule:
+# clustering on, a patient ID column mapped and in the data, geepack
+# installed), the "(no ID) row <n>" tokens filled in; NULL otherwise.
+astig_cluster_ids <- function(df, cfg, res) {
+  pid <- res$patient_id_clean
+  if (!isTRUE(cfg$cluster_by_patient %||% TRUE) || is.null(pid) || is.na(pid[1]) ||
+      !(pid[1] %in% names(df)) || !requireNamespace("geepack", quietly = TRUE)) return(NULL)
+  fill_missing_ids(df[[pid[1]]])
+}
+# The patient of each eye of `df` for COUNTING patients (the Patients columns
+# and the "n patients" of a double-angle header, D4): the mapped patient ID
+# column whenever it is in the data, whether or not the tests cluster
+# (clustering off, geepack missing); NULL without one.
+astig_count_ids <- function(df, res) {
+  pid <- res$patient_id_clean
+  if (is.null(pid) || is.na(pid[1]) || !(pid[1] %in% names(df))) return(NULL)
+  fill_missing_ids(df[[pid[1]]])
+}
+
+# The astigmatism settings of a run, read once (blank / unknown = the default)
+astig_settings <- function(cfg) {
+  one <- function(v, ok, def) { v <- tolower(trimws(as.character(unlist(v))[1]))
+    if (length(v) && !is.na(v) && v %in% ok) v else def }
+  list(method = one(cfg$astig_test_method, c("robust", "gee", "classic"), "robust"),
+       region = one(cfg$astig_region, c("polygon", "depth", "normal", "both"), "polygon"),
+       centroid_region = one(cfg$astig_centroid_region, c("bootstrap", "hotelling"), "bootstrap"),
+       jcrs = isTRUE(cfg$astig_jcrs_standard %||% TRUE))
+}
+
+# The method text of a run's astigmatism statistics, for the figure legends,
+# the sheet's notes and the Manifest
+astig_method_text <- function(st, clustered = st$clustered) {
+  unit <- if (clustered) "patients" else "eyes"
+  c(paste0("Vectors in plus-cylinder format (JCRS 2025): x = M cos 2θ, y = M sin 2θ, θ = plus axis; ",
+           "with-the-rule astigmatism to the left, against-the-rule to the right; SIA = postoperative - ",
+           "preoperative, PE = postoperative - target."),
+    paste0("Total SD = sqrt(σx² + σy²) with the population (N) denominator (Part II)."),
+    paste0("Data region: ", if (identical(st$region, "normal")) "95% bivariate-normal ellipse"
+           else paste0("convex hull of the floor(0.95 n) deepest eyes by projection depth around the centroid",
+                       if (identical(st$region, "both")) ", with the 95% bivariate-normal ellipse" else ""), "."),
+    paste0("Centroid 95% confidence region: ",
+           if (identical(st$centroid_region, "hotelling")) paste0("Hotelling T² ellipse",
+             if (clustered) " (sandwich covariance, clustered by patient)" else "")
+           else sprintf("depth polygon of %d bootstrap centroids (%s resampled; seed %d)",
+                        ASTIG_BOOT_B, unit, ASTIG_CENTROID_SEED), "."),
+    paste0("Tests: ", switch(st$method,
+      robust = sprintf(paste0("robust - centroids by a %d%%-trimmed Hotelling-type T² (pooled winsorized ",
+                              "covariance), precision and mean magnitude by %d%%-trimmed means (Yuen / Welch-type), ",
+                              "each calibrated by %d bootstrap resamples with %s resampled within each cohort ",
+                              "(seed %d); centroid against zero by the one-sample trimmed T², same bootstrap"),
+                       as.integer(ASTIG_TRIM * 100), as.integer(ASTIG_TRIM * 100), ASTIG_BOOT_B, unit, ASTIG_SEED),
+      gee = paste0("clustered GEE - centroids by the joint Wald test of both components (stacked), precision ",
+                   "and mean magnitude by a Gaussian GEE, centroid against zero by the intercepts' joint Wald ",
+                   "test; ", gee_inference_text(unit = if (clustered) "patient" else "eye")),
+      classic = "classic - Hotelling T² / Pillai MANOVA, Welch t / ANOVA, one-sample Hotelling T²; eyes independent"),
+      "; cumulative intervals between cohorts by ",
+      if (clustered) paste0("a binomial GEE clustered by patient (", gee_se_label(1),
+                            if (length(st$present) > 2 && identical(gee_small_sample(), "md"))
+                              "; F reference for the omnibus test",
+                            "; Fisher's exact test with one eye per patient)")
+      else "Fisher's exact test", "."),
+    "Precision = each eye's distance to its cohort centroid.")
+}
+
 # Size (inches) of a double-angle / semicircle plot: its own file and its cell in
 # the composite. The header is fitted to it (gr_polar_finish).
 DA_W <- 6.8; DA_H <- 6.6
 SC_W <- 7.2; SC_H <- 5.4
 POLAR_GAP_IN <- 0.14      # white space between the framed panels of their composites
 
+# The statistics of astig_vector_stats with every cohort name mapped through
+# `lab` (original group name -> the label drawn; cfg$group_labels), so the
+# figures print their labels while the computation - and its cache entry -
+# stays the sheet's.
+astig_stats_relabel <- function(st, lab = NULL) {
+  if (is.null(lab) || is.null(st)) return(st)
+  f <- function(v) { v <- as.character(v); hit <- !is.na(v) & v %in% names(lab)
+    v[hit] <- unname(lab[v[hit]]); v }
+  st$summary$group <- f(st$summary$group)
+  st$zero$group <- f(st$zero$group)
+  if (!is.null(st$between)) { st$between$group <- f(st$between$group); st$between$ref <- f(st$between$ref) }
+  names(st$regions) <- f(names(st$regions))
+  st$present <- f(st$present)
+  if (length(st$few)) names(st$few) <- f(names(st$few))
+  st
+}
+
+# The test label of a figure line: the method's test with the resampling unit
+g_astig_tlab <- function(test, B = NA, clustered = FALSE) {
+  test <- as.character(test %||% "")[1]
+  if (grepl("bootstrap", test, fixed = TRUE))
+    paste0(sub(", bootstrap", "", test, fixed = TRUE),
+           sprintf(", B = %d, %s resampled within cohorts",
+                   as.integer(if (is.finite(B)) B else ASTIG_BOOT_B), if (clustered) "patients" else "eyes"))
+  else switch(test, "Hotelling" = "Hotelling T²", "Pillai" = "Pillai MANOVA",
+              "weighted GEE" = "weighted bivariate GEE", "clustered GEE" = "clustered bivariate GEE", test)
+}
+
+# st: the vector's statistics (astig_vector_stats, cohorts named as `lab`
+# maps them; computed here when NULL). ellipse: the data region ("polygon" =
+# the depth polygon, "normal", "both"); centroid_region: "bootstrap" or
+# "hotelling" (D6).
 g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
-                                unit_lab = "Diopters", ellipse = "normal",
+                                unit_lab = "Diopters", ellipse = "polygon",
                                 show_centroid_ellipse = TRUE, jcrs = TRUE,
-                                test_method = "robust", fig_w = DA_W, fig_h = DA_H) {
+                                test_method = "robust", fig_w = DA_W, fig_h = DA_H,
+                                st = NULL, centroid_region = "bootstrap", lab = NULL) {
   m <- abs(gr_num(mag)); a <- gr_num(axisdeg) %% 180
   ok <- is.finite(m) & is.finite(a) & !is.na(gl) & gl %in% glv
   if (sum(ok) < 3) stop("too few eyes")
@@ -2770,10 +4033,17 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
   did <- if (is.null(cid0)) NULL else cid0[ok]     # aligned with d, below
   w0 <- gr_weights_of(gl)
   dw <- if (is.null(w0)) NULL else w0[ok]          # matching weights, aligned with d
+  if (is.null(st))
+    st <- astig_vector_stats(m, a, gl, glv, id = cid0, method = test_method, region = ellipse,
+                             centroid_region = centroid_region, matched = isTRUE(.gr_opts$matched),
+                             w = w0, key = title)
+  else st <- astig_stats_relabel(st, lab)
   d <- data.frame(x = m[ok] * cos(2 * a[ok] * pi / 180),
                   y = m[ok] * sin(2 * a[ok] * pi / 180),
                   grp = factor(as.character(gl[ok]), levels = glv))
   present <- glv[glv %in% levels(droplevels(d$grp))]
+  sm <- st$summary
+  srow <- function(g) sm[sm$group == g, , drop = FALSE]
 
   rmax <- max(sqrt(d$x^2 + d$y^2), 0.5, na.rm = TRUE)
   rings <- pretty(c(0, rmax), 4); rings <- rings[rings > 0]
@@ -2784,8 +4054,9 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
     data.frame(r = rr, x = rr * cos(th), y = rr * sin(th))))
   spk <- do.call(rbind, lapply(seq(0, 330, by = 30), function(s)
     data.frame(a = s, x = c(0, rmax * cos(s * pi / 180)), y = c(0, rmax * sin(s * pi / 180)))))
-  # spokes are labelled with the MERIDIAN (half the displayed angle), so the
-  # reader never has to double anything in their head
+  # spokes are labelled with the PLUS AXIS (half the displayed angle), so the
+  # reader never has to double anything in their head: 90° (with-the-rule) on
+  # the left, 0° (against-the-rule) on the right
   labd <- data.frame(a = seq(0, 330, by = 30))
   labd$lab <- paste0(labd$a / 2, "°")
   labd$x <- rmax * 1.14 * cos(labd$a * pi / 180)
@@ -2798,7 +4069,8 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
     ggplot2::annotate("polygon", x = c(0, rmax * cos(tt)), y = c(0, rmax * sin(tt)),
                       fill = fill, colour = NA)
   }
-  slices <- lapply(seq(0, 330, by = 30), function(s)
+  # (none in the journal style: no shaded background, decision D20)
+  slices <- if (isTRUE(.gr_opts$journal)) list() else lapply(seq(0, 330, by = 30), function(s)
     wedge(s, s + 30, if ((s / 30) %% 2 == 0) "grey93" else "white"))
 
   p <- Reduce(`+`, slices, ggplot2::ggplot()) +
@@ -2808,56 +4080,51 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
                        colour = "grey62", linewidth = .28) +
     ggplot2::geom_text(data = labd, ggplot2::aes(x, y, label = lab),
                        size = 2.9, colour = "grey15", fontface = "bold") +
+    ggplot2::geom_point(data = d, ggplot2::aes(x, y, colour = grp),
+                        size = 1.5, alpha = .5) +
     # magnitude scale runs straight DOWN, clear of every meridian label; drawn on
-    # a white plate so it stays legible over whichever slice it crosses
+    # a white plate over the eyes, so it stays legible however dense they are
     ggplot2::annotate("label", x = rmax * 0.045, y = -rings, label = rings,
                       size = 3.0, colour = "black", fontface = "bold", hjust = 0,
                       fill = "white", linewidth = .18, label.r = grid::unit(1, "pt"),
-                      label.padding = grid::unit(1.3, "pt")) +
-    ggplot2::geom_point(data = d, ggplot2::aes(x, y, colour = grp),
-                        size = 1.5, alpha = .5)
+                      label.padding = grid::unit(1.3, "pt"))
 
-  cent <- list()
-  inside <- character(0)       # "kept/n" per group, read back from the polygon drawn
+  # the 95% region of each cohort's eyes, as computed for the sheet (D5)
+  inside <- character(0)       # "kept / n (inside)" per group, read back from the region drawn
   for (g in present) {
-    dg <- d[d$grp == g, , drop = FALSE]
+    rg <- st$regions[[g]]
     gc <- unname(pal[g])
-    for (kind in if (identical(ellipse, "both")) c("normal", "polygon") else ellipse) {
-      e1 <- astig_region(dg$x, dg$y, kind, scale = 1)
-      if (!is.null(e1) && !is.null(attr(e1, "kept")))
-        inside[g] <- sprintf("%d/%d", attr(e1, "kept"), attr(e1, "n"))
-      else if (kind == "polygon")             # a hull needs three eyes
-        inside[g] <- sprintf("none (n = %d)", nrow(dg))
-      if (!is.null(e1))
-        p <- p + ggplot2::annotate("path", x = e1$x, y = e1$y, colour = gc,
-                                   linewidth = .55,
-                                   linetype = if (identical(ellipse, "both") &&
-                                                  kind == "polygon") "22" else "solid")
+    dr <- rg$data
+    if (!is.null(dr) && !is.null(attr(dr, "kept")))
+      inside[g] <- sprintf("%d deepest of %d eyes%s", attr(dr, "kept"), attr(dr, "n"),
+                           if (attr(dr, "inside") > attr(dr, "kept"))
+                             sprintf(" (%d inside or on it: ties)", attr(dr, "inside")) else "")
+    else if (!identical(ellipse, "normal"))             # a hull needs three eyes
+      inside[g] <- sprintf("none (n = %d)", srow(g)$n)
+    for (e1 in list(dr, rg$ellipse)) {
+      if (is.null(e1)) next
+      dashed <- identical(ellipse, "both") && identical(attr(e1, "method"), "depth")
+      p <- p + ggplot2::annotate("path", x = e1$x, y = e1$y, colour = gc, linewidth = .55,
+                                 linetype = if (dashed) "22" else "solid")
     }
-    cent[[g]] <- data.frame(x = mean(dg$x), y = mean(dg$y), grp = g,
-                            n = nrow(dg), stringsAsFactors = FALSE)
   }
-  cd <- do.call(rbind, cent)
+  cd <- data.frame(x = sm$cx, y = sm$cy, grp = sm$group, stringsAsFactors = FALSE)
+  cd <- cd[cd$grp %in% present, , drop = FALSE]
   p <- p +
     ggplot2::geom_point(data = cd, ggplot2::aes(x, y, fill = grp), shape = 23,
                         size = 3.0, stroke = .7, colour = "grey10")
-  # the 95% ellipse OF THE CENTROID goes on last: at large n it is smaller than
-  # the marker (the centroid is precisely estimated), and it must not be buried.
-  # Clustered by patient exactly when the printed centroid test is (a cluster id
-  # is in scope and the test is not the unclustered "classic" one), so the
-  # region and the P beside it answer the same question; a region that would
-  # spill past the plotted rings (a handful of patients) is left out and named
-  # in the footer instead of drawn off the plot.
-  ci_id <- if (isTRUE(jcrs) && identical(test_method, "classic")) NULL else did
+  # the 95% confidence region OF THE CENTROID goes on last: at large n it is
+  # smaller than the marker (the centroid is precisely estimated), and it must
+  # not be buried. Clustered by patient exactly when the printed tests are, so
+  # the region and the P beside it answer the same question; a region that
+  # would spill past the plotted rings (a handful of patients) is left out and
+  # named in the legend instead of drawn off the plot.
   ci_basis <- character(0)
   ci_skip <- character(0)      # why a group's region is not drawn, named by group
   if (isTRUE(show_centroid_ellipse)) {
     for (g in present) {
-      k <- d$grp == g
-      dg <- d[k, , drop = FALSE]
-      idg <- if (is.null(ci_id)) NULL else ci_id[k]
-      e2 <- astig_region(dg$x, dg$y, "normal", centroid = TRUE, id = idg)
-      if (is.null(e2)) { ci_skip[g] <- centroid_skip_why(dg$x, dg$y, idg); next }
+      e2 <- st$regions[[g]]$centroid
+      if (is.null(e2)) { ci_skip[g] <- st$regions[[g]]$centroid_why; next }
       if (max(sqrt(e2$x^2 + e2$y^2)) > rmax * 1.2) { ci_skip[g] <- "wider than the plot"; next }
       ci_basis <- c(ci_basis, attr(e2, "basis"))
       p <- p + ggplot2::annotate("path", x = e2$x, y = e2$y,
@@ -2871,106 +4138,72 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
     ggplot2::theme_void(base_size = 12) +
     ggplot2::theme(legend.position = "none",
                    axis.title.x = ggplot2::element_text(face = "bold", size = 10.5),
-                   plot.background = ggplot2::element_rect(fill = "white", colour = "grey25",
+                   # no frame around the figure in the journal style (D20)
+                   plot.background = ggplot2::element_rect(fill = "white",
+                                                           colour = if (isTRUE(.gr_opts$journal)) NA else "grey25",
                                                            linewidth = .8))
-  # header: title, then per-group centroid + spread, then the omnibus test on BOTH
-  # doubled-angle components (a centroid can differ in x, in y, or in both).
-  # The title lives INSIDE the header block; a ggplot title would be drawn in the
-  # same margin rows and overprint it.
   # ---- statistics -----------------------------------------------------------
-  # JCRS 2025 Part II asks for a BIVARIATE comparison of the centroids; without
-  # it we fall back to the historical pair of separate univariate tests on x and y.
+  # "P = .26" / "P < .001" in the run's P style (helpers.R p_eq, D15; the
+  # classic style keeps "P = 0.262"); an untestable comparison prints
+  # "P = n/a", never "P = NA" (nor "P = <.001")
+  fp <- function(p) if (!is.finite(p)) "P = n/a" else p_eq(p, where = "table")
+  rob <- identical(test_method, "robust")
+  clus <- isTRUE(st$clustered)
+  bt <- st$between
+  brow <- function(cmp, ms) if (is.null(bt)) bt else bt[bt$cmp == cmp & bt$measure == ms, , drop = FALSE]
+  # one line per measure: the omnibus (or the single) comparison, then each
+  # cohort against the reference with 3+ cohorts ([Holm] across them)
+  cmp_lines <- function(ms, lead) {
+    if (is.null(bt)) return(NULL)
+    vs <- brow("vs", ms)
+    main <- if (length(present) > 2) brow("omnibus", ms) else vs[1, , drop = FALSE]
+    tl <- g_astig_tlab(main$test, main$B, clus)
+    if (isTRUE(main$fallback) || grepl("(GEE not fitted)", tl, fixed = TRUE))
+      tl <- paste0(sub(" (GEE not fitted)", "", tl, fixed = TRUE), ", GEE not fitted")
+    no_main <- !is.finite(main$p) && nzchar(main$why)
+    first <- if (no_main) paste0(lead, p_not_tested(main$why))
+             else paste0(lead, fp(main$p), "  [", tl, "]")
+    if (length(present) <= 2) return(first)
+    pv <- ifelse(is.finite(vs$p_holm_ref), vs$p_holm_ref, vs$p)
+    # the test is named on the "vs" line when the omnibus line has no P
+    tv <- vs$test[is.finite(vs$p)][1]
+    tv_lab <- if (no_main && !is.na(tv))
+      paste0("  [", sub(", GEE not fitted", "", g_astig_tlab(tv, vs$B[is.finite(vs$p)][1], clus), fixed = TRUE), "]")
+      else ""
+    c(first, paste0("vs ", present[1], ": ",
+                    paste(sprintf("%s %s%s", vs$group, vapply(pv, fp, character(1)),
+                                  ifelse(vs$fallback | grepl("GEE not fitted", vs$test, fixed = TRUE),
+                                         " (GEE not fitted)", "")), collapse = "  ·  "),
+                    tv_lab, if (sum(is.finite(vs$p)) >= 2) "  [Holm]" else ""))
+  }
   if (isTRUE(jcrs)) {
-    rob <- identical(test_method, "robust")
-    if (rob) {
-      pj <- astig_robust_biv_p(d$x, d$y, d$grp, id = did)
-      # with two cohorts the single "vs reference" test IS the omnibus test (same
-      # statistic, same seed): it is neither recomputed nor printed twice
-      vs <- NULL
-      if (length(present) > 2) {
-        pv <- vapply(present[-1], function(o) {
-          k <- as.character(d$grp) %in% c(present[1], o)
-          astig_robust_biv_p(d$x[k], d$y[k], d$grp[k],
-                             id = if (is.null(did)) NULL else did[k]) }, numeric(1))
-        vs <- stats::setNames(stats::p.adjust(pv, "holm"), present[-1])
-      }
-    } else {
-      # the patient id enters only with the "gee" method; "classic" is the
-      # unclustered Hotelling / Pillai test (weighted GEE on a weighted cohort)
-      use_id <- if (identical(test_method, "gee")) did else NULL
-      pj <- astig_bivariate_p(d$x, d$y, d$grp, id = use_id, w = dw)
-      vs <- if (length(present) > 2)
-        astig_vs_ref(d$x, d$y, as.character(d$grp), present, holm = TRUE,
-                     id = use_id, w = dw) else NULL
+    # JCRS 2025 Part II asks for a BIVARIATE comparison of the centroids; say
+    # "P =" explicitly - a bare "Centroids: 0.26" reads as a distance in D
+    stat_lines <- cmp_lines("Centroid", "Centroid comparison: ")
+    # each cohort's centroid against zero (D7a), and the mean magnitude - for
+    # PE the standard's main outcome (D7b)
+    z <- st$zero[st$zero$group %in% present, , drop = FALSE]
+    if (nrow(z)) {
+      zt <- z$test[is.finite(z$p)][1]
+      stat_lines <- c(stat_lines, paste0("Centroid vs 0: ",
+        paste(ifelse(is.finite(z$p), sprintf("%s %s", z$group, vapply(z$p, fp, character(1))),
+                     sprintf("%s %s", z$group, "P = n/a")), collapse = "  ·  "),
+        if (!is.na(zt)) paste0("  [", g_astig_tlab(zt, z$B[is.finite(z$p)][1], clus), "]") else ""))
     }
-    # "P = 0.262" / "P < 0.001"; an untestable comparison prints "P = n/a",
-    # never "P = NA" (nor "P = <0.001")
-    fp <- function(p) if (!is.finite(p)) "P = n/a" else if (p < 0.001) "P < 0.001"
-                      else paste0("P = ", fmt_p(p))
-    # the label names the test that RAN: a clustered GEE that could not be
-    # fitted fell back to the unclustered Hotelling / Pillai test
-    fell_back <- !rob && isTRUE(attr(pj, "fallback"))
-    tlab <- if (rob) sprintf("robust %d%%-trimmed T², B = %d, %s",
-                             as.integer(round(ASTIG_TRIM * 100)), ASTIG_BOOT_B,
-                             if (!is.null(did)) "cluster bootstrap" else "bootstrap")
-            else switch(attr(pj, "test") %||% "",
-                        "weighted GEE" = "weighted bivariate GEE",
-                        "clustered GEE" = "clustered bivariate GEE",
-                        "Hotelling" = "Hotelling T²", "Pillai" = "Pillai MANOVA",
-                        if (!is.null(dw)) "weighted bivariate GEE"
-                        else if (length(present) == 2) "Hotelling T²" else "Pillai MANOVA")
-    if (fell_back) tlab <- paste0(tlab, ", GEE not fitted")
-    why_pj <- attr(pj, "why") %||% ""
-    fb_vs <- attr(vs, "fallback") %||% character(0)
-    stat_lines <- c(
-      # say "P =" explicitly - a bare "Centroids: 0.26" reads as a distance in D;
-      # no P from a group that cannot support one, and the line says which
-      if (!is.finite(pj) && nzchar(why_pj)) paste0("Centroid comparison: ", p_not_tested(why_pj))
-      else paste0("Centroid comparison: ", fp(pj), "  [", tlab, "]"),
-      # 3+ cohorts only (with two, the omnibus line above is that comparison);
-      # [Holm] only when two or more comparisons were actually adjusted
-      if (!is.null(vs) && length(vs))
-        paste0("vs ", present[1], ": ",
-               paste(sprintf("%s %s%s", names(vs), vapply(vs, fp, character(1)),
-                             ifelse(names(vs) %in% fb_vs, " (GEE not fitted)", "")),
-                     collapse = "  ·  "),
-               if (sum(is.finite(vs)) >= 2) "  [Holm]" else "") else NULL)
-    # a GEE P value (clustered or weighted) with a group of few patients: the
-    # caution line (the header is fitted to the frame, so it always fits)
-    if (!rob) {
-      cau <- few_patients_text(gr_few_merge(if (is.finite(pj)) attr(pj, "few"), attr(vs, "few")),
-                               short = TRUE)
-      if (nzchar(cau)) stat_lines <- c(stat_lines, cau)
-    } else if (!is.null(did)) {
-      # the patient bootstrap is a clustered comparison too: a compared group of
-      # 2 to 9 patients gets its own caution (contract R4-6), naming only the
-      # groups behind a P value actually printed - every group in the omnibus
-      # test, the reference and that group in a "vs" comparison
-      cmp <- unique(c(if (is.finite(pj)) present,
-                      if (!is.null(vs) && any(is.finite(vs))) c(present[1], names(vs)[is.finite(vs)])))
-      if (length(cmp)) {
-        kk <- as.character(d$grp) %in% cmp
-        cau <- few_patients_text(few_patient_groups(did[kk], droplevels(d$grp[kk])),
-                                 bootstrap = TRUE)
-        if (nzchar(cau)) stat_lines <- c(stat_lines, cau)
-      }
-    }
-    # the robust test is cluster-aware but is not the exact Part II statistic:
-    # the line says so rather than "Per JCRS 2025 Part II"
-    meth <- paste0(if (rob) "JCRS 2025 Part II plot  ·  " else "Per JCRS 2025 Part II  ·  ",
-                   if (rob && !is.null(did))
-                     "robust trimmed test (not the exact Part II variant), bootstrap over patients"
-                   else if (rob) "robust trimmed test (not the exact Part II variant), bootstrap (eyes independent)"
-                   else if (!is.null(dw))
-                     paste0("matching weights (weighted GEE",
-                            if (!is.null(use_id)) ", clustered by patient" else "", ")")
-                   else if (!is.null(use_id) && fell_back)
-                     "eyes treated as independent (the clustered GEE could not be fitted)"
-                   else if (!is.null(use_id)) "clustered by patient (GEE)"
+    stat_lines <- c(stat_lines, cmp_lines("Mean magnitude", "Mean magnitude: "))
+    # a P value from a group of 2-9 patients: the caution line
+    cau <- few_patients_text(st$few, short = !rob, bootstrap = rob)
+    if (nzchar(cau)) stat_lines <- c(stat_lines, cau)
+    meth <- paste0(if (rob) "JCRS 2025 Part II plot  ·  robust trimmed tests (not the exact Part II variant), bootstrap over "
+                   else "Per JCRS 2025 Part II  ·  ",
+                   if (rob) (if (clus) "patients within cohorts" else "eyes within cohorts")
+                   else if (!is.null(dw)) paste0("matching weights for the centroid test (weighted GEE",
+                                                 if (identical(test_method, "gee") && clus) ", clustered by patient" else "", ")")
+                   else if (identical(test_method, "gee") && clus) "clustered by patient (GEE)"
                    else "eyes treated as independent")
     # the trimmed-mean bootstrap has no weighted form: say so on a matched cohort
-    if (rob && !is.null(dw))
-      meth <- c(meth, "Matched cohort: the robust test does not use the matching weights")
+    if (!is.null(dw))
+      meth <- c(meth, "Matched cohort: the astigmatism tests other than a GEE centroid test do not use the matching weights")
   } else {
     # p_omnibus looks the cluster ids / weights up by position: narrow them to
     # the eyes in `d`, or a single dropped eye would silently switch the test
@@ -3006,65 +4239,72 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
                      paste0("  ·  x: ", uni_meth(tx), "  ·  y: ", uni_meth(ty))
                    else "")
   }
-  reg <- if (identical(ellipse, "polygon")) "95% convex polygon (JCRS)"
-         else if (identical(ellipse, "both")) "95% ellipse + polygon"
-         else "95% normal ellipse (assumes Gaussian)"
+  reg <- if (identical(ellipse, "normal")) "Solid: 95% bivariate-normal ellipse of the eyes (assumes Gaussian)"
+         else if (identical(ellipse, "both"))
+           "Solid: 95% bivariate-normal ellipse; dotted: 95% depth polygon of the eyes"
+         else paste0("Solid: convex hull of the floor(0.95 n) deepest eyes (projection depth around the centroid; ",
+                     "an analogue of the Part II polygon)")
   # the eyes each polygon is the hull of, read from the polygons drawn, so the
-  # label can never disagree with the drawing; each entry is named by its group,
-  # and a group too small for a hull says so ("C none (n = 1)") rather than drop
-  # out of the list (an excluded eye that shares the coordinates of a kept one
-  # lies on the edge). One line: gr_polar_finish breaks it at its commas to fit.
+  # legend can never disagree with the drawing; each entry is named by its
+  # group, and a group too small for a hull says so ("C none (n = 2)")
   inside_lines <- if (length(inside)) {
     gi <- present[present %in% names(inside)]
-    paste0("Polygon = hull of the deepest eyes (hull peeling): ",
+    paste0("Polygon = convex hull of the floor(0.95 n) deepest eyes: ",
            paste(sprintf("%s %s", gi, inside[gi]), collapse = ", "))
   } else character(0)
-  # the dashed region's basis, as drawn (Hotelling F radius either way). It is
-  # the region of the plain MEAN centroid (the one in the group lines), which
-  # the robust test - comparing 20%-trimmed centroids - does not use
+  # the dashed region's basis, as drawn: the region of the plain MEAN centroid
+  # (the diamond)
   ci_txt <- if (!isTRUE(show_centroid_ellipse)) ""
-            else paste0("  ·  dashed = 95% CI of ",
-                        if (isTRUE(jcrs) && identical(test_method, "robust"))
-                          "the untrimmed centroid" else "centroid",
+            else paste0("  ·  dashed = 95% confidence region of the centroid (",
+                        if (identical(st$centroid_region, "hotelling")) "Hotelling T² ellipse" else
+                          sprintf("depth polygon of %d bootstrap centroids", ASTIG_BOOT_B),
                         if (!length(ci_basis)) ""
-                        else if (all(ci_basis == "clustered")) " (clustered by patient)"
-                        else " (eyes independent)")
+                        else if (all(ci_basis %in% c("clustered", "bootstrap over patients"))) ", clustered by patient"
+                        else ", eyes independent", ")")
   # each group left out, with its own reason
   ci_note <- if (isTRUE(show_centroid_ellipse) && length(ci_skip))
-    paste0("Centroid CI not drawn: ",
+    paste0("Centroid confidence region not drawn: ",
            paste(sprintf("%s (%s)", names(ci_skip), ci_skip), collapse = ", "))
     else character(0)
-  foot <- c(paste0(reg, ci_txt), ci_note, inside_lines, stat_lines, meth)
+  orient <- paste0("Plus-cylinder format: each spoke is labelled with the plus axis; with-the-rule ",
+                   "astigmatism to the left, against-the-rule to the right; ◆ = centroid (mean vector).")
+  # the journal style keeps only the short statistics lines (the P values with
+  # their tests, and any caution) inside the image; the title and the method
+  # text go to the figure's legend file (attr "legend", decision D20)
+  # the tests behind the P values printed (the sheet's method notes say the same)
+  tests_txt <- if (isTRUE(jcrs)) grep("^(Tests|Precision)", astig_method_text(st), value = TRUE) else character(0)
+  method <- c(orient, paste0(reg, ci_txt), ci_note, inside_lines, meth, tests_txt,
+              "Total SD: population (N) denominator, JCRS 2025 Part II.")
+  journal <- isTRUE(.gr_opts$journal)
+  foot <- if (journal) stat_lines else c(paste0(reg, ci_txt), ci_note, inside_lines, stat_lines, meth)
   terse <- length(present) > 5      # two narrow columns: the long form will not fit
   hs <- hdr_groups(present, pal, function(g) {
-    dg <- d[d$grp == g, , drop = FALSE]
-    cm <- sqrt(mean(dg$x)^2 + mean(dg$y)^2)
-    ca <- (atan2(mean(dg$y), mean(dg$x)) * 180 / pi / 2) %% 180
-    mm <- sqrt(dg$x^2 + dg$y^2)
-    # total SD = sqrt(var x + var y): invariant to rotation/translation of the
-    # coordinate frame, and a required JCRS 2025 summary statistic
-    # (an SD needs two eyes: a one-eye group prints "n/a", never "NA")
-    tsd <- if (nrow(dg) > 1) sqrt(stats::var(dg$x) + stats::var(dg$y)) else NA_real_
-    msd_ <- if (nrow(dg) > 1) stats::sd(mm) else NA_real_
-    if (terse) sprintf("%.2f D @ %.0f°, SD %s, n = %d", cm, ca, f2(tsd), nrow(dg))
-    # single-space separators: the double-spaced version ran 1-2 characters past
-    # the right edge with 3 groups, clipping the last digit of n
-    else sprintf(paste0("centroid %.2f D @ %.0f° · SD %s · mean %.2f ± %s · ",
-                        "med %.2f · RMS %.2f D · n = %d"),
-                 cm, ca, f2(tsd), mean(mm), f2(msd_),
-                 stats::median(mm), sqrt(mean(mm^2)), nrow(dg))
-  }, foot = foot, title = title)
+    r <- srow(g)
+    pts <- if (is.finite(r$n_pat)) sprintf(", %d %s", as.integer(r$n_pat),
+                                           cluster_unit_word("patient", as.integer(r$n_pat))) else ""
+    if (terse) sprintf("%s, total SD %s, n = %d", astig_polar_text(r$cm, r$ca), f2(r$tsd), r$n)
+    # single-space separators: the header is wrapped at " · " and ", "
+    else paste0("centroid ", astig_polar_text(r$cm, r$ca),
+                sprintf(" (x %s; y %s)", fmt_fix(r$cx, 2), fmt_fix(r$cy, 2)),
+                " · total SD ", f2(r$tsd), " D",
+                " · magnitude ", f2(r$mmean), " ± ", f2(r$msd), ", median ", f2(r$mmed),
+                ", range ", f2(r$mmin), " to ", f2(r$mmax), ", RMS ", f2(r$rms), " D",
+                sprintf(" · n = %d eyes%s", r$n, pts))
+  }, foot = foot, title = if (journal) NULL else title)
   # top margin sized from the header actually built (title + groups + footer
   # lines, as wrapped to the frame), so the bottom-anchored block never pushes
   # the title off the canvas; fig_w / fig_h are the size the plot is saved at
-  gr_polar_finish(p, hs, xlim = c(-rmax * 1.24, rmax * 1.24),
-                  ylim = c(-rmax * 1.24, rmax * 1.24), fig_w = fig_w, fig_h = fig_h)
+  out <- gr_polar_finish(p, hs, xlim = c(-rmax * 1.24, rmax * 1.24),
+                         ylim = c(-rmax * 1.24, rmax * 1.24), fig_w = fig_w, fig_h = fig_h)
+  attr(out, "legend") <- list(title = title, lines = method[!is.na(method) & nzchar(method)])
+  out
 }
 
 # ============================================================
 # AstigMATIC-style semicircle, restyled: background in GREY shades so colour
 # carries group identity only, and every group superimposed on one diagram.
-# Single-angle (meridian as drawn) - kept for familiarity; the double-angle plot
+# Single-angle (each vector drawn at its PLUS axis, decision D3) - kept for
+# familiarity, for the Alpins vectors TIA, SIA and DV; the double-angle plot
 # above is the one that satisfies the JCRS standard.
 # ============================================================
 g_astig_semicircle_multi <- function(mag, axisdeg, gl, glv, pal, title,
@@ -3089,9 +4329,12 @@ g_astig_semicircle_multi <- function(mag, axisdeg, gl, glv, pal, title,
     ggplot2::annotate("polygon", x = c(0, rmax * cos(tt)), y = c(0, rmax * sin(tt)),
                       fill = fill, colour = NA)
   }
-  # alternating 30-degree slices; the middle pair (60-120) is a step darker so the
-  # with-the-rule zone still reads as a band, as it did in the original diagram
-  SEMI_FILL <- c("grey93", "white", "grey86", "grey86", "white", "grey93")
+  # alternating 30-degree slices; the middle pair (plus axes 60-120: the
+  # with-the-rule zone) is a step darker so it still reads as a band, as it did
+  # in the original diagram (white in the journal style: no shaded background,
+  # decision D20)
+  SEMI_FILL <- if (isTRUE(.gr_opts$journal)) rep("white", 6)
+               else c("grey93", "white", "grey86", "grey86", "white", "grey93")
   circ <- do.call(rbind, lapply(rings, function(rr)
     data.frame(r = rr, x = rr * cos(th_s), y = rr * sin(th_s))))
   spokes <- do.call(rbind, lapply(seq(0, 180, by = 15), function(sp)
@@ -3139,7 +4382,8 @@ g_astig_semicircle_multi <- function(mag, axisdeg, gl, glv, pal, title,
     ggplot2::theme_void(base_size = 12) +
     ggplot2::theme(legend.position = "none",
                    axis.title.x = ggplot2::element_text(face = "bold", size = 10.5),
-                   plot.background = ggplot2::element_rect(fill = "white", colour = "grey25",
+                   plot.background = ggplot2::element_rect(fill = "white",
+                                                           colour = if (isTRUE(.gr_opts$journal)) NA else "grey25",
                                                            linewidth = .8))
   if (!is.null(arc_at) && arc_at <= rmax)
     p <- p + ggplot2::annotate("path", x = arc_at * cos(th_s), y = arc_at * sin(th_s),
@@ -3147,13 +4391,20 @@ g_astig_semicircle_multi <- function(mag, axisdeg, gl, glv, pal, title,
   terse <- length(present) > 5      # two narrow columns: the long form will not fit
   hs <- hdr_groups(present, pal, function(g) {
     r <- cd[cd$grp == g, ]
-    if (terse) sprintf("◆ %.2f D Ax %.0f°, n = %d", r$cm, r$ca, r$n)
-    else sprintf("◆ %.2f D Ax %.0f°  ·  mean %.2f ± %s  ·  n = %d",
-                 r$cm, r$ca, r$am, f2(r$asd), r$n)
-  }, foot = "◆ vector mean, computed in double-angle space", title = title)
+    if (terse) sprintf("◆ %s, n = %d", astig_polar_text(r$cm, r$ca), r$n)
+    else sprintf("◆ %s  ·  mean %.2f ± %s D  ·  n = %d",
+                 astig_polar_text(r$cm, r$ca), r$am, f2(r$asd), r$n)
+  }, foot = if (isTRUE(.gr_opts$journal)) NULL
+            else "◆ vector mean, computed in double-angle space; angles are plus axes",
+     title = if (isTRUE(.gr_opts$journal)) NULL else title)
   # header wrapped to the frame and top margin sized from it (see g_double_angle_plot)
-  gr_polar_finish(p, hs, xlim = c(-rmax * 1.16, rmax * 1.16),
-                  ylim = c(-rmax * 0.17, rmax * 1.12), fig_w = fig_w, fig_h = fig_h)
+  out <- gr_polar_finish(p, hs, xlim = c(-rmax * 1.16, rmax * 1.16),
+                         ylim = c(-rmax * 0.17, rmax * 1.12), fig_w = fig_w, fig_h = fig_h)
+  # the title and the method note go to the legend file in the journal style
+  attr(out, "legend") <- list(title = title, lines = c(
+    "◆ vector mean, computed in double-angle space.",
+    "Each vector is drawn at its plus axis (plus-cylinder format); the spokes are labelled with the axis."))
+  out
 }
 
 # ============================================================
@@ -3248,25 +4499,117 @@ compose_panel_w <- function(n, ncol = 3, pw = 5.6, rows_spec = NULL, gap_in = 0)
   rep(W / rs - gap_in - PANEL_LETTER_IN, rs)
 }
 
+# A composite laid out AT a chosen page width (figure_width_cm, decision D21):
+# as many panels per row as keep each at least min_pw inches wide (one at
+# least), every row full, the panels as wide as the page allows and their
+# height scaled with the width (not below ph_min). Nothing is shrunk after
+# drawing, so the text keeps its point size. Returns list(ncol, rows_spec, pw, ph).
+GR_COMPOSITE_MIN_PW <- 3.1      # the bar and scatter panels
+GR_POLAR_MIN_PW <- 5.0          # the double-angle and semicircle plots
+GR_COMPOSITE_MIN_PH <- 4.9      # the lowest a bar or scatter panel is laid out (its header needs it)
+gr_width_layout <- function(n, width_in, pw, ph, gap_in = 0, min_pw = GR_COMPOSITE_MIN_PW,
+                            ph_min = 0) {
+  k <- max(1L, min(n, floor((width_in + 1e-9) / (min_pw + gap_in + PANEL_LETTER_IN))))
+  rs <- rep(k, ceiling(n / k)); rs[length(rs)] <- n - k * (length(rs) - 1L)
+  pw2 <- (width_in - k * PANEL_LETTER_IN) / k - gap_in
+  list(ncol = k, rows_spec = rs, pw = pw2, ph = max(ph_min, ph * pw2 / pw))
+}
+
+# The highest a composite laid out at a chosen width (figure_width_cm) may be:
+# a journal page. A taller one is split into pages, each a figure of its own
+# (<base>_1, <base>_2 ..., panel letters from A on each, its own legend file).
+GR_PAGE_MAX_H_CM <- 23
+# The plotting area of a panel is never laid out lower than this (inches): a
+# panel whose stat lines, axes and key take more of its height grows downward
+# (its own file and its composite row) instead of squashing the bars.
+GR_MIN_PANEL_IN <- 2.3
+
+# The height (inches) panel `p` needs when drawn `w` inches wide: its fixed
+# rows (header, margins, axis text and titles, key) plus GR_MIN_PANEL_IN for
+# the plotting area; 0 when it cannot be measured.
+gr_need_h <- function(p, w) {
+  out <- tryCatch(gr_with_measure_device(w, 6, function() {
+    gt <- if (inherits(p, "ggplot")) ggplot2::ggplotGrob(p) else p
+    if (!inherits(gt, "gtable")) return(0)
+    nn <- grid::unitType(gt$heights) != "null"
+    fixed <- if (any(nn)) sum(grid::convertHeight(gt$heights[nn], "in", valueOnly = TRUE)) else 0
+    fixed + GR_MIN_PANEL_IN
+  }), error = function(e) 0)
+  if (length(out) == 1 && is.finite(out)) out else 0
+}
+
+# width_in: the page width the composite is laid out at (NA = its designed
+# size, pw x ph panels); min_pw / ph_min: see gr_width_layout.
+# need_h: optional, per panel the height it needs (gr_need_h): a row is laid
+# out as high as its tallest need, never lower than ph.
+# max_h_in: at a chosen width, a composite taller than this is written as pages
+# (GR_PAGE_MAX_H_CM). The files written carry attr "pages": per page its base
+# and the indices of its panels, for the caller's legend files.
 compose_panels <- function(plots, captions, base, formats, dpi, ncol = 3,
                            pw = 5.6, ph = 4.9, cap_h = 0.42, rows_spec = NULL,
                            sections = NULL, note = NULL, preview_dir = NULL,
-                           logger = NULL, gap_in = 0) {
+                           logger = NULL, gap_in = 0, width_in = NA_real_,
+                           min_pw = GR_COMPOSITE_MIN_PW, ph_min = 0, need_h = NULL,
+                           max_h_in = if (is.finite(width_in)) GR_PAGE_MAX_H_CM / 2.54 else NA_real_,
+                           row_ph = NULL, n_lab = NULL) {
   n <- length(plots); if (n == 0) return(character(0))
+  if (is.finite(width_in)) {
+    lay <- gr_width_layout(n, width_in, pw, ph, max(as.numeric(gap_in %||% 0)[1], 0, na.rm = TRUE),
+                           min_pw, ph_min)
+    ncol <- lay$ncol; rows_spec <- lay$rows_spec; pw <- lay$pw; ph <- lay$ph
+  }
   rows_spec <- compose_rows(n, ncol, rows_spec)
   nr <- length(rows_spec)
   hh_in  <- if (!is.null(sections)) 0.55 else 0            # section header band
   cap_in <- if (is.null(captions)) 0.06 else cap_h         # caption band
   gap_in <- max(as.numeric(gap_in %||% 0)[1], 0, na.rm = TRUE)
   lab_in <- PANEL_LETTER_IN                                # panel-letter strips
-  band_in <- hh_in + lab_in + ph + gap_in + cap_in
+  # each row as high as ph, or as its tallest panel needs (need_h)
+  row_of <- rep(seq_len(nr), rows_spec)
+  if (is.null(row_ph)) {
+    nh <- if (length(need_h) == n) as.numeric(need_h) else rep(0, n)
+    nh[!is.finite(nh)] <- 0
+    row_ph <- vapply(seq_len(nr), function(r) max(ph, nh[row_of == r]), numeric(1))
+  }
+  band_r <- hh_in + lab_in + row_ph + gap_in + cap_in      # inches, per row
   note <- if (is.null(note)) character(0) else note[nzchar(note)]
   note_in <- if (length(note)) 0.30 + 0.22 * length(note) else 0   # note band
   # a row of k panels gives each a 1/k share of W: k letter strips are added
   # for the fullest row, so its panels keep the width they had without them
-  W <- ncol * (pw + gap_in) + max(rows_spec) * lab_in; H <- nr * band_in + note_in
-  hr <- 1 / nr
-  fh <- hh_in / band_in; fp <- (ph + gap_in) / band_in; fc <- cap_in / band_in
+  # (n_lab: the letter strips of the whole composite, so each of its pages has
+  # the page width of the composite)
+  W <- ncol * (pw + gap_in) + (n_lab %||% max(rows_spec)) * lab_in; H <- sum(band_r) + note_in
+  # Too high for a page: split into pages of whole rows (a row higher than a
+  # page is a page of its own), each written by this function as a figure
+  if (is.finite(max_h_in) && nr > 1 && H > max_h_in + 1e-6) {
+    pages <- list(); cur <- integer(0); h <- note_in
+    for (r in seq_len(nr)) {
+      if (length(cur) && h + band_r[r] > max_h_in + 1e-6) { pages[[length(pages) + 1]] <- cur; cur <- integer(0); h <- note_in }
+      cur <- c(cur, r); h <- h + band_r[r]
+    }
+    pages[[length(pages) + 1]] <- cur
+    if (!is.null(logger))
+      logger(sprintf("%s: %.1f cm high at this width - written as %d pages of at most %.0f cm (%s_1 ... _%d), each with its own legend file.",
+                     basename(base), H * 2.54, length(pages), max_h_in * 2.54, basename(base), length(pages)))
+    written <- character(0); pinfo <- list()
+    for (pg in seq_along(pages)) {
+      rr <- pages[[pg]]
+      idx <- which(row_of %in% rr)
+      b <- paste0(base, "_", pg)
+      got <- compose_panels(plots[idx], if (is.null(captions)) NULL else captions[idx], b, formats, dpi,
+                            ncol = ncol, pw = pw, ph = ph, cap_h = cap_h, rows_spec = rows_spec[rr],
+                            sections = if (is.null(sections)) NULL else sections[rr],
+                            note = note, preview_dir = preview_dir, logger = logger, gap_in = gap_in,
+                            width_in = NA_real_, max_h_in = NA_real_, row_ph = row_ph[rr],
+                            n_lab = n_lab %||% max(rows_spec))
+      written <- c(written, got)
+      pinfo[[pg]] <- list(base = b, idx = idx, ok = length(got) > 0)
+    }
+    attr(written, "pages") <- pinfo
+    return(written)
+  }
+  Hr <- sum(band_r)                                         # the rows' area (inches)
+  row_bot <- 1 - cumsum(band_r) / Hr                        # npc of that area
   written <- character(0)
   if (length(formats) == 0) formats <- "tiff"
   draw <- function() {
@@ -3277,12 +4620,15 @@ compose_panels <- function(plots, captions, base, formats, dpi, ncol = 3,
     i <- 0
     for (r in seq_len(nr)) {
       k <- rows_spec[r]
-      band_bot <- 1 - r * hr; band_top <- 1 - (r - 1) * hr
+      # this row's band and its parts, as fractions of the rows' area
+      hr <- band_r[r] / Hr
+      fh <- hh_in / band_r[r]; fp <- (row_ph[r] + gap_in) / band_r[r]; fc <- cap_in / band_r[r]
+      band_bot <- row_bot[r]; band_top <- band_bot + hr
       for (j in seq_len(k)) {
         i <- i + 1; if (i > n) break
         xc <- (j - 0.5) / k
         # the panel's slot less the gap and the letter strip on its left
-        # (pw x ph when the row is full); the strip above it is in the band
+        # (pw x row height when the row is full); the strip above it is in the band
         p_left <- grid::unit((j - 1) / k, "npc") + grid::unit(gap_in / 2 + lab_in, "in")
         p_top <- grid::unit(band_bot + hr * (fc + fp), "npc") - grid::unit(gap_in / 2, "in")
         vp_p <- grid::viewport(x = p_left, y = band_bot + hr * (fc + fp / 2), just = c("left", "centre"),
@@ -3435,10 +4781,21 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
   # the test scope (cluster ids, matching weights) never outlives this call,
   # even when it stops with an error
   .gr_opts$cluster_id <- NULL; .gr_opts$weights <- NULL; .gr_opts$n_failed <- 0L
-  .gr_opts$n_gee_fallback <- 0L
-  on.exit({ .gr_opts$cluster_id <- NULL; .gr_opts$weights <- NULL }, add = TRUE)
-  formats <- gr_normalise_formats(cfg$graph_formats %||% list("png"), logger)
-  dpi <- as.numeric(cfg$graph_dpi %||% 300)
+  .gr_opts$n_gee_fallback <- 0L; .gr_opts$n_label_thin <- 0L
+  on.exit({ .gr_opts$cluster_id <- NULL; .gr_opts$weights <- NULL; .gr_opts$journal <- FALSE }, add = TRUE)
+  # figure style, width, formats and resolution of the run (D20, D21)
+  fs <- gr_figure_settings(cfg, logger)
+  .gr_opts$journal <- fs$journal
+  formats <- fs$formats
+  dpi <- fs$dpi
+  width_in <- fs$width_in
+  log_once(logger, paste0("StandardEyes figures: ", gr_figure_settings_text(fs), "."))
+  if ("eps" %in% formats && !isTRUE(tryCatch(capabilities("cairo"), error = function(e) FALSE)))
+    log_once(logger, "EPS figures are written with R's postscript device (no cairo): symbols such as ≤ and ± can be lost - check them, or use TIFF.")
+  # the size of a single panel's own file: as designed, or laid out at the
+  # chosen width (its height scaled with it)
+  file_w <- if (is.finite(width_in)) width_in else GR_PANEL_FILE_W
+  file_h <- if (is.finite(width_in)) max(4.0, 5.4 * width_in / GR_PANEL_FILE_W) else 5.4
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   if (!dir.exists(out_dir))
     stop("the graphs folder could not be created: ", out_dir,
@@ -3461,6 +4818,11 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
     invisible(NULL)
   }
   run_lab <- if (nzchar(tag)) paste0(" (", sub("^_", "", tag), ")") else ""
+  # the same in a legend file's title, in words: "..., matched cohort:
+  # Cohort B vs Reference" rather than the run tag
+  leg_lab <- if (!nzchar(tag)) ""
+             else if (startsWith(tag, "_Matched_")) paste0(", matched cohort: ", gsub("_", " ", sub("^_Matched_", "", tag)))
+             else paste0(", ", gsub("_", " ", sub("^_", "", tag)))
 
   # group display labels for the figures (cfg$group_labels: name -> label);
   # colors are looked up by the ORIGINAL group name, then re-keyed
@@ -3589,7 +4951,9 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
     if (n_noid > 0)
       logger(sprintf("StandardEyes figures%s: %d of %d eyes have no patient ID - each is treated as its own patient in the clustered p-values.",
                      if (nzchar(tag)) paste0(" (", sub("^_", "", tag), ")") else "", n_noid, length(cid)))
-    logger("StandardEyes figures: p-values clustered by patient (GEE, robust SE) - both eyes of a patient count once.")
+    logger(paste0("StandardEyes figures: p-values clustered by patient (GEE; ", gee_inference_text(),
+                  ") wherever a patient has two analysed eyes - both eyes of a patient count once; ",
+                  "with one eye per patient the classical tests run, as in the tables."))
   } else {
     .gr_opts$cluster_id <- NULL
     if (cluster_by_pt)
@@ -3603,6 +4967,8 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
   # never read as matching weights.
   w_note <- NULL
   is_matched <- isTRUE(startsWith(as.character(tag)[1], "_Matched_")) || "Pairing" %in% names(df)
+  # a matched pass's clustered GEE: independence working correlation (D18)
+  .gr_opts$matched <- is_matched
   if (is_matched && "weights" %in% names(df)) {
     mw <- suppressWarnings(as.numeric(df$weights))
     if (any(is.finite(mw) & abs(mw - 1) > 1e-8)) {
@@ -3620,19 +4986,36 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
   # only records each panel's section (no builder runs), so each panel is then
   # built knowing the narrowest width it is drawn at - its composite cell or
   # its own file - which decides whether its caution line fits (gr_bars).
-  plan <- character(0); cell_w <- numeric(0); planning <- TRUE
+  plan <- character(0); cell_w <- numeric(0); cell_h <- 4.9; planning <- TRUE
   fail_why <- character(0)       # why a panel could not be drawn, by panel name
+  ptxt <- list()                 # the text each panel draws (journal legend files)
+  cneed <- numeric(0)            # the height each panel needs in its composite cell (gr_need_h)
   addC <- function(nm, cap, expr, section = "") {
     if (planning) { plan[[nm]] <<- section; return(invisible(NULL)) }
     .gr_opts$cell_w <- if (nm %in% names(cell_w)) cell_w[[nm]] else GR_BAR_MIN_W
-    on.exit(.gr_opts$cell_w <- NULL, add = TRUE)
+    .gr_opts$cell_h <- cell_h
+    on.exit({ .gr_opts$cell_w <- NULL; .gr_opts$cell_h <- NULL }, add = TRUE)
     p <- tryCatch(expr, error = function(e) {
       fail_why[[nm]] <<- conditionMessage(e)
       logger(paste0("StandardEyes figure '", nm, "' failed", run_lab, ": ", conditionMessage(e))); NULL })
     if (!is.null(p)) {
       if (inherits(p, "ggplot")) p <- p + ggplot2::labs(title = NULL)
-      written <<- c(written, save_graph(p, file.path(out_dir, paste0("StandardEyes_", nm, tg)),
-                                        formats, dpi, logger = logger))
+      base <- file.path(out_dir, paste0("StandardEyes_", nm, tg))
+      # its own file grows downward when its stat lines, axes and key leave the
+      # bars less than GR_MIN_PANEL_IN (never squashed); its composite row too
+      fh_p <- max(file_h, gr_need_h(p, file_w))
+      cneed[[nm]] <<- gr_need_h(p, .gr_opts$cell_w)
+      got <- save_graph(p, base, formats, dpi, w = file_w, h = fh_p, logger = logger)
+      written <<- c(written, got)
+      # journal style: the panel title and its abbreviations in <figure>_legend.txt
+      if (fs$journal) {
+        tx <- gr_figure_texts(p)
+        # the stability panel's points are group means, not eyes: not "●"
+        if (identical(nm, "07_Stability")) tx <- setdiff(tx, "●")
+        ptxt[[nm]] <<- tx
+        if (length(got)) gr_write_legend(base, paste0(cap, leg_lab), c(gr_panel_notes(nm), gr_gee_legend_lines(tx)),
+                                         texts = tx, logger = logger)
+      }
       cp[[length(cp) + 1]] <<- p; cc_ <<- c(cc_, cap); cs <<- c(cs, section); cn <<- c(cn, nm)
     }
   }
@@ -3693,21 +5076,48 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
   # each panel's width in the composite (laid out as below, from the planned
   # sections) or in its own file, whichever is narrower. A panel that fails to
   # draw (logged) re-packs the composite rows the others were planned for.
-  cell_w <- stats::setNames(pmin(GR_PANEL_FILE_W, if (length(plan) >= 2)
-    compose_panel_w(length(plan), rows_spec = build_sections(unname(plan))$rows_spec)
-    else rep(GR_PANEL_FILE_W, length(plan))), names(plan))
+  # At a chosen width the composite is laid out at that width (gr_width_layout).
+  if (length(plan) >= 2 && is.finite(width_in)) {
+    wl <- gr_width_layout(length(plan), width_in, 5.6, 4.9, ph_min = GR_COMPOSITE_MIN_PH)
+    comp_w <- compose_panel_w(length(plan), wl$ncol, wl$pw, wl$rows_spec)
+    cell_h <- min(file_h, wl$ph)
+  } else {
+    comp_w <- if (length(plan) >= 2)
+      compose_panel_w(length(plan), rows_spec = build_sections(unname(plan))$rows_spec)
+      else rep(file_w, length(plan))
+    cell_h <- min(file_h, 4.9)
+  }
+  cell_w <- stats::setNames(pmin(file_w, comp_w), names(plan))
   planning <- FALSE
   draw_panels()
   if (length(cp) >= 2) {
     lay <- build_sections(cs)
-    written <- c(written, compose_panels(cp,
-      captions = if (is.null(lay$sections)) cc_ else NULL,
-      base = file.path(out_dir, paste0("StandardEyes_AllGroups", tg)),
-      formats = formats, dpi = dpi,
-      rows_spec = lay$rows_spec, sections = lay$sections,
-      note = w_note, preview_dir = preview_dir(), logger = logger))
+    base_c <- file.path(out_dir, paste0("StandardEyes_AllGroups", tg))
+    # journal style (D20): no section bands, frames or captions in the image -
+    # the panel titles and the matched-cohort note go to the legend file
+    got <- compose_panels(cp,
+      captions = if (fs$journal || !is.null(lay$sections)) NULL else cc_,
+      base = base_c, formats = formats, dpi = dpi,
+      rows_spec = lay$rows_spec, sections = if (fs$journal) NULL else lay$sections,
+      note = if (fs$journal) NULL else w_note, preview_dir = preview_dir(), logger = logger,
+      width_in = width_in, ph_min = GR_COMPOSITE_MIN_PH,
+      need_h = unname(cneed[cn]))
+    written <- c(written, got)
+    # one legend file per figure: the composite, or each of its pages
+    pages <- attr(got, "pages") %||% list(list(base = base_c, idx = seq_along(cp), ok = length(got) > 0))
+    if (fs$journal) for (pg in pages) if (isTRUE(pg$ok)) {
+      ii <- pg$idx
+      gr_write_legend(pg$base, paste0("Standard graphs", leg_lab,
+                                      if (length(pages) > 1) sprintf(" (page %d of %d)", match(pg$base, vapply(pages, `[[`, "", "base")), length(pages)) else ""),
+                      c(paste0(paste0(LETTERS[seq_along(ii)], ", ", cc_[ii], collapse = "; "), "."), w_note,
+                        unlist(lapply(seq_along(ii), function(k) {
+                          nt <- gr_panel_notes(cn[ii[k]])
+                          if (length(nt)) paste0(LETTERS[k], ": ", nt) })),
+                        gr_gee_legend_lines(ptxt[cn[ii]])),
+                      texts = unlist(ptxt[cn[ii]]), logger = logger)
+    }
   } else if (length(cp) == 1) {
-    preview_single(cp[[1]], paste0("StandardEyes_", cn[1], tg), 6.5, 5.4)
+    preview_single(cp[[1]], paste0("StandardEyes_", cn[1], tg), file_w, file_h)
     logger(sprintf("StandardEyes figures%s: only one panel could be drawn (%s) - no composite figure, which needs two or more.",
                    run_lab, cn[1]))
   }
@@ -3718,84 +5128,168 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
   da_on <- isTRUE(cfg$double_angle_figs %||% TRUE)
   sc_on <- isTRUE(cfg$semicircle_figs %||% TRUE)
   if (!is.null(cav) && (da_on || sc_on)) {
-    ell <- as.character(cfg$astig_region %||% "polygon")
-    jcrs_astig <- isTRUE(cfg$astig_jcrs_standard %||% TRUE)
-    astig_meth <- as.character(cfg$astig_test_method %||% "robust")
-    if (!astig_meth %in% c("robust", "gee", "classic")) astig_meth <- "robust"
-    keep <- is.finite(cav$tia) & cav$tia >= 0.25       # CI is meaningless below this
-    vecs <- list(
-      list("TIA", "Target Induced Astigmatism", cav$tia, cav$tax, "Diopters", NULL),
-      list("SIA", "Surgically Induced Astigmatism", cav$sia, cav$sax, "Diopters", NULL),
-      list("DV",  "Difference Vector", cav$dv, cav$dax, "Diopters", NULL),
-      list("CI",  "Correction Index", ifelse(keep, cav$sia / cav$tia, NA_real_),
-           cav$sax, "Index", 1))
+    ast <- astig_settings(cfg)
+    ell <- ast$region
+    jcrs_astig <- ast$jcrs
+    astig_meth <- ast$method
+    # The double-angle set is the standard's (D3): PRE, SIA, PE - and POST when
+    # a target is not plano; the correction index, a ratio without a meridian,
+    # is drawn only as its histogram. The semicircle set keeps the Alpins
+    # vectors TIA, SIA and DV, at their plus axes.
+    da_vecs <- astig_jcrs_vectors(cav)
+    sc_vecs <- list(
+      list(key = "TIA", title = "Target induced astigmatism (Alpins; target - preoperative)",
+           mag = cav$tia, ax = cav$tax),
+      list(key = "SIA", title = "Surgically induced astigmatism (postoperative - preoperative)",
+           mag = cav$sia, ax = cav$sax),
+      list(key = "DV", title = "Difference vector (Alpins; target - postoperative = -PE)",
+           mag = cav$dv, ax = cav$dax))
+    # the statistics of each double-angle panel, computed with the cohorts'
+    # own names so the astigmatism sheet's (export.R) are reused from the cache
+    gl_orig <- as.character(df$GroupLabel)
     dap <- list(); dac <- character(0); scp <- list(); scc <- character(0)
-    for (v in vecs) {
-      if (da_on) {
-        if (jcrs_astig && identical(astig_meth, "robust")) {
-          # the patient bootstrap is the slow step of a run: say what is running
-          okv <- is.finite(abs(gr_num(v[[3]]))) & is.finite(gr_num(v[[4]])) &
-                 !is.na(gl) & gl %in% glv
-          kv <- length(unique(gl[okv]))
-          if (kv >= 2)
-            logger(sprintf("Astigmatism %s%s: robust centroid test, %d groups, %d eyes - B = %d bootstrap resamples per test ...",
-                           v[[1]], if (nzchar(tag)) paste0(" (", sub("^_", "", tag), ")") else "",
-                           kv, sum(okv), ASTIG_BOOT_B))
-        }
-        p <- tryCatch(g_double_angle_plot(v[[3]], v[[4]], gl, glv, pal,
-                        paste0(v[[2]], " - double-angle"), unit_lab = v[[5]],
-                        ellipse = ell, jcrs = jcrs_astig,
-                        test_method = astig_meth, fig_w = DA_W, fig_h = DA_H),
-                      error = function(e) { logger(paste0("StandardEyes double-angle '",
-                        v[[1]], "' failed", run_lab, ": ", conditionMessage(e))); NULL })
-        if (!is.null(p)) {
-          written <- c(written, save_graph(p, file.path(out_dir,
-            paste0("StandardEyes_DoubleAngle_", v[[1]], tg)), formats, dpi, w = DA_W, h = DA_H,
-            logger = logger))
-          dap[[length(dap) + 1]] <- p; dac <- c(dac, v[[1]])
-        }
+    # their own size, or laid out at the chosen width (aspect kept)
+    da_w <- if (is.finite(width_in)) width_in else DA_W
+    da_h <- DA_H * da_w / DA_W
+    sc_w <- if (is.finite(width_in)) width_in else SC_W
+    sc_h <- SC_H * sc_w / SC_W
+    # journal style: the plot's title and method text in <figure>_legend.txt
+    polar_legend <- function(p, base) {
+      if (!fs$journal) return(invisible(NULL))
+      lg <- attr(p, "legend")
+      tx <- gr_figure_texts(p)
+      gr_write_legend(base, paste0(lg$title %||% basename(base), leg_lab),
+                      c(lg$lines, gr_gee_legend_lines(tx)),
+                      texts = c(tx, "◆"), logger = logger)
+    }
+    da_leg <- list(); sc_leg <- list()
+    # each plot is built by a function of its size (w x h inches), kept so a
+    # composite laid out at a chosen width can build its panels again at the
+    # width of its cells (polar_cells); the height a plot was laid out at is
+    # its attr "fig_h" (gr_polar_finish: taller than asked when a header that
+    # wraps to many lines would otherwise squeeze the diagram)
+    da_mk <- list(); sc_mk <- list()
+    fig_h_of <- function(p, h) { v <- suppressWarnings(as.numeric(attr(p, "fig_h"))[1])
+      if (length(v) && is.finite(v)) max(v, h) else h }
+    # the patients counted in each header: the mapped patient ID, whether or
+    # not the tests cluster (D4)
+    cnt_id <- astig_count_ids(df, res)
+    if (da_on) for (v in da_vecs) {
+      st <- tryCatch(astig_vector_stats(v$mag, v$ax, gl_orig, orig_glv, id = .gr_opts$cluster_id,
+                                        method = astig_meth, region = ell,
+                                        centroid_region = ast$centroid_region,
+                                        matched = isTRUE(.gr_opts$matched), w = .gr_opts$weights,
+                                        key = v$key, logger = logger, count_id = cnt_id,
+                                        what = paste0(v$key, if (nzchar(tag)) paste0(" (", sub("^_", "", tag), ")") else "")),
+                     error = function(e) { logger(paste0("Astigmatism statistics '", v$key, "' failed", run_lab,
+                                                         ": ", conditionMessage(e))); NULL })
+      if (is.null(st)) next
+      mk <- local({ v <- v; st <- st; function(w, h) g_double_angle_plot(v$mag, v$ax, gl, glv, pal,
+                      paste0(v$title, " - double-angle"), unit_lab = "Diopters",
+                      ellipse = ell, jcrs = jcrs_astig,
+                      test_method = astig_meth, fig_w = w, fig_h = h,
+                      st = st, centroid_region = ast$centroid_region, lab = lab_map) })
+      p <- tryCatch(mk(da_w, da_h),
+                    error = function(e) { logger(paste0("StandardEyes double-angle '",
+                      v$key, "' failed", run_lab, ": ", conditionMessage(e))); NULL })
+      if (!is.null(p)) {
+        base <- file.path(out_dir, paste0("StandardEyes_DoubleAngle_", v$key, tg))
+        got <- save_graph(p, base, formats, dpi, w = da_w, h = fig_h_of(p, da_h), logger = logger)
+        written <- c(written, got)
+        if (length(got)) polar_legend(p, base)
+        dap[[length(dap) + 1]] <- p; dac <- c(dac, v$key); da_leg[[v$key]] <- attr(p, "legend")
+        da_mk[[length(da_mk) + 1]] <- mk
       }
-      if (sc_on) {
-        p <- tryCatch(g_astig_semicircle_multi(v[[3]], v[[4]], gl, glv, pal,
-                        paste0(v[[2]], " - semicircle"), unit_lab = v[[5]], arc_at = v[[6]],
-                        fig_w = SC_W, fig_h = SC_H),
-                      error = function(e) { logger(paste0("StandardEyes semicircle '",
-                        v[[1]], "' failed", run_lab, ": ", conditionMessage(e))); NULL })
-        if (!is.null(p)) {
-          written <- c(written, save_graph(p, file.path(out_dir,
-            paste0("StandardEyes_Semicircle_", v[[1]], tg)), formats, dpi, w = SC_W, h = SC_H,
-            logger = logger))
-          scp[[length(scp) + 1]] <- p; scc <- c(scc, v[[1]])
-        }
+    }
+    if (sc_on) for (v in sc_vecs) {
+      mk <- local({ v <- v; function(w, h) g_astig_semicircle_multi(v$mag, v$ax, gl, glv, pal,
+                      paste0(v$title, " - semicircle"), unit_lab = "Diopters",
+                      fig_w = w, fig_h = h) })
+      p <- tryCatch(mk(sc_w, sc_h),
+                    error = function(e) { logger(paste0("StandardEyes semicircle '",
+                      v$key, "' failed", run_lab, ": ", conditionMessage(e))); NULL })
+      if (!is.null(p)) {
+        base <- file.path(out_dir, paste0("StandardEyes_Semicircle_", v$key, tg))
+        got <- save_graph(p, base, formats, dpi, w = sc_w, h = fig_h_of(p, sc_h), logger = logger)
+        written <- c(written, got)
+        if (length(got)) polar_legend(p, base)
+        scp[[length(scp) + 1]] <- p; scc <- c(scc, v$key); sc_leg[[v$key]] <- attr(p, "legend")
+        sc_mk[[length(sc_mk) + 1]] <- mk
+      }
+    }
+    # The panels of a polar composite and the height each needs. At a chosen
+    # width a cell is narrower than the figure's own file (panel-letter strip,
+    # gap), so each panel is built again at its cell's size - its header wrapped
+    # to that width - rather than drawn squeezed; at the designed size the
+    # file's plot is the cell's. A panel that cannot be rebuilt keeps its file's.
+    polar_cells <- function(plots, mks, pw, ph) {
+      if (is.finite(width_in)) {
+        lay <- gr_width_layout(length(plots), width_in, pw, ph, POLAR_GAP_IN, GR_POLAR_MIN_PW)
+        plots <- lapply(seq_along(plots), function(i)
+          tryCatch(mks[[i]](lay$pw, lay$ph), error = function(e) plots[[i]]))
+      }
+      list(plots = plots, need_h = vapply(plots, function(p) fig_h_of(p, 0), numeric(1)))
+    }
+    # a composite's legend: its panels by letter, then the method text of each;
+    # a composite written as pages (compose_panels attr "pages") gets one per page
+    composite_legend <- function(plots, legs, base, what, got = NULL) {
+      if (!fs$journal) return(invisible(NULL))
+      pages <- attr(got, "pages") %||% list(list(base = base, idx = seq_along(plots), ok = TRUE))
+      for (pg in seq_along(pages)) {
+        if (!isTRUE(pages[[pg]]$ok)) next
+        ii <- pages[[pg]]$idx
+        ttl <- vapply(legs[ii], function(l) as.character(l$title %||% "")[1], character(1))
+        lines <- unlist(lapply(seq_along(ii), function(k)
+          if (length(legs[[ii[k]]]$lines)) paste0(LETTERS[k], ": ", legs[[ii[k]]]$lines)))
+        tx <- unlist(lapply(plots[ii], gr_figure_texts))
+        gr_write_legend(pages[[pg]]$base,
+                        paste0(what, leg_lab, if (length(pages) > 1) sprintf(" (page %d of %d)", pg, length(pages)) else ""),
+                        c(paste0(paste0(LETTERS[seq_along(ttl)], ", ", ttl, collapse = "; "), "."), lines,
+                          gr_gee_legend_lines(tx)),
+                        texts = c(tx, "◆"), logger = logger)
       }
     }
     if (length(dap) >= 2) {
-      written <- c(written, compose_panels(dap, captions = NULL,
-        base = file.path(out_dir, paste0("StandardEyes_DoubleAngle", tg)),
+      base <- file.path(out_dir, paste0("StandardEyes_DoubleAngle", tg))
+      cells <- polar_cells(dap, da_mk, DA_W, DA_H)
+      got <- compose_panels(cells$plots, captions = NULL, base = base,
         formats = formats, dpi = dpi, ncol = 2, pw = DA_W, ph = DA_H, gap_in = POLAR_GAP_IN,
-        preview_dir = preview_dir(), logger = logger))
+        preview_dir = preview_dir(), logger = logger, width_in = width_in, min_pw = GR_POLAR_MIN_PW,
+        need_h = cells$need_h)
+      written <- c(written, got)
+      if (length(got)) composite_legend(dap, da_leg, base, "Double-angle plots", got)
     } else if (length(dap) == 1) {
-      preview_single(dap[[1]], paste0("StandardEyes_DoubleAngle_", dac[1], tg), DA_W, DA_H)
+      preview_single(dap[[1]], paste0("StandardEyes_DoubleAngle_", dac[1], tg), da_w, fig_h_of(dap[[1]], da_h))
     }
     if (length(scp) >= 2) {
-      written <- c(written, compose_panels(scp, captions = NULL,
-        base = file.path(out_dir, paste0("StandardEyes_Semicircle", tg)),
+      base <- file.path(out_dir, paste0("StandardEyes_Semicircle", tg))
+      cells <- polar_cells(scp, sc_mk, SC_W, SC_H)
+      got <- compose_panels(cells$plots, captions = NULL, base = base,
         formats = formats, dpi = dpi, ncol = 2, pw = SC_W, ph = SC_H, gap_in = POLAR_GAP_IN,
-        preview_dir = preview_dir(), logger = logger))
+        preview_dir = preview_dir(), logger = logger, width_in = width_in, min_pw = GR_POLAR_MIN_PW,
+        need_h = cells$need_h)
+      written <- c(written, got)
+      if (length(got)) composite_legend(scp, sc_leg, base, "Semicircle (single-angle) plots", got)
     } else if (length(scp) == 1) {
-      preview_single(scp[[1]], paste0("StandardEyes_Semicircle_", scc[1], tg), SC_W, SC_H)
+      preview_single(scp[[1]], paste0("StandardEyes_Semicircle_", scc[1], tg), sc_w, fig_h_of(scp[[1]], sc_h))
     }
   }
   if (length(glv) > 5)
     logger(sprintf("StandardEyes figures: %d groups superimposed - readable up to about 5; consider subsets.",
                    length(glv)))
   .gr_opts$cluster_id <- NULL; .gr_opts$weights <- NULL     # reset on exit
+  .gr_opts$matched <- FALSE
   # every test whose clustered GEE was fitted but failed - the univariate panel
   # tests (p_omnibus) and the double-angle centroid tests (astig_bivariate_p) -
   # and whose P therefore comes from the unclustered test
   if ((.gr_opts$n_gee_fallback %||% 0L) > 0)
     logger(sprintf("StandardEyes figures%s: in %d test(s) the clustered GEE could not be fitted (no convergence, a numerically singular covariance, or a group of a 0/1 outcome without events); those P values come from the unclustered test and are labelled \"GEE not fitted\" on the figure.",
                    run_lab, .gr_opts$n_gee_fallback))
+  # bar panels whose bars are too narrow for a label each: the tallest bars
+  # kept theirs (gr_bars), the others are named here
+  if ((.gr_opts$n_label_thin %||% 0L) > 0)
+    logger(sprintf("StandardEyes figures%s: in %d bar panel(s) the bars are too narrow at this width for a %g-pt value label on each - the tallest bars are labelled, the labels that would overlap them are left out.",
+                   run_lab, .gr_opts$n_label_thin, GR_MIN_TEXT_PT))
   if (dir.exists(prev_dir) && !length(list.files(prev_dir, all.files = TRUE, no.. = TRUE)))
     unlink(prev_dir, recursive = TRUE)
 

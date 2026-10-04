@@ -38,9 +38,13 @@ DEFAULTS: dict[str, Any] = {
     "do_matching": True,
     "psm_covariates_raw": [],
     "psm_method": "nearest",
-    "psm_distance": "logit",
+    # the propensity score on the LOGIT scale (MatchIt distance "glm" with link
+    # "linear.logit"), so the default caliper is 0.2 SD of the logit of the
+    # propensity score (Austin 2011; decision D13). "logit" (the v1.0.0
+    # default) is the same logistic model on the probability scale.
+    "psm_distance": "linear.logit",
     # 1:1 nearest-neighbour without replacement inside a 0.2-SD caliper of the
-    # propensity score (logit model): the default (the example presets
+    # logit of the propensity score: the default (the example presets
     # use 2:1)
     "psm_ratio": 1,
     "psm_replace": False,
@@ -51,6 +55,15 @@ DEFAULTS: dict[str, Any] = {
     # settings give identical matched cohorts in the run and the live preview
     "psm_seed": 20250601,
     "run_gee_stage": "matched",
+    # small-sample inference of every GEE test and interval (decision D11):
+    # "md" = Mancl-DeRouen bias-corrected robust SE with a t reference (F for
+    # joint tests), df = patients - model coefficients; "none" = the v1.0.0
+    # uncorrected robust SE with a normal reference
+    "gee_small_sample": "md",
+    # summary-table and Publication-Table tests (decision D12): "auto" =
+    # patient-clustered GEE for every per-eye row in which a patient has two
+    # analysed eyes, classical tests otherwise; "classical" = the v1.0.0 tests
+    "table_tests": "auto",
     "run_main_gee": True,
     "run_adjusted_gee": False,
     "gee_adjust_covariates_raw": [],
@@ -81,8 +94,15 @@ DEFAULTS: dict[str, Any] = {
     # notation the visual acuity is RECORDED in, for every VA-role column and
     # every column in logmar_cols_raw: "decimal" | "logmar" | "snellen" | "etdrs"
     "va_format": "decimal",
-    "do_logmar": False,
+    # visual acuity analysed in logMAR by default (decision D16); a settings
+    # file without logmar_cols_raw converts the mapped VA role columns
+    # (normalize_cfg fills them in, as R/pipeline.R va_columns does)
+    "do_logmar": True,
     "logmar_cols_raw": [],
+    # GUI-only: true once the user chose the logMAR column list; while false
+    # the GUI keeps the list equal to the mapped VA role columns. The engine
+    # ignores it (it reads logmar_cols_raw)
+    "logmar_cols_user": False,
     # stability-over-time figure: one entry per follow-up visit,
     # {label, time, seq, sph, cyl} -- SEQ is used when given, else sph + cyl/2
     "stability_figs": False,
@@ -100,19 +120,40 @@ DEFAULTS: dict[str, Any] = {
     #   four = cataract set, additionally drops Safety and attempted-vs-achieved.
     "graph_set": "nine",
     "graph_formats": ["tiff"],
+    # 50-1200 dpi (line art for a journal: 1200)
     "graph_dpi": 300,
+    # figure style (decision D20): "journal" = white, no frames, section bands,
+    # captions or shaded wedges, titles / method text / abbreviations in a
+    # <figure>_legend.txt beside each figure; "annotated" = the v1.0.0 look
+    "figure_style": "journal",
+    # page width every figure is laid out at, in cm (decision D21); None =
+    # each figure's own size. 8.76, 12.69 and 17.77 are the journal widths
+    "figure_width_cm": None,
+    # P value style of tables, sheets, logs and figures (decision D15): "ama"
+    # = .27, .003, <.001, >.99; "classic" = the v1.0.0 0.266 / <0.001
+    "p_style": "ama",
     "group_colors": {},
     "group_labels": {},
     # astigmatism PANELS inside the standard set (refractive-astigmatism bar +
     # the vector panels). Off = a purely refractive figure set.
     "astig_panels": True,
-    # JCRS-standard double-angle astigmatism plots and the grey single-angle
-    # semicircle vector plots (TIA / SIA / DV / CI)
+    # JCRS-standard double-angle astigmatism plots (decision D3: preoperative,
+    # SIA and prediction error, plus postoperative when a target is not plano;
+    # plus-cylinder format, with-the-rule on the left) and the grey single-
+    # angle semicircle plots of the Alpins vectors (TIA / SIA / DV)
     "double_angle_figs": True,
     "semicircle_figs": True,
+    # the "Astigmatism (JCRS 2025)" and "Astigmatism vectors" sheets and the
+    # astigmatism CSV beside the workbook (decision D8)
+    "astig_sheet": True,
     # JCRS 2025 Part II says astigmatism data are usually NOT Gaussian, so the
     # nonparametric convex polygon is the default rather than the normal ellipse.
+    # "polygon" = the convex hull of the 95% deepest eyes by projection depth
+    # (decision D5; "depth" is accepted as the same)
     "astig_region": "polygon",     # "normal" | "polygon" | "both"
+    # 95% confidence region of each centroid (decision D6): "bootstrap" = the
+    # depth polygon of 999 bootstrap centroids; "hotelling" = the T2 ellipse
+    "astig_centroid_region": "bootstrap",
     # follow the JCRS 2025 astigmatism working group: total SD, a bivariate
     # centroid test and Holm-adjusted group comparisons. Off = the older
     # behaviour (two separate univariate tests, no adjustment).
@@ -120,15 +161,18 @@ DEFAULTS: dict[str, Any] = {
     # cluster the figure p-values by patient (GEE, robust SE) so both eyes of
     # one person are not counted as independent
     "cluster_by_patient": True,
-    # bivariate centroid test: "robust" = trimmed Hotelling T2 calibrated by a
-    # (cluster) bootstrap, which is what JCRS 2025 Part II describes;
-    # "gee" = clustered GEE Wald; "classic" = Hotelling/MANOVA, eyes independent
+    # astigmatism tests (decision D7): "robust" = trimmed Hotelling T2 /
+    # trimmed means calibrated by a bootstrap resampling patients within each
+    # cohort, which is what JCRS 2025 Part II describes; "gee" = clustered GEE
+    # Wald; "classic" = Hotelling/MANOVA / Welch, eyes independent
     "astig_test_method": "robust",
-    # optional pre-computed Alpins vectors {tia_mag,tia_axis,sia_mag,sia_axis,dv_mag,dv_axis};
-    # anything not mapped is computed from sphere/cylinder/axis instead
+    # optional pre-computed vectors, magnitude + plus axis
+    # {tia_mag,tia_axis,sia_mag,sia_axis,dv_mag,dv_axis,pe_mag,pe_axis};
+    # anything not mapped is computed from cylinder/axis instead (PE = -DV)
     "astig_vector_cols": {},
-    # optional intended/target refractive cylinder {cyl, axis}; when mapped, TIA
-    # becomes the intended CHANGE rather than the preoperative astigmatism
+    # optional intended/target refractive cylinder {cyl, axis}, in either
+    # cylinder form; when mapped, TIA becomes the intended CHANGE rather than
+    # the preoperative astigmatism, and PE = postoperative - target
     "astig_target": {},
     "do_regression": True,
     "regression_stage": "unmatched",
@@ -166,8 +210,35 @@ def _clean_filter_value(op: str, value: Any) -> Any:
     return parsed
 
 
-GRAPH_FORMATS = ("png", "tiff", "jpeg", "pdf")
-_FORMAT_ALIASES = {"jpg": "jpeg", "tif": "tiff"}
+GRAPH_FORMATS = ("png", "tiff", "jpeg", "pdf", "eps")
+_FORMAT_ALIASES = {"jpg": "jpeg", "tif": "tiff", "ps": "eps"}
+# figure resolution, style, width and P style (R/graphs.R gr_figure_settings,
+# R/helpers.R set_p_style)
+GRAPH_DPI_RANGE = (50, 1200)
+FIGURE_STYLES = ("journal", "annotated")
+FIGURE_WIDTH_MAX_CM = 60
+JOURNAL_WIDTHS_CM = (8.76, 12.69, 17.77)
+P_STYLES = ("ama", "classic")
+# "jcrs" is read by R set_p_style as "ama"
+_P_STYLE_ALIASES = {"jcrs": "ama"}
+VA_ROLES = ("pre_ucva", "pre_bcva", "post_ucva", "post_bcva")
+# astigmatism settings (R/graphs.R astig_settings)
+ASTIG_REGIONS = ("polygon", "depth", "normal", "both")
+ASTIG_CENTROID_REGIONS = ("bootstrap", "hotelling")
+ASTIG_TEST_METHODS = ("robust", "gee", "classic")
+
+
+def figure_width_cm(cfg: dict) -> Any:
+    """The figure width as R reads it: None when blank or missing, else the
+    number (a value that is not a number is returned as given, for the
+    validation to name)."""
+    v = (cfg or {}).get("figure_width_cm")
+    if _blank(v):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return v
 RESERVED_RUN_NAMES = ("pooled", "all")
 SCALAR_NUMERIC_OPS = ("==", "!=", "<", "<=", ">", ">=", "abs_ge", "abs_le")
 
@@ -256,10 +327,23 @@ _NON_PS_DISTANCES = ("mahalanobis", "robust_mahalanobis", "euclidean", "scaled_e
 
 
 def psm_distance(cfg: dict) -> str:
-    """The distance as R receives it (blank = glm, like .psm_settings();
-    MatchIt itself ignores case)."""
+    """The distance as R receives it (blank = the default, linear.logit, like
+    .psm_settings(); MatchIt itself ignores case)."""
     d = (cfg or {}).get("psm_distance")
-    return "glm" if _blank(d) else str(d).strip().lower()
+    return DEFAULTS["psm_distance"] if _blank(d) else str(d).strip().lower()
+
+
+# small-sample GEE inference and table tests (R/helpers.R set_gee_small_sample,
+# R/analysis.R table_tests_of)
+GEE_SMALL_SAMPLE = ("md", "none")
+TABLE_TESTS = ("auto", "classical")
+
+
+def _choice(cfg: dict, key: str) -> str:
+    """A choice setting as R reads it: trimmed and lower-cased; blank / missing
+    = its default."""
+    v = (cfg or {}).get(key)
+    return DEFAULTS[key] if _blank(v) else str(v).strip().lower()
 
 
 def psm_distance_problem(cfg: dict) -> str | None:
@@ -282,7 +366,7 @@ def psm_distance_problem(cfg: dict) -> str | None:
         # MatchIt refuses an unnamed caliper when the distance is not a score
         return (f"Matching distance '{d}' is not a propensity score, so the caliper (in SDs of "
                 "the score) cannot apply - leave the caliper empty or choose a propensity "
-                "distance such as logit.")
+                "distance such as linear.logit.")
     order = (cfg or {}).get("psm_m_order")
     if d in _NON_PS_DISTANCES and not _blank(order) and str(order).strip().lower() in ("largest", "smallest"):
         # 'largest' / 'smallest' order the eyes by their propensity score
@@ -341,6 +425,21 @@ def normalize_cfg(cfg: dict, file_path: str, sheet: Any = None) -> dict:
     out.update(normalize_psm(out))
     out["psm_method"] = psm_method(out)
     out["psm_distance"] = psm_distance(out)
+    # a settings file of v1.0.0 has neither key: the v1.1.0 defaults apply
+    out["gee_small_sample"] = _choice(out, "gee_small_sample")
+    out["table_tests"] = _choice(out, "table_tests")
+    # reporting settings of v1.1.0 (D15, D20, D21): absent = the defaults
+    out["p_style"] = _P_STYLE_ALIASES.get(_choice(out, "p_style"), _choice(out, "p_style"))
+    out["figure_style"] = _choice(out, "figure_style")
+    out["figure_width_cm"] = figure_width_cm(out)
+    # astigmatism choices (D5-D7): absent or blank = the v1.1.0 defaults
+    for k in ("astig_region", "astig_centroid_region", "astig_test_method"):
+        out[k] = _choice(out, k)
+    # logMAR for the mapped acuity columns when the settings name no list
+    # (D16; the same rule as R/pipeline.R va_columns)
+    if "logmar_cols_raw" not in (cfg or {}) and out.get("do_logmar"):
+        roles = out.get("roles") or {}
+        out["logmar_cols_raw"] = [str(roles[k]) for k in VA_ROLES if not _blank(roles.get(k))]
     # read from the cfg AS SENT: the default above would hide a legacy
     # settings file's subset_pooled
     out["subset_mode"] = subset_mode(cfg or {})
@@ -469,7 +568,7 @@ def column_problems(cfg: dict, columns: list) -> tuple[list[str], list[str]]:
                 soft += [(f"{sec} {kind}", x) for x in _names(vals)]
     soft += [("excluded-if-missing", n) for n in _names(cfg.get("exclude_params_raw"))]
     soft += [("patient-level", n) for n in _names(cfg.get("patient_level_params_raw"))]
-    soft += [("LogMAR", n) for n in _names(cfg.get("logmar_cols_raw"))]
+    soft += [("logMAR", n) for n in _names(cfg.get("logmar_cols_raw"))]
     if cfg.get("do_standardize_minus_cyl"):
         triples = cfg.get("std_triples") or [{"sph": cfg.get("std_sph_raw"),
                                               "cyl": cfg.get("std_cyl_raw"),
@@ -564,10 +663,47 @@ def validate_cfg(cfg: dict, columns: list | None = None, data: Any = None) -> li
         errs.append(f"Visual-acuity notation '{fmt}' is not supported - use one of: "
                     + ", ".join(VA_FORMATS) + ".")
 
+    if _choice(cfg, "gee_small_sample") not in GEE_SMALL_SAMPLE:
+        errs.append(f"GEE small-sample correction '{cfg.get('gee_small_sample')}' is not supported - "
+                    "use md (Mancl-DeRouen, t reference) or none (uncorrected, normal reference).")
+    if _choice(cfg, "table_tests") not in TABLE_TESTS:
+        errs.append(f"Table tests '{cfg.get('table_tests')}' is not supported - use auto "
+                    "(patient-clustered when a patient has two analysed eyes) or classical.")
+
     bad_fmts = [f for f in (cfg.get("graph_formats") or []) if f not in GRAPH_FORMATS]
     if bad_fmts:
         errs.append("Unsupported graph format(s): " + ", ".join(map(str, bad_fmts))
                     + ". Use " + ", ".join(GRAPH_FORMATS) + ".")
+    dpi = cfg.get("graph_dpi")
+    if not _blank(dpi):
+        try:
+            dv = float(dpi)
+            ok = math.isfinite(dv) and GRAPH_DPI_RANGE[0] <= dv <= GRAPH_DPI_RANGE[1]
+        except (TypeError, ValueError):
+            ok = False
+        if not ok:
+            errs.append(f"Graph resolution '{dpi}' must be a number from {GRAPH_DPI_RANGE[0]} to "
+                        f"{GRAPH_DPI_RANGE[1]} dpi (journals ask 300 for photographs, 1200 for line art).")
+    if _choice(cfg, "figure_style") not in FIGURE_STYLES:
+        errs.append(f"Figure style '{cfg.get('figure_style')}' is not supported - use journal "
+                    "(no frames, bands or shading; legend text in a file) or annotated (the v1.0.0 look).")
+    fw = figure_width_cm(cfg)
+    if fw is not None and not (isinstance(fw, float) and math.isfinite(fw) and 0 < fw <= FIGURE_WIDTH_MAX_CM):
+        errs.append(f"Figure width '{cfg.get('figure_width_cm')}' must be a width in cm (above 0, at most "
+                    f"{FIGURE_WIDTH_MAX_CM}), or blank for each figure's own size - the journal column "
+                    "widths are " + ", ".join(f"{w:g}" for w in JOURNAL_WIDTHS_CM) + " cm.")
+    if _P_STYLE_ALIASES.get(_choice(cfg, "p_style"), _choice(cfg, "p_style")) not in P_STYLES:
+        errs.append(f"P value style '{cfg.get('p_style')}' is not supported - use ama (.27, <.001) "
+                    "or classic (0.266, <0.001).")
+    if _choice(cfg, "astig_region") not in ASTIG_REGIONS:
+        errs.append(f"Astigmatism data region '{cfg.get('astig_region')}' is not supported - use polygon "
+                    "(95% depth polygon), normal (95% ellipse) or both.")
+    if _choice(cfg, "astig_centroid_region") not in ASTIG_CENTROID_REGIONS:
+        errs.append(f"Centroid confidence region '{cfg.get('astig_centroid_region')}' is not supported - use "
+                    "bootstrap (depth polygon of bootstrap centroids) or hotelling (T² ellipse).")
+    if _choice(cfg, "astig_test_method") not in ASTIG_TEST_METHODS:
+        errs.append(f"Astigmatism test method '{cfg.get('astig_test_method')}' is not supported - use robust, "
+                    "gee or classic.")
 
     # run labels become file names: reserved and colliding names would make
     # one run's workbook and figures overwrite another's

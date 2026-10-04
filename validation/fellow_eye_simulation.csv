@@ -1,0 +1,7 @@
+"patients_per_group","eyes_per_group","inter_eye_correlation","replicates","clustered_fitted","eye_level_rejection_pct","clustered_rejection_pct"
+30,60,0.5,5000,5000,11.1,6.3
+60,120,0.5,5000,5000,10.5,5.5
+120,240,0.5,5000,5000,10.9,4.8
+30,60,0.8,5000,5000,14.9,6.2
+60,120,0.8,5000,5000,14.2,5.1
+120,240,0.8,5000,5000,13.7,5.2

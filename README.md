@@ -42,6 +42,7 @@ The app shows its version as `v1.0.0 (build <id>)`: the release number used on t
 | `webapp/` | The local FastAPI server, the Alpine.js interface and the seven *Example - …* presets |
 | `Example Data/` | Simulated dataset, astigmatism validation dataset and the seven example settings files (`Settings_01_Two_cohorts_simple.json` … `Settings_07_Full_figure_suite.json`) |
 | `docs/` | The project website (GitHub Pages) |
+| `validation/` | The fellow-eye simulation behind the clustered tests of the figures: the script and its results |
 
 The bundled runtime (`runtime/`: a private copy of Python and the R library) is **not** in the repository — it is
 attached to each release as part of the ZIP, which is Windows-only (`Start StandardEyes.bat` and

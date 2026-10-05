@@ -70,10 +70,16 @@ What changed, and how to get the 1.0.0 behaviour back:
   the prediction error (PE = postoperative - target), plus
   postoperative astigmatism when a target is not plano. The
   correction-index polar plots are gone (its histogram
-  stays). The 95% region of the eyes is the standard's
-  depth polygon, the centroid's 95% confidence region a
-  bootstrap polygon, and the robust tests resample
-  patients.
+  stays). The 95% region of the eyes is the depth-based
+  convex polygon and the centroid's 95% confidence region
+  the bootstrap convex polygon of the centroid, both built
+  as in the WHWK functions (the journal's reference tool).
+  Each centroid is tested against zero by the bootstrap
+  projection-distance test of the same functions (with
+  999 resamples P = .001 is its floor). The robust tests
+  resample patients; their 20% trimming and winsorizing
+  follow the standard order-statistic definitions
+  (Wilcox).
   Back: the plus-cylinder vectors and the plot set have no
   switch (1.0.0 mishandled the cylinder sign). On the
   Special outputs tab, "95% region of the eyes" = normal,
@@ -83,9 +89,37 @@ What changed, and how to get the 1.0.0 behaviour back:
 
 * New sheets "Astigmatism (JCRS 2025)" (centroids, total
   SD, magnitudes, intervals and the standard's tests) and
-  "Astigmatism vectors" (per eye), with a CSV copy.
+  "Astigmatism vectors" (per eye); the "Astigmatism
+  (JCRS 2025)" sheet is also written as a CSV beside the
+  workbook.
   Back: Special outputs tab, untick "Astigmatism (JCRS
   2025) sheet" (astig_sheet = false).
+
+* Input files for the WHWK functions: with the
+  double-angle plots, a "WHWK input" folder inside the
+  run's figure folder (Graphs_<prefix>_<run>_<time>, beside
+  the figures it belongs to; the run log gives its full
+  path) holds, for each plotted vector,
+  <vector>_vector.txt (columns <Cohort>.x, <Cohort>.y,
+  plus-cylinder double-angle form) and
+  <vector>_magnitude.txt, tab-delimited, with a README.
+  The Wilcox-Holladay-Wang-Koch R functions are obtained
+  from https://osf.io/xhe8u/; they treat eyes as
+  independent and refuse values beyond 6 D.
+  Back: Special outputs tab, untick "Input files for the
+  WHWK functions" (astig_whwk_files = false).
+
+* GEE models of an outcome that hardly varies within a
+  patient: a variable marked "per patient" is modeled on
+  one row per patient by an ordinary linear or logistic
+  model on the GEE and Regression sheets, never by an
+  eye-level GEE. Any other exchangeable GEE is kept only
+  if it converged, its working correlation is below 0.95
+  and one further scoring step moves no coefficient by
+  more than 0.01 SE; otherwise it is refitted with an
+  independence working correlation (robust SE still
+  clustered by patient). Sheets, tables, figures and the
+  run log name the model used. No switch.
 
 Also new: EPS figures, up to 1200 dpi, and a figure width
 in cm (8.76, 12.69 or 17.77 = the journal column widths).
@@ -169,8 +203,9 @@ touching your own data. It contains no patient information.
 The seven examples, each showing a different capability:
 
   01_Two_cohorts_simple
-      The minimum useful run: two groups, no matching, GEE
-      or regression - just the summary tables and figures.
+      The minimum useful run: two groups, no matching, no
+      GEE sheets or regression - the summary tables
+      (patient-clustered P values) and figures.
 
   02_Two_cohorts_full
       The showcase. Propensity-score matching, clustered
@@ -198,8 +233,9 @@ The seven examples, each showing a different capability:
 
   06_Figures_only_no_stats
       Figure toggles - astigmatism panels and vector plots
-      off, stability on - showing the composite adapt its
-      section headers.
+      off, stability on - showing the combined figure
+      without the astigmatism panels (seven panels,
+      lettered A to G).
 
   07_Full_figure_suite
       The full suite on three cohorts: every group on ONE
@@ -378,9 +414,24 @@ crash, the next time the app starts). You get:
     value style on the GEE tab (settings-file keys
     figure_style, figure_width_cm, graph_formats,
     graph_dpi and p_style).
+    With the double-angle plots, the sub-folder
+    "WHWK input" of this figure folder (one per run, so
+    runs that share an output folder keep their own)
+    holds tab-delimited input files for the
+    Wilcox-Holladay-Wang-Koch R functions (one pair per
+    plotted vector, see its README.txt; astig_whwk_files).
   * Optionally the filtered dataset as CSV: the rows that
     are analysed (in a group, and in a subset when subsets
     are defined), with a GroupLabel column (and Subset)
+    leading. It holds the values as analysed, so a header
+    carries a suffix where a column no longer holds what
+    was recorded: acuity converted to logMAR (_logMAR; the
+    recorded acuity is not repeated), acuity text read as
+    decimal (_decimal), and refraction transposed to minus
+    cylinder when the conversion is on (_minus_cyl, sphere,
+    cylinder and axis of each converted set). A missing
+    value is an empty cell. Matched_Data uses the same
+    headers.
 
 P values are printed in the journal style by default
 (.27, .003, <.001, >.99); "classic" keeps 0.266 / <0.001.

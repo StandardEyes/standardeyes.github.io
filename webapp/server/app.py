@@ -636,8 +636,10 @@ def histogram(req: HistReq):
         actual = preview.resolve(req.col, resolver)
         if actual is None or actual not in mdf.columns:
             # Matched_Data names the scale of a VA column in its header
-            # (<header>_logMAR / <header>_decimal), as the filtered CSV does
-            for sfx in ("_logMAR", "_decimal"):
+            # (<header>_logMAR / <header>_decimal), and a refraction column
+            # transposed to minus cylinder <header>_minus_cyl, as the filtered
+            # CSV does
+            for sfx in ("_logMAR", "_decimal", "_minus_cyl"):
                 actual = preview.resolve(str(req.col) + sfx, resolver)
                 if actual is not None and actual in mdf.columns:
                     break

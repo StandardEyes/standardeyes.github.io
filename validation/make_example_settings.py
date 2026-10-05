@@ -166,7 +166,8 @@ def cfg(**over):
 EXAMPLES = [   # name, title, what it is, what it shows, settings
     ("01_Two_cohorts_simple",
      "Two groups, tables and figures only",
-     "Two groups compared with the standard tests. No matching, GEE or regression.",
+     "Two groups compared with the standard tests (P values clustered by patient). No matching, "
+     "GEE sheets or regression.",
      "The smallest useful run: the group summary tables and the comparative figure set.",
      cfg(output_prefix="Ex01_Simple")),
 
@@ -204,8 +205,9 @@ EXAMPLES = [   # name, title, what it is, what it shows, settings
     ("06_Figures_only_no_stats",
      "Figure options",
      "Figure switches: astigmatism panels and vector plots off, stability on.",
-     "Shows the combined figure adapting its section headers when the astigmatism "
-     "panels are switched off. No matching, GEE or regression sheets.",
+     "Shows the combined figure without the astigmatism panels: seven panels (vision, "
+     "efficacy, safety, SEQ accuracy, attempted vs achieved, defocus equivalent, "
+     "stability), lettered A to G. No matching, GEE or regression sheets.",
      cfg(output_prefix="Ex06_Figures", astig_panels=False,
          double_angle_figs=False, semicircle_figs=False, **STABILITY_ON)),
 

@@ -212,6 +212,6 @@
   "num_filters": 4,
   "num_subsets": 0,
   "_title": "Two groups, tables and figures only",
-  "_description": "Two groups compared with the standard tests. No matching, GEE or regression.",
+  "_description": "Two groups compared with the standard tests (P values clustered by patient). No matching, GEE sheets or regression.",
   "_demonstrates": "The smallest useful run: the group summary tables and the comparative figure set."
 }

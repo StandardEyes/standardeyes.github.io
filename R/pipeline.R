@@ -409,7 +409,8 @@ write_csv_utf8_bom <- function(d, path) {
   # not be written as 1e+05
   old <- options(scipen = 100)
   on.exit(options(old), add = TRUE)
-  utils::write.csv(d, con, row.names = FALSE)
+  # a missing value is an empty cell, never the text "NA" (T1-07, T1-13)
+  utils::write.csv(d, con, row.names = FALSE, na = "")
   invisible(TRUE)
 }
 
@@ -900,6 +901,20 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
       logger(sprintf("Astigmatism setting %s = '%s' is not known (use %s) - %s is used.", k,
                      as.character(unlist(cfg[[k]]))[1], paste(okv, collapse = ", "), okv[1]))
   }
+  # the WHWK input files (decision R3-3): absent or blank = on; true / false
+  # also as text; anything else is named and the default used
+  wf <- cfg$astig_whwk_files
+  if (!is.null(wf) && !(is.logical(wf) && length(wf) == 1 && !is.na(wf))) {
+    v <- tolower(trimws(as.character(unlist(wf))[1]))
+    cfg$astig_whwk_files <- if (length(v) && !is.na(v) && v %in% c("true", "1", "yes", "on")) TRUE
+      else if (length(v) && !is.na(v) && v %in% c("false", "0", "no", "off")) FALSE
+      else {
+        if (length(v) && !is.na(v) && nzchar(v))
+          logger(sprintf("Astigmatism setting astig_whwk_files = '%s' is not known (use true or false) - true is used.",
+                         as.character(unlist(wf))[1]))
+        TRUE
+      }
+  }
   # the figure style, width, resolution and formats, read once here so an
   # unknown value is named at the start of every run - with or without
   # figures - and its default used (decision R2-7; graphs.R gr_figure_settings,
@@ -1005,6 +1020,9 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
                            paste(nm[nzchar(trimws(nm))], collapse = " / "), "'."))
       dat <- standardize_minus_cyl(dat, cl[["sphere"]], cl[["cylinder"]], cl[["axis"]], logger,
                                    display_names = disp_map)
+      # the columns now holding minus-cylinder values, for the exported data's
+      # headers (suffix "_minus_cyl", T1-07)
+      res$std_minus_cols <- unique(c(res$std_minus_cols, unname(cl[!is.na(cl)])))
     }
     # the switch alone converts nothing: said, so plus-cylinder data are never
     # analysed unconverted without a word (a warning when cylinder roles are
@@ -1131,7 +1149,10 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
   # the scale each exported VA column holds, added to its header in the
   # filtered-dataset CSV and in Matched_Data alike (contract R4-3)
   sfx <- c(stats::setNames(rep("_logMAR", length(res$logmar_cols_clean)), res$logmar_cols_clean),
-           stats::setNames(rep("_decimal", length(res$va_decimal_from_text)), res$va_decimal_from_text))
+           stats::setNames(rep("_decimal", length(res$va_decimal_from_text)), res$va_decimal_from_text),
+           # the refraction columns transposed to minus cylinder (T1-07): their
+           # values are no longer the recorded ones, and the header says so
+           stats::setNames(rep("_minus_cyl", length(res$std_minus_cols)), res$std_minus_cols))
 
   if (isTRUE(cfg$export_filtered_csv)) {
     fp <- .pl_os_path(file.path(output_dir, paste0("Filtered_Dataset_", stamp, ".csv")))
@@ -1222,7 +1243,11 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
     }
 
     # the run (label + subset values) is recorded in the workbook's Manifest
+    invisible(gee_refit_take())
     built <- build_workbook_for_data(dat_run, cfg, res, logger, loveplot_dir = output_dir, run = run)
+    # the clustered table tests whose exchangeable GEE was not accepted (R3-4)
+    n_refit <- length(gee_refit_take())
+    if (n_refit > 0) logger(gee_refit_log_text(n_refit, paste0("Workbook of run '", run$label, "'")))
 
     out_xlsx <- .pl_os_path(file.path(output_dir, paste0(prefix, "_", stem, "_", stamp, ".xlsx")))
     save_workbook_checked(built$wb, out_xlsx, paste0("workbook of run '", run$label, "'"))
@@ -1242,12 +1267,16 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
       if (!dir.exists(gdir)) {
         logger(paste0("Graphs skipped: the folder could not be created: ", gdir))
       } else {
-        gf <- tryCatch(generate_standard_graphs(dat_run, cfg, res, gdir, tag = "", logger = logger),
+        # a subset run names its subset in the figures' legend titles
+        sub_lab <- if (length(run$values)) as.character(run$label)[1] else ""
+        gf <- tryCatch(generate_standard_graphs(dat_run, cfg, res, gdir, tag = "", logger = logger,
+                                                subset_label = sub_lab),
                        error = function(e) { logger(paste0("Graphs failed: ", conditionMessage(e))); character(0) })
         if (!is.null(built$matched_only)) {
           for (plab in unique(built$matched_only$Pairing)) {
             mdp <- built$matched_only[built$matched_only$Pairing == plab, , drop = FALSE]
-            tryCatch(generate_standard_graphs(mdp, cfg, res, gdir, tag = paste0("_Matched_", plab), logger = logger),
+            tryCatch(generate_standard_graphs(mdp, cfg, res, gdir, tag = paste0("_Matched_", plab), logger = logger,
+                                              subset_label = sub_lab),
                      error = function(e) logger(paste0("Matched graphs failed: ", conditionMessage(e))))
           }
         }

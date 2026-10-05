@@ -253,5 +253,5 @@
   "num_subsets": 0,
   "_title": "Figure options",
   "_description": "Figure switches: astigmatism panels and vector plots off, stability on.",
-  "_demonstrates": "Shows the combined figure adapting its section headers when the astigmatism panels are switched off. No matching, GEE or regression sheets."
+  "_demonstrates": "Shows the combined figure without the astigmatism panels: seven panels (vision, efficacy, safety, SEQ accuracy, attempted vs achieved, defocus equivalent, stability), lettered A to G. No matching, GEE or regression sheets."
 }

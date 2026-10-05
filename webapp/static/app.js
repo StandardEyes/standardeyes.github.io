@@ -255,9 +255,12 @@ function defaultState(){
       stability_change_from:"", stability_change_to:"", stability_change_threshold:0.50,
       astig_panels:true, double_angle_figs:true, semicircle_figs:true,
       // the "Astigmatism (JCRS 2025)" + "Astigmatism vectors" sheets (D8); the
-      // 95% region of the eyes ("polygon" = depth polygon, D5) and of each
-      // centroid ("bootstrap" | "hotelling", D6)
+      // 95% region of the eyes ("polygon" = the depth-based convex polygon as
+      // in the WHWK functions, R3-1) and of each centroid ("bootstrap" = the
+      // bootstrap convex polygon as in the WHWK functions | "hotelling", R3-2);
+      // the WHWK input files beside the double-angle figures (R3-3)
       astig_sheet:true, astig_region:"polygon", astig_centroid_region:"bootstrap",
+      astig_whwk_files:true,
       astig_jcrs_standard:true, cluster_by_patient:true, astig_test_method:"robust",
       astig_vector_cols:{}, astig_target:{},
       do_regression:true, regression_stage:"unmatched", regression_covariates_raw:[],
@@ -1628,6 +1631,7 @@ function builder(){
         astig_sheet:s.astig_sheet,
         astig_region:s.astig_region,
         astig_centroid_region:s.astig_centroid_region,
+        astig_whwk_files:s.astig_whwk_files,
         astig_jcrs_standard:s.astig_jcrs_standard,
         cluster_by_patient:s.cluster_by_patient,
         astig_test_method:s.astig_test_method,
@@ -1663,7 +1667,7 @@ function builder(){
        "figure_style","p_style",
        "stability_figs",
        "astig_panels","double_angle_figs","semicircle_figs","astig_sheet",
-       "astig_region","astig_centroid_region","astig_jcrs_standard",
+       "astig_region","astig_centroid_region","astig_whwk_files","astig_jcrs_standard",
        "cluster_by_patient","astig_test_method",
        "stability_include_preop","stability_change_threshold",
        "do_regression","regression_stage","regression_covariates_raw",
@@ -2090,12 +2094,15 @@ function builder(){
           "; "+(w ? w+" cm wide" : "each figure's own size")+"; "+s.graph_formats.map(f=>f.toUpperCase()).join(", ")+
           " at "+s.graph_dpi+" dpi"]);
       } else out.push(["Figures", "off"]);
-      const reg={polygon:"95% depth polygon", normal:"95% normal ellipse", both:"depth polygon and normal ellipse"}[s.astig_region] || s.astig_region;
-      const cr={bootstrap:"bootstrap polygon", hotelling:"Hotelling T² ellipse"}[s.astig_centroid_region] || s.astig_centroid_region;
+      const reg={polygon:"95% depth-based convex polygon (as in the WHWK functions)", normal:"95% normal ellipse",
+                 both:"depth-based convex polygon and normal ellipse"}[s.astig_region] || s.astig_region;
+      const cr={bootstrap:"bootstrap convex polygon (as in the WHWK functions)", hotelling:"Hotelling T² ellipse"}[s.astig_centroid_region] || s.astig_centroid_region;
       const unit=(s.cluster_by_patient && pid) ? "patients" : "eyes";
-      const tm={robust:"robust (trimmed, bootstrap of "+unit+")", gee:"clustered GEE Wald", classic:"classic (eyes independent)"}[s.astig_test_method] || s.astig_test_method;
+      const tm={robust:"robust (centroid vs 0 as in the WHWK functions; between cohorts trimmed; bootstrap of "+unit+")",
+                gee:"clustered GEE Wald", classic:"classic (eyes independent)"}[s.astig_test_method] || s.astig_test_method;
       out.push(["Astigmatism", "region of the eyes: "+reg+"; centroid CI: "+cr+"; tests: "+tm+
-        "; JCRS 2025 sheet "+(s.astig_sheet ? "on" : "off")]);
+        "; JCRS 2025 sheet "+(s.astig_sheet ? "on" : "off")+
+        "; WHWK input files "+((s.make_graphs && s.double_angle_figs && s.astig_whwk_files) ? "on" : "off")]);
       return out;
     },
     // the run's notes (server checks before R starts) and the engine's

@@ -555,6 +555,115 @@ gee_inference_text <- function(mode = gee_small_sample(), unit = "patient") {
               "(df = ", if (identical(unit, "eye")) "eyes" else "patients", " - model coefficients)")
 }
 
+# ------------------------------------------------------------
+# Exchangeable GEE fits whose outcome hardly varies within a patient (decision
+# R3-4). An exchangeable working correlation estimated near or above 1 (age or
+# sex as an outcome, the optical zone) makes the estimating equations
+# ill-conditioned, and geepack can stop far from a solution. An exchangeable
+# fit is accepted only if it converged, its working correlation is below
+# GEE_EXCH_ALPHA_MAX and one further Fisher-scoring step moves no coefficient
+# by more than GEE_EXCH_STEP_MAX of its robust SE; otherwise the model is
+# refitted with an independence working correlation (the patient-clustered
+# robust SE stay valid) and labeled GEE_INDEP_REFIT; if that fails too, the
+# model is not estimable, with the reason. Nothing is replaced silently: the
+# callers name the working correlation used on every sheet, table, figure and
+# in the run log. (A variable flagged as a per-patient parameter is never the
+# outcome of an eye-level GEE: analysis.R fits it on one row per patient,
+# GEE_PER_PATIENT.)
+# ------------------------------------------------------------
+GEE_EXCH_ALPHA_MAX <- 0.95
+GEE_EXCH_STEP_MAX <- 0.01
+GEE_INDEP_REFIT <- "independence working correlation (the outcome is almost constant within patients)"
+GEE_PER_PATIENT <- "per patient (one row per patient)"
+.gee_inf$refits <- character(0)
+
+# The move of each coefficient of a fitted geeglm (Gaussian identity or
+# binomial logit; exchangeable or independence; prior weights as geepack) that
+# one further Fisher-scoring step at its estimates would make, with the
+# working correlation held at its estimate, in units of geepack's robust SE:
+# |B^-1 sum_i D_i' V_i^-1 (y_i - mu_i)| / SE, B = sum_i D_i' V_i^-1 D_i (the
+# scale cancels).
+gee_scoring_step <- function(fit) {
+  X <- stats::model.matrix(fit)
+  y <- as.numeric(fit$y)
+  mu <- as.numeric(stats::fitted(fit))
+  w <- fit$prior.weights
+  if (is.null(w)) w <- rep(1, length(y))
+  fam <- fit$family$family
+  v <- if (identical(fam, "binomial")) mu * (1 - mu) else rep(1, length(mu))
+  cs <- fit$corstr %||% fit$geese$model$corstr %||% "independence"
+  alpha <- if (identical(cs, "exchangeable")) as.numeric(fit$geese$alpha[1]) else 0
+  idx <- split(seq_along(y), factor(fit$id, levels = unique(fit$id)))
+  p <- ncol(X)
+  Bm <- matrix(0, p, p); U <- numeric(p)
+  for (i in idx) {
+    ni <- length(i)
+    Di <- X[i, , drop = FALSE] * v[i]
+    R <- matrix(alpha, ni, ni); diag(R) <- 1
+    sA <- sqrt(v[i]); Wh <- sqrt(w[i])
+    Vinv <- (Wh %o% Wh) * solve((sA %o% sA) * R)
+    Bm <- Bm + t(Di) %*% Vinv %*% Di
+    U <- U + as.numeric(t(Di) %*% Vinv %*% (y[i] - mu[i]))
+  }
+  se <- sqrt(diag(fit$geese$vbeta))
+  st <- abs(as.numeric(solve(Bm, U)))
+  out <- st / se
+  # a coefficient with a robust SE of 0 (e.g. the intercept when the reference
+  # group's outcome is the same value in every eye) has no SE to scale by: it
+  # passes when the step is nothing next to the coefficient itself
+  z <- !is.finite(se) | se <= 0
+  if (any(z)) out[z] <- ifelse(st[z] <= 1e-8 * pmax(1, abs(as.numeric(stats::coef(fit))[z])), 0, Inf)
+  out
+}
+
+# "" when an exchangeable fit is accepted, else why not (in the words of the
+# sheets and the log)
+gee_exch_reject <- function(fit) {
+  if (is.null(fit)) return("the exchangeable fit failed")
+  err <- suppressWarnings(as.numeric(fit$geese$error))
+  if (length(err) && !isTRUE(err[1] == 0)) return("the exchangeable fit did not converge")
+  a <- suppressWarnings(as.numeric(fit$geese$alpha[1]))
+  if (!length(a) || !is.finite(a)) return("the exchangeable working correlation could not be estimated")
+  if (a >= GEE_EXCH_ALPHA_MAX)
+    return(sprintf("estimated working correlation %.3f (%.2f or more)", a, GEE_EXCH_ALPHA_MAX))
+  st <- tryCatch(max(gee_scoring_step(fit)), error = function(e) NA_real_)
+  if (!is.finite(st)) return("its scoring check could not be computed")
+  if (st > GEE_EXCH_STEP_MAX)
+    return(sprintf("not at its solution (one further scoring step moves a coefficient by %.2g SE)", st))
+  ""
+}
+
+# Fit a GEE with the working correlation `corstr`, and an exchangeable one
+# only when gee_exch_reject() accepts it: fit_fun(corstr) returns the geeglm
+# (or NULL). Returns list(fit, corstr = the working correlation of `fit`,
+# refit = why the exchangeable fit was rejected ("" when it was not), why = why
+# no fit is returned ("" when one is)).
+gee_fit_checked <- function(fit_fun, corstr = "exchangeable") {
+  if (!identical(corstr, "exchangeable")) {
+    f <- fit_fun(corstr)
+    return(list(fit = f, corstr = corstr, refit = "", why = if (is.null(f)) "the model could not be fitted" else ""))
+  }
+  f1 <- fit_fun("exchangeable")
+  why <- gee_exch_reject(f1)
+  if (!nzchar(why)) return(list(fit = f1, corstr = "exchangeable", refit = "", why = ""))
+  f2 <- fit_fun("independence")
+  err <- if (is.null(f2)) NA else suppressWarnings(as.numeric(f2$geese$error))[1]
+  if (is.null(f2) || !isTRUE(err == 0))
+    return(list(fit = NULL, corstr = "independence", refit = why,
+                why = paste0("the exchangeable fit was not accepted (", why, ") and the independence refit ",
+                             if (is.null(f2)) "failed" else "did not converge")))
+  list(fit = f2, corstr = "independence", refit = why, why = "")
+}
+
+# The clustered tests of the tables and figures (gee_group_p) record each
+# refit here; the pipeline and the figure pass log how many (and reset).
+gee_refit_note <- function(what) .gee_inf$refits <- c(.gee_inf$refits, what)
+gee_refit_take <- function() { r <- .gee_inf$refits %||% character(0); .gee_inf$refits <- character(0); r }
+gee_refit_log_text <- function(n, where)
+  sprintf(paste0("%s: in %d clustered test(s) the exchangeable GEE was not accepted (working correlation %.2f or more, ",
+                 "no convergence, or not at its solution) - refitted with an %s; the test name says so."),
+          where, n, GEE_EXCH_ALPHA_MAX, GEE_INDEP_REFIT)
+
 # TRUE when at least one patient contributes more than one of these eyes (the
 # usable eyes of one variable). Only then is a patient-clustered test run in
 # the tables and figures (decision D12); with one eye per patient the
@@ -658,12 +767,17 @@ gee_group_p <- function(x, g, id, kind = "continuous", event = NULL, w = NULL,
   d <- d[order(d$cid), , drop = FALSE]          # geepack needs rows sorted by cluster
   fam <- if (identical(kind, "proportion")) stats::binomial() else stats::gaussian()
   # anything geepack prints stays off the console (stdout is the engine's LOG
-  # protocol): quiet_eval
-  fit <- quiet_eval(suppressWarnings(
-           if (is.null(w)) geepack::geeglm(y ~ g, id = cid, data = d, family = fam, corstr = cs)
+  # protocol): quiet_eval. An exchangeable fit is kept only when it is
+  # accepted; otherwise the independence refit, recorded and labeled through
+  # attr "refit" (decision R3-4; gee_fit_checked)
+  fc <- gee_fit_checked(function(cs_) quiet_eval(suppressWarnings(
+           if (is.null(w)) geepack::geeglm(y ~ g, id = cid, data = d, family = fam, corstr = cs_)
            else geepack::geeglm(y ~ g, id = cid, data = d, weights = .w, family = fam,
-                                corstr = cs)))$value
-  if (is.null(fit)) return(NA_real_)
+                                corstr = cs_)))$value, cs)
+  fit <- fc$fit
+  if (is.null(fit)) return(if (nzchar(fc$refit)) na_why(fc$why) else NA_real_)
+  if (nzchar(fc$refit)) gee_refit_note(fc$refit)
+  tag <- function(p) if (nzchar(fc$refit)) structure(p, refit = fc$refit, corstr = fc$corstr) else p
   if (isTRUE(each)) {
     if (!identical(levels(d$g)[1], glv[1])) return(na_why(paste0(glv[1], " has no data for this variable")))
     cn <- names(stats::coef(fit))
@@ -672,14 +786,14 @@ gee_group_p <- function(x, g, id, kind = "continuous", event = NULL, w = NULL,
       j <- match(paste0("g", l), cn)
       if (!is.na(j)) out[[l]] <- gee_wald(fit, j, unit)$p
     }
-    return(out)
+    return(tag(out))
   }
   wt <- gee_wald(fit, grep("^g", names(stats::coef(fit))), unit)
   if (isTRUE(wt$singular)) return(structure(NA_real_, singular = TRUE))
   # no corrected covariance or no t / F reference: the GEE sheets' reason,
   # never a silent classical fallback
   if (!is.finite(wt$p) && nzchar(wt$why)) return(na_why(wt$why))
-  wt$p
+  tag(wt$p)
 }
 
 # Patient-clustered test of a categorical variable with more than two levels
@@ -1096,12 +1210,40 @@ fmt_quartiles <- function(q) {
 # One effect style for every table (decision D24):
 #   "β = -9.98 (95% CI, -29.04 to 9.08)"   kind "beta" (linear models)
 #   "OR = 3.02 (95% CI, 1.21 to 7.57)"     kind "OR"   (logistic models)
-# without an interval (lo / hi missing) only the estimate is given.
+# without an interval (lo / hi missing) only the estimate is given. digits: one
+# number, or one per row (effect_digits).
 fmt_effect <- function(kind, est, lo = NA_real_, hi = NA_real_, digits = 2) {
+  if (length(digits) > 1) {
+    n <- length(digits)
+    kind <- rep_len(kind, n); est <- rep_len(est, n); lo <- rep_len(lo, n); hi <- rep_len(hi, n)
+    return(vapply(seq_len(n), function(i) fmt_effect(kind[i], est[i], lo[i], hi[i], digits[i]), character(1)))
+  }
   sym <- ifelse(toupper(kind) == "OR", "OR", "β")
   ci <- ifelse(is.finite(lo) & is.finite(hi),
                paste0(" (95% CI, ", fmt_fix(lo, digits), " to ", fmt_fix(hi, digits), ")"), "")
   paste0(sym, " = ", fmt_fix(est, digits), ci)
+}
+
+# The decimals of each model term's effect text (finding T1-05): two for the
+# group comparisons and the intercept (D24); for a covariate - an effect per
+# unit, often small - as many as keep two significant digits of the larger of
+# the estimate and the half-width of its interval, between two and four (an
+# odds ratio judged on the log scale), so a significant per-unit effect never
+# prints as "β = 0.00 (95% CI, 0.00 to 0.00)".
+effect_digits <- function(term, kind, est, lo = NA_real_, hi = NA_real_) {
+  n <- length(est)
+  term <- rep_len(as.character(term), n); kind <- rep_len(kind, n)
+  lo <- rep_len(lo, n); hi <- rep_len(hi, n)
+  vapply(seq_len(n), function(i) {
+    if (is.na(term[i]) || grepl("^GroupLabel", term[i]) || term[i] == "(Intercept)") return(2L)
+    or <- toupper(kind[i]) == "OR"
+    f <- function(v) if (or) suppressWarnings(log(v)) else v
+    s <- c(abs(f(est[i])), (f(hi[i]) - f(lo[i])) / 2)
+    s <- s[is.finite(s)]
+    ref <- if (length(s)) max(s) else NA_real_
+    if (!is.finite(ref) || ref <= 0 || ref >= 0.1) 2L
+    else as.integer(min(4, max(2, 1 - floor(log10(ref)))))
+  }, integer(1))
 }
 
 # ------------------------------------------------------------
@@ -1862,6 +2004,18 @@ sanitize_xlsx <- function(path, logger = NULL) {
       if (changed) { writeLines(txt, f, useBytes = TRUE); n_fixed <- n_fixed + 1L }
     }
 
+    # docProps/app.xml: openxlsx names "Microsoft Excel" as the application
+    # that wrote the file; it is StandardEyes (D25, finding T1-16)
+    n_app <- 0L
+    apf <- file.path(td, "docProps", "app.xml")
+    if (file.exists(apf)) {
+      ax <- paste(readLines(apf, warn = FALSE, encoding = "UTF-8"), collapse = "\n")
+      ver <- tryCatch(as.character(standardeyes_version()$public)[1], error = function(e) NA_character_)
+      app_name <- paste0("StandardEyes", if (length(ver) && !is.na(ver)) paste0(" ", ver) else "")
+      ax2 <- sub("<Application>[^<]*</Application>", paste0("<Application>", app_name, "</Application>"), ax)
+      if (!identical(ax2, ax)) { writeLines(ax2, apf, useBytes = TRUE); n_app <- 1L }
+    }
+
     ctf <- file.path(td, "[Content_Types].xml")
     if (n_fixed > 0 && file.exists(ctf)) {
       ct <- paste(readLines(ctf, warn = FALSE, encoding = "UTF-8"), collapse = "\n")
@@ -1875,7 +2029,7 @@ sanitize_xlsx <- function(path, logger = NULL) {
       if (changed) writeLines(ct, ctf, useBytes = TRUE)
     }
 
-    if (n_fixed > 0) {
+    if (n_fixed > 0 || n_app > 0) {
       tmp <- file.path(dirname(path), paste0(".~sanitize_", basename(path), ".tmp"))
       on.exit(if (file.exists(tmp)) unlink(tmp), add = TRUE)
       zip::zip(zipfile = tmp,
@@ -1887,7 +2041,7 @@ sanitize_xlsx <- function(path, logger = NULL) {
       if (!suppressWarnings(file.rename(tmp, path)) &&
           !suppressWarnings(file.copy(tmp, path, overwrite = TRUE)))
         stop("could not replace the workbook (is it open in another program?)")
-      if (!is.null(logger))
+      if (!is.null(logger) && n_fixed > 0)
         logger(paste0("Workbook sanitized for interoperability (",
                       n_fixed, " sheet rels cleaned)."))
     }

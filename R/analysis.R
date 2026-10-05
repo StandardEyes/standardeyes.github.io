@@ -210,6 +210,8 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
     base <- if (kind == "ordinal") "GEE on ranks" else "GEE"
     p <- gee_group_p(x, g, id, "continuous", unit = unit, ranks = kind == "ordinal", corstr = cs)
   }
+  # an exchangeable fit that was not accepted: the independence refit is named (R3-4)
+  if (nzchar(as.character(attr(p, "refit") %||% "")[1])) base <- paste0(base, ", ", GEE_INDEP_REFIT)
   lab <- paste0(base, ", clustered by ", if (identical(unit, "eye")) "eye" else "patient",
                 " (", gee_se_label(q), ")")
   # a single group, a constant variable, "B has n = 1": no test, and no test
@@ -222,10 +224,42 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
   if (is.finite(p)) return(list(p = as.numeric(p), test = lab, note = ""))
   why <- as.character(attr(p, "why") %||% "")[1]
   if (!is.na(why) && nzchar(why)) return(list(p = NA_real_, test = lab, note = why))
+  # the classical test, with the eyes treated as independent: said in the
+  # label, and the cause in the note (printed after the interpretation, and
+  # listed in the run log by the table writer: .gee_fallback_take)
   gt <- group_test(v, g, kind)
-  gt$test <- paste0(gt$test, " (GEE not fitted)")
+  gt$test <- paste0(gt$test, ", eyes treated as independent (GEE not fitted)")
+  if (is.finite(gt$p)) {
+    gt$note <- paste0("GEE not fitted: ", .gee_fail_cause(v, g, kind), "; the P value treats the eyes as independent")
+    .gee_fallback_rows$n <- .gee_fallback_rows$n + 1L
+  }
   gt
 }
+
+# Why a patient-clustered GEE of a table row could not be fitted, in words: a
+# group whose eyes all fall in one category (separation: no finite estimate),
+# else no convergence or a numerically singular covariance
+.gee_fail_cause <- function(v, g, kind) {
+  ok <- !is.na(v) & !is.na(g)
+  if (kind %in% c("dichotomous", "categorical")) {
+    vv <- as.character(v[ok]); gg <- as.character(g[ok])
+    if (kind == "dichotomous") vv <- ifelse(vv %in% c("TRUE", "1"), "with the event", "without the event")
+    levs <- sort(unique(vv))
+    what <- unlist(lapply(unique(gg), function(gn) {
+      miss <- setdiff(levs, vv[gg == gn])
+      if (length(miss)) sprintf("no eye %s in %s",
+                                if (kind == "dichotomous") miss else sprintf("with '%s'", miss), gn)
+    }))
+    if (length(what)) return(paste0(paste(utils::head(what, 3), collapse = "; "),
+                                    if (length(what) > 3) "; ..." else "", " (separation)"))
+  }
+  "the model did not converge or its robust covariance is singular"
+}
+# rows of the summary tables whose clustered GEE could not be fitted in this
+# run (counted by .clustered_test, logged once per table set)
+.gee_fallback_rows <- new.env()
+.gee_fallback_rows$n <- 0L
+.gee_fallback_take <- function() { n <- .gee_fallback_rows$n; .gee_fallback_rows$n <- 0L; n }
 
 # ------------------------------------------------------------
 # N-group summary table.
@@ -309,7 +343,9 @@ create_summary_table <- function(df, params_clean, type_map,
   # the same header for every table of one cohort (the Publication Table
   # stacks them), so it depends on the configuration, not on this table's rows
   any_pat <- has_pid && length(patient_level_params_clean) > 0
-  hdr_n <- if (any_pat) paste0(n_eye, " eyes; ", n_pat, " patients") else as.character(n_eye)
+  # (singular for one: "2 eyes; 1 patient", T1-15)
+  hdr_n <- if (any_pat) paste0(n_eye, ifelse(n_eye == 1, " eye; ", " eyes; "), n_pat,
+                               ifelse(n_pat == 1, " patient", " patients")) else as.character(n_eye)
   if (weighted) {
     ess <- vapply(glev, function(g) {
       w <- w_all[in_grp(gv, g)]; w <- w[is.finite(w) & w > 0]
@@ -354,6 +390,9 @@ create_summary_table <- function(df, params_clean, type_map,
       row$`Practical Interpretation` <- if (is.na(pval)) {
         if (nzchar(note)) paste0("Not estimable - ", note, ".")
         else "Not estimable - the test could not be performed (insufficient or missing data)."
+      } else if (nzchar(note)) {
+        # a P that came with a note (a clustered GEE not fitted): the cause
+        paste0(p_interpretation(pval, interp_word), " Note: ", note, ".")
       } else p_interpretation(pval, interp_word)
       row
     }
@@ -365,7 +404,7 @@ create_summary_table <- function(df, params_clean, type_map,
     # whenever it differs from the header denominator, so heavy missingness is
     # visible (the header n counts every eye of the group).
     with_n <- function(cells, nn) {
-      show <- (is.na(denom) | nn != denom) & nn > 0
+      show <- (is.na(denom) | nn != denom) & nn > 0 & !grepl("(n = ", cells, fixed = TRUE)
       cells[show] <- paste0(cells[show], " (n = ", nn[show], ")")
       cells
     }
@@ -389,7 +428,9 @@ create_summary_table <- function(df, params_clean, type_map,
             xr <- if (weighted) x[is.finite(w[sel]) & w[sel] > 0] else x
             return(fmt_va(ms[1], ms[2], if (length(xr)) min(xr) else NA, if (length(xr)) max(xr) else NA))
           }
-          paste0(fmt_fix(ms[1]), " ± ", fmt_fix(ms[2]))
+          # a single value has no SD: "37.00 (n = 1)", never "37.00 ± n/a" (T1-15)
+          if (is.finite(ms[2])) paste0(fmt_fix(ms[1]), " ± ", fmt_fix(ms[2]))
+          else paste0(fmt_fix(ms[1]), " (n = ", length(x), ")")
         } else {
           q <- if (weighted) .wquantile(x, w[sel], c(.5, .25, .75))
                else c(stats::median(x), stats::quantile(x, .25), stats::quantile(x, .75))
@@ -561,9 +602,10 @@ make_initial_summary <- function(df, patient_id_clean, age_clean, fu_clean, sex_
     Value = c(num_patients, num_eyes, age_mean, age_sd,
               ifelse(is.finite(age_min) && is.finite(age_max), paste(age_min, "-", age_max), NA),
               fu_mean, fu_sd,
-              # fixed decimals like every median [IQR] cell (fmt_quartiles, D24)
+              # two decimals, like the mean and SD above, whatever the data (D24,
+              # T1-11: "181 [169–193]" and "180.00 [168.00–192.75]" were mixed)
               ifelse(is.finite(fu_med) && is.finite(fu_q1) && is.finite(fu_q3),
-                     fmt_quartiles(c(fu_med, fu_q1, fu_q3)), NA)),
+                     paste0(fmt_fix(fu_med), " [", fmt_fix(fu_q1), "–", fmt_fix(fu_q3), "]"), NA)),
     stringsAsFactors = FALSE
   )
 
@@ -933,17 +975,19 @@ extract_gee_tidy <- function(fit, family_name = c("gaussian","binomial"),
   # CI: the effect as the tables print it (decision D24), "β = 30.93 (95% CI,
   # 29.95 to 31.91)" / "OR = 3.02 (95% CI, 1.21 to 7.57)", on the sheet under
   # the header "Effect (95% CI)"; the numeric columns stay for machine reading
-  eff_txt <- function(kind, v, lo, hi) ifelse(is.finite(v), fmt_effect(kind, v, lo, hi), NA_character_)
+  # (a covariate's per-unit effect keeps two significant digits: effect_digits)
+  eff_txt <- function(kind, v, lo, hi, term) ifelse(is.finite(v), fmt_effect(kind, v, lo, hi,
+                                                       effect_digits(term, kind, v, lo, hi)), NA_character_)
   if (family_name == "binomial") {
     out <- out %>% dplyr::mutate(
       Effect = "OR", EffectValue = exp(estimate),
       CI_low = exp(estimate - mult * std.error), CI_high = exp(estimate + mult * std.error),
-      CI = eff_txt("OR", EffectValue, CI_low, CI_high))
+      CI = eff_txt("OR", EffectValue, CI_low, CI_high, term))
   } else {
     out <- out %>% dplyr::mutate(
       Effect = "β", EffectValue = estimate,
       CI_low = estimate - mult * std.error, CI_high = estimate + mult * std.error,
-      CI = eff_txt("beta", EffectValue, CI_low, CI_high))
+      CI = eff_txt("beta", EffectValue, CI_low, CI_high, term))
   }
   out$Inference <- gee_se_label(1, mode)
   if (nzchar(why)) attr(out, "why") <- why
@@ -957,6 +1001,76 @@ GEE_LONE_NOTE <- "SE not estimable - this level is held by 1 patient"
 .lone_note <- function(unit = "patient") {
   if (identical(unit, "eye")) sub("1 patient", "1 eye", GEE_LONE_NOTE, fixed = TRUE) else GEE_LONE_NOTE
 }
+
+# A variable flagged as a per-patient parameter as the outcome of a model
+# (decision R3-4): never an eye-level GEE, whose working correlation would be
+# near 1. One row per patient (per patient and group, as collapse_patient_level
+# counts them): the outcome of the patient's first analysed eye (the value is
+# the patient's), numeric covariates averaged over the patient's analysed eyes,
+# any other covariate the first eye's, matching weights (wtd = TRUE) averaged;
+# then an ordinary model - linear (model-based SE, t reference on the residual
+# df) or logistic (model-based SE, Wald z reference). f: the model formula;
+# df2: the complete-case eyes. Returns list(tidy = the rows in the GEE sheets'
+# columns (extract_gee_tidy), n = patients, note = what was averaged, why = ""
+# or why nothing was fitted).
+.per_patient_model <- function(f, df2, preds, id_col, bin, wtd = FALSE, outcome_name = NA_character_) {
+  grp <- if ("GroupLabel" %in% names(df2)) as.character(df2$GroupLabel) else ""
+  k <- factor(paste(df2[[id_col]], grp, sep = "\r"))
+  k <- factor(k, levels = unique(as.character(k)))
+  pd <- df2[!duplicated(k), , drop = FALSE]
+  avg <- character(0)
+  for (p in setdiff(preds, "GroupLabel")) if (is.numeric(df2[[p]])) {
+    pd[[p]] <- as.numeric(tapply(df2[[p]], k, mean))
+    if (any(tapply(df2[[p]], k, function(z) length(unique(z)) > 1))) avg <- c(avg, p)
+  }
+  pd$.pp_w <- if (isTRUE(wtd) && "weights" %in% names(df2)) as.numeric(tapply(as.numeric(df2$weights), k, mean)) else 1
+  n_par <- tryCatch(ncol(stats::model.matrix(f, pd)), error = function(e) NA_integer_)
+  out <- list(tidy = NULL, n = nrow(pd), avg = avg, why = "")
+  if (is.finite(n_par) && nrow(pd) - n_par < 1) {
+    out$why <- sprintf("too few patients for this model (%d patients, %d coefficients)", nrow(pd), n_par)
+    return(out)
+  }
+  fit <- tryCatch(suppressWarnings(
+    if (bin) stats::glm(f, data = pd, family = stats::binomial(), weights = .pp_w)
+    else stats::lm(f, data = pd, weights = .pp_w)), error = function(e) e)
+  if (inherits(fit, "error")) { out$why <- paste0("the per-patient model failed: ", conditionMessage(fit)); return(out) }
+  if (bin && !isTRUE(fit$converged)) { out$why <- "the per-patient logistic model did not converge"; return(out) }
+  # glm stops at a relative deviance change of 1e-8 and takes its model-based SE
+  # from the weights of that last step, up to ~1e-4 off those at the maximum:
+  # a few more steps from its estimates make them the maximum's (kept only when
+  # they converge)
+  if (bin) {
+    f2 <- tryCatch(suppressWarnings(stats::glm(f, data = pd, family = stats::binomial(), weights = .pp_w,
+                                               start = stats::coef(fit),
+                                               control = stats::glm.control(epsilon = 1e-12, maxit = 50))),
+                   error = function(e) NULL)
+    if (!is.null(f2) && isTRUE(f2$converged) && all(is.finite(stats::coef(f2)))) fit <- f2
+  }
+  cf <- summary(fit)$coefficients
+  dfr <- if (bin) NA_real_ else fit$df.residual
+  mult <- if (bin) stats::qnorm(0.975) else stats::qt(0.975, dfr)
+  td <- tibble::tibble(Outcome = outcome_name, term = rownames(cf), estimate = unname(cf[, 1]),
+                       std.error = unname(cf[, 2]), statistic = unname(cf[, 3]), p.value = unname(cf[, 4]),
+                       df = dfr)
+  # (a covariate's per-unit effect keeps two significant digits: effect_digits)
+  eff_txt <- function(kind, v, lo, hi, term) ifelse(is.finite(v), fmt_effect(kind, v, lo, hi,
+                                                       effect_digits(term, kind, v, lo, hi)), NA_character_)
+  td <- if (bin) dplyr::mutate(td, Effect = "OR", EffectValue = exp(estimate),
+                               CI_low = exp(estimate - mult * std.error), CI_high = exp(estimate + mult * std.error),
+                               CI = eff_txt("OR", EffectValue, CI_low, CI_high, term))
+        else dplyr::mutate(td, Effect = "β", EffectValue = estimate,
+                           CI_low = estimate - mult * std.error, CI_high = estimate + mult * std.error,
+                           CI = eff_txt("beta", EffectValue, CI_low, CI_high, term))
+  td$Inference <- if (bin) "model-based SE, Wald z reference" else "model-based SE, t reference"
+  out$tidy <- td
+  out
+}
+
+# The Model text of a per-patient model (.per_patient_model)
+.per_patient_label <- function(pp, bin, display_names = NULL)
+  paste0(if (bin) "Logistic regression" else "Linear regression", ", ", GEE_PER_PATIENT, ", ", pp$n, " patients",
+         if (length(pp$avg)) paste0("; ", paste(disp_name(pp$avg, display_names), collapse = ", "),
+                                    " averaged over each patient's eyes") else "")
 
 # Clustered GEE of each outcome on the predictors (the group factor and any
 # adjustment covariates), one model per outcome. Every outcome either gets its
@@ -982,10 +1096,18 @@ GEE_LONE_NOTE <- "SE not estimable - this level is held by 1 patient"
 # SE, P and CI take the run's small-sample inference (extract_gee_tidy; D11).
 # display_names: optional clean key -> original header map (R4-3) for the
 # Outcome and Covariates columns, the model notes and the covariate terms.
+# Decision R3-4: an outcome in `patient_level` (the variables flagged as
+# per-patient parameters) is never the outcome of an eye-level GEE when a
+# patient ID is mapped - it is modeled on one row per patient by an ordinary
+# linear or logistic model (.per_patient_model), labeled GEE_PER_PATIENT; an
+# exchangeable fit is kept only when helpers.R gee_exch_reject() accepts it,
+# otherwise the model is refitted with an independence working correlation and
+# labeled GEE_INDEP_REFIT (logged with the reason), or reported as not
+# estimable when that fails too.
 run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clean,
                            patient_id_clean, dicho_pref_clean = list(),
                            use_weights = FALSE, logger = message, display_names = NULL,
-                           matched = FALSE) {
+                           matched = FALSE, patient_level = character(0)) {
   dn <- function(x) disp_name(x, display_names)
   cs <- .cluster_setup(df, patient_id_clean, logger)
   df <- cs$df
@@ -1026,8 +1148,14 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
     if (!(outc %in% names(df))) next
     out_type <- get_var_type(outc, outcome_type_map); if (is.na(out_type)) out_type <- "continuous"
     if (out_type %in% c("ordinal","categorical")) {
+      # no effect estimate here; its table P comes from the clustered test of
+      # its type (D12), said so rather than seeming to contradict the tables
       res_list[[outc]] <- na_row(outc, NA_character_,
-        paste("Skipped:", out_type, "outcome not modeled in GEE")); next
+        paste0("Skipped: ", out_type, " outcome not modeled in GEE (no effect estimate); its P value in the ",
+               "summary tables comes from ",
+               if (out_type == "ordinal") "a GEE on ranks, clustered by patient (the Wilcoxon / Kruskal-Wallis test with one eye per patient)"
+               else "a joint clustered Wald test on its level indicators (the chi-squared / Fisher's exact test with one eye per patient)",
+               " - see the Test column there")); next
     }
     preds <- predictors_clean[predictors_clean %in% names(df)]
     # a baseline variable that is also an adjustment covariate is never
@@ -1158,32 +1286,59 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
         skip_all(small, except = c(empty, names(un$out))), left_out, empty_rows)
       next
     }
-    fit <- fit_gee(f, df2, id_col, fam, use_weights,
-                   corstr = if (ind) "independence" else "exchangeable")
-    if (is.null(fit)) {
-      res_list[[outc]] <- dplyr::bind_rows(na_row(outc, eff, paste0(note, "Model failed: ",
-        if (nzchar(.gee_err$msg %||% "")) .gee_err$msg else "did not converge")), left_out, empty_rows)
-      next
+    # a per-patient variable: one row per patient, an ordinary model (R3-4)
+    if (identical(cs$unit, "patient") && outc %in% patient_level) {
+      pp <- .per_patient_model(f, df2, preds, id_col, bin, w_ind, dn(outc))
+      log_once(logger, sprintf(paste0("GEE sheets: '%s' is a per-patient variable - modeled on one row per ",
+                                      "patient by an ordinary %s model, never by an eye-level GEE."),
+                               dn(outc), if (bin) "logistic" else "linear"))
+      if (nzchar(pp$why)) {
+        res_list[[outc]] <- dplyr::bind_rows(skip_all(pp$why, except = c(empty, names(un$out))),
+                                             left_out, empty_rows)
+        next
+      }
+      t <- pp$tidy
+      model_txt <- .per_patient_label(pp, bin, display_names)
+    } else {
+      # an exchangeable fit only when it is accepted, else independence (R3-4)
+      fc <- gee_fit_checked(function(cs_) fit_gee(f, df2, id_col, fam, use_weights, corstr = cs_),
+                            if (ind) "independence" else "exchangeable")
+      fit <- fc$fit
+      if (is.null(fit)) {
+        res_list[[outc]] <- dplyr::bind_rows(na_row(outc, eff, paste0(note, "Model failed: ",
+          if (nzchar(fc$refit)) fc$why
+          else if (nzchar(.gee_err$msg %||% "")) .gee_err$msg else "did not converge")), left_out, empty_rows)
+        if (nzchar(fc$refit))
+          logger(sprintf("GEE '%s' (covariates: %s): not estimable - %s.", dn(outc),
+                         if (length(setdiff(preds, "GroupLabel"))) paste(dn(setdiff(preds, "GroupLabel")), collapse = ", ")
+                         else "none", fc$why))
+        next
+      }
+      if (nzchar(fc$refit))
+        logger(sprintf("GEE '%s' (covariates: %s): exchangeable fit not accepted - %s; refitted with an %s.",
+                       dn(outc), if (length(setdiff(preds, "GroupLabel"))) paste(dn(setdiff(preds, "GroupLabel")), collapse = ", ")
+                                 else "none", fc$refit, GEE_INDEP_REFIT))
+      t <- extract_gee_tidy(fit, fam, dn(outc), cs$unit)
+      # no corrected covariance or no t reference (too few patients for the
+      # coefficients): no comparison of this outcome is estimated, and every
+      # row says why
+      why_t <- attr(t, "why") %||% ""
+      if (nzchar(why_t)) {
+        res_list[[outc]] <- dplyr::bind_rows(skip_all(why_t, except = c(empty, names(un$out))),
+                                             left_out, empty_rows)
+        next
+      }
+      model_txt <- if (w_ind) paste0(if (bin) "GEE Binomial" else "GEE Gaussian",
+                                     ", working correlation: independence (weighted)")
+                   else if (ind) paste0(if (bin) "GEE Binomial" else "GEE Gaussian",
+                                        ", working correlation: independence (matched cohort)")
+                   else if (nzchar(fc$refit)) paste0(if (bin) "GEE Binomial" else "GEE Gaussian", ", ",
+                                                     GEE_INDEP_REFIT, " - exchangeable fit not accepted: ", fc$refit)
+                   else if (bin) "GEE Binomial (exchangeable)" else "GEE Gaussian (exchangeable)"
     }
-    t <- extract_gee_tidy(fit, fam, dn(outc), cs$unit)
     # covariate levels held by one patient: estimate only (extract_gee_tidy)
     lone <- setdiff(attr(t, "lone") %||% character(0), paste0("GroupLabel", names(one_pt)))
-    # no corrected covariance or no t reference (too few patients for the
-    # coefficients): no comparison of this outcome is estimated, and every
-    # row says why
-    why_t <- attr(t, "why") %||% ""
-    if (nzchar(why_t)) {
-      res_list[[outc]] <- dplyr::bind_rows(skip_all(why_t, except = c(empty, names(un$out))),
-                                           left_out, empty_rows)
-      next
-    }
-    t$Model <- paste0(note,
-                      if (w_ind) paste0(if (bin) "GEE Binomial" else "GEE Gaussian",
-                                        ", working correlation: independence (weighted)")
-                      else if (ind) paste0(if (bin) "GEE Binomial" else "GEE Gaussian",
-                                           ", working correlation: independence (matched cohort)")
-                      else if (bin) "GEE Binomial (exchangeable)" else "GEE Gaussian (exchangeable)",
-                      cl_note)
+    t$Model <- paste0(note, model_txt, cl_note)
     adj <- setdiff(preds, "GroupLabel")
     t$Covariates <- if (length(adj)) paste(dn(adj), collapse = ", ") else "none"
     if (bin) {
@@ -1299,6 +1454,13 @@ build_gee_lookup <- function(gee_df, group_term) {
       holm[k] <- TRUE
     }
   }
+  # a model that is not the exchangeable GEE of the column is named in its
+  # cell (decision R3-4): a per-patient variable's ordinary model, or an
+  # independence refit
+  mdl <- if ("Model" %in% names(rows)) as.character(rows$Model) else rep("", nrow(rows))
+  mdl[is.na(mdl)] <- ""
+  tag <- ifelse(grepl(GEE_PER_PATIENT, mdl, fixed = TRUE), " [one row per patient, ordinary model]",
+                ifelse(grepl(GEE_INDEP_REFIT, mdl, fixed = TRUE), " [independence working correlation]", ""))
   rows <- rows %>%
     dplyr::mutate(
       # one effect style for every table (D24): "β = -9.98 (95% CI, -29.04
@@ -1307,7 +1469,8 @@ build_gee_lookup <- function(gee_df, group_term) {
         is.na(EffectValue) ~ "not estimable",
         Effect == "OR" ~ fmt_effect("OR", EffectValue, CI_low, CI_high),
         TRUE ~ fmt_effect("beta", EffectValue, CI_low, CI_high)),
-      gee_p_label = paste0(dplyr::coalesce(fmt_p(p_shown), ""), ifelse(holm, " [Holm]", "")))
+      gee_p_label = paste0(dplyr::coalesce(fmt_p(p_shown), ""), ifelse(holm, " [Holm]", ""),
+                           ifelse(is.na(EffectValue), "", tag)))
   if (length(group_term) > 1 && nrow(rows) > 0) {
     rows <- rows %>%
       dplyr::mutate(.cmp = sub("^GroupLabel", "", term), .ord = match(term, group_term)) %>%
@@ -1388,7 +1551,8 @@ REG_CRUDE_HOLM_P <- "Crude P (Holm), same eyes"
 run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_clean,
                                   patient_id_clean, dicho_pref_clean = list(),
                                   glevels, use_weights = FALSE, logger = message,
-                                  display_names = NULL, matched = FALSE) {
+                                  display_names = NULL, matched = FALSE,
+                                  patient_level = character(0)) {
   dn <- function(x) disp_name(x, display_names)
   ref <- glevels[1]
   pub <- list(); full <- list(); n_flagged <- 0
@@ -1605,17 +1769,36 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
 
     fam_r <- if (dich) "binomial" else "gaussian"
     cstr <- if (ind) "independence" else "exchangeable"
-    fit <- fit_gee(fmla, df2, id_col, fam_r, use_weights, corstr = cstr)
+    # decision R3-4: a per-patient variable is modeled on one row per patient
+    # by an ordinary model; an exchangeable GEE is kept only when it is
+    # accepted (helpers.R gee_fit_checked), else refitted with independence
+    pp <- NULL; fc <- list(refit = "", why = "")
+    if (identical(cs$unit, "patient") && outc %in% patient_level) {
+      pp <- .per_patient_model(fmla, df2, preds, id_col, dich, w_ind, dn(outc))
+      fit <- if (nzchar(pp$why)) NULL else pp
+      n_txt <- sprintf("%d patients (%d eyes)", pp$n, n)
+    } else {
+      fc <- gee_fit_checked(function(cs_) fit_gee(fmla, df2, id_col, fam_r, use_weights, corstr = cs_), cstr)
+      fit <- fc$fit
+      if (nzchar(fc$refit))
+        logger(sprintf("Regression '%s': exchangeable fit not accepted - %s; %s.", dn(outc), fc$refit,
+                       if (is.null(fit)) paste0("not estimable (", fc$why, ")") else paste0("refitted with an ", GEE_INDEP_REFIT)))
+    }
     # one count per model, whether it carries a caution, failed, or both
     if (nzchar(caution) || is.null(fit)) n_flagged <- n_flagged + 1
     if (is.null(fit)) {
       add_rows(list(skip_row(outc, n, paste0(
         drop_note, if (nzchar(caution)) paste0(caution, ". ") else "", "Model failed: ",
-        ifelse(nzchar(.gee_err$msg %||% ""), .gee_err$msg, "did not converge"))),
+        if (!is.null(pp)) pp$why else if (nzchar(fc$refit)) fc$why
+        else ifelse(nzchar(.gee_err$msg %||% ""), .gee_err$msg, "did not converge"))),
         unest_rows(), empty_rows))
       next
     }
-    td <- extract_gee_tidy(fit, fam_r, dn(outc), cs$unit)
+    m_note <- if (!is.null(pp)) .per_patient_label(pp, dich, display_names)
+              else if (nzchar(fc$refit)) paste0(GEE_INDEP_REFIT, " - exchangeable fit not accepted: ", fc$refit)
+              else ""
+    note <- .join_note(note, m_note)
+    td <- if (!is.null(pp)) pp$tidy else extract_gee_tidy(fit, fam_r, dn(outc), cs$unit)
     # no corrected covariance, or too few patients for the t reference: the
     # model is fitted but none of its comparisons can be tested (D11)
     why_t <- attr(td, "why") %||% ""
@@ -1624,22 +1807,37 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
                           except = c(empty, names(un$out))), unest_rows(), empty_rows))
       next
     }
-    td$Model <- paste0(if (dich) "Logistic GEE (OR)" else "Linear GEE (β)",
-                       if (w_ind) ", working correlation: independence (weighted)"
-                       else if (ind) ", working correlation: independence (matched cohort)" else "")
+    td$Model <- if (!is.null(pp)) m_note
+                else paste0(if (dich) "Logistic GEE (OR)" else "Linear GEE (β)",
+                            if (w_ind) ", working correlation: independence (weighted)"
+                            else if (ind) ", working correlation: independence (matched cohort)"
+                            else if (nzchar(fc$refit)) paste0(", ", m_note)
+                            # an accepted exchangeable fit is named too (R3-4, T1-04)
+                            else ", working correlation: exchangeable")
     # covariate levels held by one patient: estimate only (extract_gee_tidy)
     k_lone <- !is.na(td$term) & td$term %in% setdiff(attr(td, "lone") %||% character(0),
                                                      paste0("GroupLabel", names(one_pt)))
     if (any(k_lone)) td$Model[k_lone] <- paste0(td$Model[k_lone], ". ", .lone_note(cs$unit))
     # the crude comparison on the SAME eyes (decision D17): the group alone, on
     # the adjusted model's complete cases, with its weights and working
-    # correlation; NULL when it cannot be fitted or tested
+    # correlation (independence when the adjusted model was refitted; its own
+    # acceptance check otherwise, R3-4); per patient for a per-patient
+    # variable; NULL when it cannot be fitted or tested
     tcr <- NULL
-    fit_c <- fit_gee(as.formula(paste0("`", outc, "` ~ GroupLabel")), df2, id_col, fam_r,
-                     use_weights, corstr = cstr)
-    if (!is.null(fit_c)) {
-      tcr <- extract_gee_tidy(fit_c, fam_r, dn(outc), cs$unit)
-      if (nzchar(attr(tcr, "why") %||% "")) tcr <- NULL
+    fml_c <- as.formula(paste0("`", outc, "` ~ GroupLabel"))
+    if (!is.null(pp)) {
+      pc <- .per_patient_model(fml_c, df2, "GroupLabel", id_col, dich, w_ind, dn(outc))
+      if (!nzchar(pc$why)) tcr <- pc$tidy
+    } else {
+      fcc <- gee_fit_checked(function(cs_) fit_gee(fml_c, df2, id_col, fam_r, use_weights, corstr = cs_),
+                             if (nzchar(fc$refit)) "independence" else cstr)
+      fit_c <- fcc$fit
+      if (nzchar(fcc$refit) && !is.null(fit_c))
+        note <- .join_note(note, paste0("crude model: ", GEE_INDEP_REFIT))
+      if (!is.null(fit_c)) {
+        tcr <- extract_gee_tidy(fit_c, fam_r, dn(outc), cs$unit)
+        if (nzchar(attr(tcr, "why") %||% "")) tcr <- NULL
+      }
     }
     # the term of a one-patient group is not reported (the other terms are)
     for (gn in names(one_pt)) {

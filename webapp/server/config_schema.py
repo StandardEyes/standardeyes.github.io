@@ -148,12 +148,16 @@ DEFAULTS: dict[str, Any] = {
     "astig_sheet": True,
     # JCRS 2025 Part II says astigmatism data are usually NOT Gaussian, so the
     # nonparametric convex polygon is the default rather than the normal ellipse.
-    # "polygon" = the convex hull of the 95% deepest eyes by projection depth
-    # (decision D5; "depth" is accepted as the same)
+    # "polygon" = the depth-based convex polygon as in the WHWK functions, the
+    # journal's reference tool (decision R3-1; "depth" is accepted as the same)
     "astig_region": "polygon",     # "normal" | "polygon" | "both"
-    # 95% confidence region of each centroid (decision D6): "bootstrap" = the
-    # depth polygon of 999 bootstrap centroids; "hotelling" = the T2 ellipse
+    # 95% confidence region of each centroid (decision R3-2): "bootstrap" = the
+    # bootstrap convex polygon of the centroid as in the WHWK functions (999
+    # bootstrap centroids, projection distance); "hotelling" = the T2 ellipse
     "astig_centroid_region": "bootstrap",
+    # with the double-angle figures, tab-delimited input files for the WHWK
+    # functions in the figures' "WHWK input" folder (decision R3-3)
+    "astig_whwk_files": True,
     # follow the JCRS 2025 astigmatism working group: total SD, a bivariate
     # centroid test and Holm-adjusted group comparisons. Off = the older
     # behaviour (two separate univariate tests, no adjustment).
@@ -161,10 +165,12 @@ DEFAULTS: dict[str, Any] = {
     # cluster the figure p-values by patient (GEE, robust SE) so both eyes of
     # one person are not counted as independent
     "cluster_by_patient": True,
-    # astigmatism tests (decision D7): "robust" = trimmed Hotelling T2 /
-    # trimmed means calibrated by a bootstrap resampling patients within each
-    # cohort, which is what JCRS 2025 Part II describes; "gee" = clustered GEE
-    # Wald; "classic" = Hotelling/MANOVA / Welch, eyes independent
+    # astigmatism tests (decision D7, R3-2): "robust" = the centroid against
+    # zero by the bootstrap projection-distance test of the WHWK functions, and
+    # between cohorts trimmed Hotelling T2 / trimmed means calibrated by a
+    # bootstrap resampling patients within each cohort; "gee" = clustered GEE
+    # Wald; "classic" = one-sample Hotelling / Hotelling-MANOVA / Welch, eyes
+    # independent
     "astig_test_method": "robust",
     # optional pre-computed vectors, magnitude + plus axis
     # {tia_mag,tia_axis,sia_mag,sia_axis,dv_mag,dv_axis,pe_mag,pe_axis};
@@ -435,6 +441,15 @@ def normalize_cfg(cfg: dict, file_path: str, sheet: Any = None) -> dict:
     # astigmatism choices (D5-D7): absent or blank = the v1.1.0 defaults
     for k in ("astig_region", "astig_centroid_region", "astig_test_method"):
         out[k] = _choice(out, k)
+    # the WHWK input files (R3-3): a settings file without the key - or with a
+    # blank value - gets the default (on); "true" / "false" text is read as such
+    wf = out.get("astig_whwk_files")
+    if wf is None or (isinstance(wf, str) and not wf.strip()):
+        out["astig_whwk_files"] = True
+    elif isinstance(wf, str) and wf.strip().lower() in ("true", "false", "1", "0", "yes", "no", "on", "off"):
+        out["astig_whwk_files"] = wf.strip().lower() in ("true", "1", "yes", "on")
+    elif isinstance(wf, (int, float)) and not isinstance(wf, bool) and wf in (0, 1):
+        out["astig_whwk_files"] = bool(wf)
     # logMAR for the mapped acuity columns when the settings name no list
     # (D16; the same rule as R/pipeline.R va_columns)
     if "logmar_cols_raw" not in (cfg or {}) and out.get("do_logmar"):
@@ -697,10 +712,13 @@ def validate_cfg(cfg: dict, columns: list | None = None, data: Any = None) -> li
                     "or classic (0.266, <0.001).")
     if _choice(cfg, "astig_region") not in ASTIG_REGIONS:
         errs.append(f"Astigmatism data region '{cfg.get('astig_region')}' is not supported - use polygon "
-                    "(95% depth polygon), normal (95% ellipse) or both.")
+                    "(95% depth-based convex polygon, as in the WHWK functions), normal (95% ellipse) or both.")
     if _choice(cfg, "astig_centroid_region") not in ASTIG_CENTROID_REGIONS:
         errs.append(f"Centroid confidence region '{cfg.get('astig_centroid_region')}' is not supported - use "
-                    "bootstrap (depth polygon of bootstrap centroids) or hotelling (T² ellipse).")
+                    "bootstrap (bootstrap convex polygon of the centroid, as in the WHWK functions) or "
+                    "hotelling (T² ellipse).")
+    if not isinstance(cfg.get("astig_whwk_files", True), bool):
+        errs.append(f"WHWK input files '{cfg.get('astig_whwk_files')}' must be on or off (true / false).")
     if _choice(cfg, "astig_test_method") not in ASTIG_TEST_METHODS:
         errs.append(f"Astigmatism test method '{cfg.get('astig_test_method')}' is not supported - use robust, "
                     "gee or classic.")

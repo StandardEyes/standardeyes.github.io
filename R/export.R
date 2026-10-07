@@ -921,11 +921,19 @@ gee_skip_note <- function(g, corstr = NULL) {
     k <- !is.na(g$Model) & grepl(txt, g$Model, fixed = TRUE)
     if ("Outcome" %in% names(g)) length(unique(g$Outcome[k])) else sum(k)
   }
-  n_pp <- n_of(get0("GEE_PER_PATIENT", ifnotfound = "per patient (one row per patient)"))
+  pp_txt <- get0("GEE_PER_PATIENT", ifnotfound = "per patient (one row per patient)")
+  n_pp <- n_of(pp_txt)
+  # on a matched cohort they are independence GEEs on the patient rows (D18,
+  # finding S1): "GEE Gaussian, per patient (one row per patient), ..."
+  n_pp_gee <- n_of(paste0("GEE Gaussian, ", pp_txt)) + n_of(paste0("GEE Binomial, ", pp_txt))
   n_ind <- n_of(get0("GEE_INDEP_REFIT", ifnotfound = "independence working correlation (the outcome is almost constant"))
-  r34 <- c(if (n_pp > 0) paste0(n_pp, " outcome(s) are per-patient variables: modeled on one row per patient ",
+  r34 <- c(if (n_pp > n_pp_gee) paste0(n_pp - n_pp_gee, " outcome(s) are per-patient variables: modeled on one row per patient ",
                                 "by an ordinary linear or logistic model (model-based SE), never by an eye-level ",
                                 "GEE - see the 'Model' column."),
+           if (n_pp_gee > 0) paste0(n_pp_gee, " outcome(s) are per-patient variables: modeled on one row per patient ",
+                                    "by a GEE with an independence working correlation and the robust SE clustered by ",
+                                    "patient (", gee_se_label(1), "; matched cohort), never by an eye-level GEE - see ",
+                                    "the 'Model' column."),
            if (n_ind > 0) paste0(n_ind, " outcome(s) were refitted with an independence working correlation: the ",
                                  "exchangeable fit was not accepted (working correlation 0.95 or more, no ",
                                  "convergence, or not at its solution - the outcome is almost constant within ",
@@ -1088,7 +1096,11 @@ pub_values_note <- function(out) {
   if (length(out_txt)) c("Values:", paste0("- ", out_txt)) else character(0)
 }
 
-make_publication_table <- function(wb, sheet_name, sections, note = NULL) {
+# tests_note: an optional footnote line under "Tests behind the P values",
+# printed when the table has a classical (eye-level) test - the statement that
+# the classical table tests can differ from the figures' clustered P values
+# (table_tests = "classical", finding S3).
+make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_note = NULL) {
   drop_cols <- c("Test", "Practical Interpretation")
   secs <- list()
   ne_why <- character(0); ne_row <- character(0)
@@ -1191,6 +1203,8 @@ make_publication_table <- function(wb, sheet_name, sections, note = NULL) {
                 rr <- unique(t_row[t_lab == tl])
                 paste0("- ", tl, ": ", paste(rr, collapse = "; "), ".")
               }, character(1), USE.NAMES = FALSE))
+    if (length(tests_note) && nzchar(tests_note[1]) && any(!grepl("GEE|Weighted|ermutation", t_lab)))
+      foot <- c(foot, tests_note[1])
   }
   if (length(foot))
     openxlsx::writeData(wb, sn, foot, startRow = top + nrow(out) + 2, startCol = 1)
@@ -1478,6 +1492,31 @@ loveplot_path <- function(dir, pairing, run = NULL) {
   file.path(dir, paste0("LovePlot_", safe_filename(tag), ".png"))
 }
 
+# The balance plot's axis title at a single journal column (finding F9): cobalt
+# prints it at 11 pt, centred under the plotting area, which the covariate
+# names push to the right - at 8.76 cm its last letters ran past the figure.
+# Here it is `size` pt, centred - or ending at the plotting area's right edge
+# when even then a centred title would run past the figure (measured on a
+# measuring device at the figure's size, w_in x h_in inches; centred when
+# nothing can be measured).
+loveplot_title_fit <- function(p, w_in, h_in, size = 9) {
+  p <- p + ggplot2::theme(axis.title.x = ggplot2::element_text(size = size))
+  hj <- tryCatch(gr_with_measure_device(w_in, h_in, function() {
+    gt <- ggplot2::ggplotGrob(p)
+    pan <- gt$layout[gt$layout$name == "panel", , drop = FALSE]
+    k <- which(gt$layout$name == "xlab-b")
+    if (!nrow(pan) || !length(k)) return(0.5)
+    fixed <- grid::unitType(gt$widths) != "null"
+    wpt <- numeric(length(gt$widths))
+    wpt[fixed] <- grid::convertWidth(gt$widths[fixed], "pt", valueOnly = TRUE)
+    wpt[!fixed] <- (w_in * 72.27 - sum(wpt)) * as.numeric(gt$widths[!fixed]) / sum(as.numeric(gt$widths[!fixed]))
+    centre <- (sum(wpt[seq_len(min(pan$l) - 1)]) + sum(wpt[seq_len(max(pan$r))])) / 2
+    tw <- grid::convertWidth(grid::grobWidth(gt$grobs[[k[1]]]), "pt", valueOnly = TRUE)
+    if (centre + tw / 2 > w_in * 72.27 - 2) 1 else 0.5
+  }), error = function(e) 0.5)
+  p + ggplot2::theme(axis.title.x = ggplot2::element_text(size = size, hjust = hj))
+}
+
 # cobalt's balance-table row names (a covariate key, or "<key>_<level>" for a
 # factor level; "distance" for the propensity score) with each covariate key
 # replaced by its header (R4-3). Longest keys first, so "Age_2" is never read
@@ -1544,6 +1583,14 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
   # the table tests (decision D12): patient-clustered wherever a patient has
   # two analysed eyes, unless the classical tests are chosen
   tbl_tests <- table_tests_of(cfg)
+  # the classical tables chosen while the figures cluster by patient (finding
+  # S3): the Publication Tables say that a table and its figure can differ
+  pid_tt <- as.character(res$patient_id_clean %||% NA_character_)[1]
+  tests_note <- if (identical(tbl_tests, "classical") && isTRUE(as.logical(unlist(cfg$cluster_by_patient %||% TRUE))[1]) &&
+                    !is.na(pid_tt) && pid_tt %in% names(dat) && fellow_eyes_present(dat[[pid_tt]]))
+    paste0("Classical tests (Summary-table tests = classical) treat the two eyes of a patient as independent",
+           if (isTRUE(cfg$make_graphs)) paste0("; the figures' P values are patient-clustered GEE tests, so a ",
+                                               "table and its figure can give different P values") else "", ".")
   # acuity analysed in logMAR: Snellen geometric mean, logMAR mean ± SD and the
   # range in Snellen in every cell (D16)
   va_lm <- vi$in_logmar
@@ -1655,7 +1702,7 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
     make_publication_table(wb, "Publication Table",
       list(`Baseline characteristics`      = baseline_tbl,
            `Preoperative / intraoperative` = preop_tbl,
-           `Outcomes`                      = outcome_tbl))
+           `Outcomes`                      = outcome_tbl), tests_note = tests_note)
 
   if (isTRUE(cfg$make_meyestro))
     optional_tab("mEYEstro tabs", make_meyestro_tabs(dat, wb, res$roles, pairing = NULL,
@@ -1817,10 +1864,12 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
           lw <- if (is.finite(fs$width_in)) fs$width_in else 9
           lh <- lw * 2 / 3
           # a single journal column (narrower than 12 cm, finding F9): the key
-          # goes under the plot, so the plotting area keeps the full width
+          # goes under the plot, so the plotting area keeps the full width, and
+          # the axis title is fitted to the figure (loveplot_title_fit)
           if (lw < 12 / 2.54) {
             lp_plot <- lp_plot + ggplot2::theme(legend.position = "bottom", legend.title = ggplot2::element_blank())
             lh <- lw * 0.8
+            lp_plot <- loveplot_title_fit(lp_plot, lw, lh)
           }
           got <- save_graph(lp_plot, sub("\\.png$", "", lp), fs$formats, fs$dpi, w = lw, h = lh,
                             logger = logger, what = lp_what, count = FALSE)
@@ -1833,7 +1882,7 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
                                    if (!is.null(run) && length(run$values)) paste0(", subset: ", run$label) else ""),
                             c(paste0("Standardized mean differences of the matching covariates before ",
                                      "(Unadjusted) and after matching (Adjusted), computed by cobalt; the ",
-                                     "dashed lines mark -0.1 and 0.1; grey circles, before matching; black ",
+                                     "dashed lines mark -0.1 and 0.1; gray circles, before matching; black ",
                                      "triangles, after matching."),
                               "* (where shown): the raw (unstandardized) difference in means.",
                               if (!is.na(psm_score_scale(psm$distance)))
@@ -1980,7 +2029,7 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
         make_publication_table(wb, paste0("Pub_M_", lab),
           list(`Baseline characteristics`      = b_m,
                `Preoperative / intraoperative` = p_m,
-               `Outcomes`                      = o_m), note = w_note)
+               `Outcomes`                      = o_m), note = w_note, tests_note = tests_note)
 
       if (isTRUE(cfg$make_meyestro))
         optional_tab("mEYEstro tabs", make_meyestro_tabs(md, wb, res$roles, pairing = lab,
@@ -2069,7 +2118,7 @@ describe_sheet <- function(nm) {
     c("^GEE_Main_",           "Clustered GEE with the group as the only predictor; per-patient variables by an ordinary model on one row per patient."),
     c("^GEE_Adj_M_",          "Adjusted clustered GEE on the matched cohort (covariates listed per row and in the Manifest)."),
     c("^GEE_Adj_",            "Clustered GEE adjusted for the covariates listed per row and in the Manifest (a variable is never adjusted for itself)."),
-    c("^GEE_M_",              "Clustered GEE on the matched cohort."),
+    c("^GEE_M_",              "Clustered GEE on the matched cohort (independence working correlation); per-patient variables by an independence GEE on one row per patient."),
     c("^Regression",          "Covariate-adjusted models, the crude estimate on the same eyes, and a full-model appendix."),
     c("^Reg_M_",              "Covariate-adjusted models on the matched cohort, with the crude estimate on the same eyes."),
     c("^PSM_",                "Matching (MatchIt): settings, covariates, balance and the matched rows."),
@@ -2150,8 +2199,9 @@ filter_rules_text <- function(rules) {
 }
 
 # The analysed variables by section and type, the preferred level of each
-# dichotomous variable and the per-patient variables, as the Manifest records
-# them (finding T1-01); headers as typed.
+# dichotomous variable, the per-patient variables and the within-group
+# variables counted once per patient, as the Manifest records them (finding
+# T1-01); headers as typed.
 variables_text <- function(cfg) {
   secs <- c(baseline = "Baseline", preop = "Preoperative", outcome = "Outcome", within_group = "Within-group")
   part <- unlist(lapply(names(secs), function(s) {
@@ -2169,8 +2219,15 @@ variables_text <- function(cfg) {
           collapse = ", "))
   pp <- as.character(unlist(cfg$patient_level_params_raw))
   ex <- as.character(unlist(cfg$exclude_params_raw))
+  # the within-group tables' unit of each variable ("patient": counted once
+  # per patient; every other variable per eye)
+  wl <- cfg$within_group_levels
+  wl_p <- if (length(wl) && !is.null(names(wl)))
+    names(wl)[vapply(wl, function(x) identical(tolower(as.character(unlist(x))[1]), "patient"), logical(1))]
+    else character(0)
   out <- c(part, pref_txt,
            if (length(pp)) paste0("per-patient variables: ", paste(pp, collapse = ", ")),
+           if (length(wl_p)) paste0("within-group tables, counted once per patient: ", paste(wl_p, collapse = ", ")),
            if (length(ex)) paste0("excluded: ", paste(ex, collapse = ", ")))
   if (length(out)) paste(out, collapse = " | ") else "none"
 }
@@ -2430,7 +2487,8 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
                "by more than ", get0("GEE_EXCH_STEP_MAX", ifnotfound = 0.01), " SE - otherwise refitted with an ",
                "independence working correlation and labeled so (sheets, tables, figures, run log); independence on ",
                "matched cohorts; variables marked per patient are modeled on one row per patient by an ordinary ",
-               "linear or logistic model, never by an eye-level GEE")),
+               "linear or logistic model (on matched cohorts by an independence GEE with the robust SE clustered ",
+               "by patient), never by an eye-level GEE")),
       c("Table tests",          table_tests_text(cfg, has_pid = !is.na(pid[1]) && pid[1] %in% names(dat))),
       c("Multiplicity",         paste0("Holm within each variable across the comparisons of each group with ",
                                        "the reference (summary-table GEE and adjusted columns, tagged [Holm]; ",
@@ -2473,11 +2531,15 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
         c("Figure p-values",    if (!isTRUE(cfg$cluster_by_patient %||% TRUE)) "eyes treated as independent"
                                 else if (!fig_clustered)
                                   "eyes treated as independent (clustering requested, but no patient ID column is mapped)"
-                                else paste0("clustered by patient (GEE, ",
+                                else paste0("clustered by patient (GEE, exchangeable working correlation - ",
+                                            "independence on matched cohorts and where a test is labeled so; ",
                                             if (identical(gee_small_sample(), "none")) "uncorrected robust SE, normal reference"
                                             else "robust SE (Mancl-DeRouen), t reference; F for joint tests",
                                             ") wherever a patient has two analyzed eyes; ",
-                                            "classical tests for one eye per patient")),
+                                            "classical tests for one eye per patient; a GEE that cannot be fitted: ",
+                                            "a permutation test over patients, labeled 'GEE not fitted'",
+                                            if (identical(table_tests_of(cfg), "classical"))
+                                              " - the summary tables run the classical tests (table_tests = classical), so a table and its figure can give different P values")),
       # every setting exactly as run (the input file by its name, no output folder)
       c("Settings (JSON)", { js <- settings_json_text(cfg)
                              if (is.na(js)) "not recorded (too long for one cell)" else js })

@@ -56,7 +56,7 @@ const VA_ROLES = ["pre_ucva","pre_bcva","post_ucva","post_bcva"];
 const STD_ROLE_SETS = [["pre_sph","pre_cyl","pre_axis"],["post_sph","post_cyl","post_axis"]];
 // MatchIt methods that run with the bundled R library; a preset asking for
 // any other method loads with a warning and falls back to nearest
-const PSM_METHODS = [["nearest","nearest neighbour"],["exact","exact"],
+const PSM_METHODS = [["nearest","nearest neighbor"],["exact","exact"],
                      ["cem","coarsened exact (cem)"],["subclass","subclassification"]];
 // matching distances that are not propensity scores (config_schema
 // _NON_PS_DISTANCES): MatchIt takes no caliper in score SDs and no
@@ -362,7 +362,7 @@ function builder(){
     removeStdTriple(i){ this.s.std_triples.splice(i,1); this._stdNoSeed=true; },
     // which of the settings next to the Method select the chosen method uses
     psmMethodHint(m){
-      const tail=" Ratio, match order, replacement, caliper and seed are not used (greyed out). The live matched-count preview below covers nearest only; the run itself uses this method.";
+      const tail=" Ratio, match order, replacement, caliper and seed are not used (grayed out). The live matched-count preview below covers nearest only; the run itself uses this method.";
       return {
         exact: "Exact matching keeps the eyes whose covariate values exactly equal those of an eye in the other group, so it needs discrete covariates (sex, eye, a category): with a continuous covariate such as age or refraction almost no eye has an exact twin and no eye is matched — use coarsened exact (cem) for those. The distance is not used either, and the matched eyes carry weights that are generally not 1."+tail,
         cem: "Coarsened exact matching bins each covariate and keeps the eyes that share a bin with the other group. The distance is not used, and the matched eyes carry weights that are generally not 1."+tail,
@@ -512,7 +512,7 @@ function builder(){
       });
       if(!use.length){
         // shown next to the button; runError is reserved for a failed analysis
-        this.stabilityMsg="No follow-up column families were recognised — add the visits manually.";
+        this.stabilityMsg="No follow-up column families were recognized — add the visits manually.";
         return;
       }
       // R pairs the change-from / change-to visits by label: never propose two equal labels
@@ -1684,6 +1684,15 @@ function builder(){
       // aliases the engine reads as the same setting
       if(s.astig_region==="depth") s.astig_region="polygon";
       if(s.p_style==="jcrs") s.p_style="ama";
+      // the WHWK input files switch is read as the server reads it: blank = the
+      // default (on), "true" / "false" (yes / no, on / off) text and 1 / 0 the
+      // switch; any other value is kept, so the run's check names it
+      { const wf=s.astig_whwk_files;
+        if(typeof wf==="string"){
+          const v=wf.trim().toLowerCase();
+          if(!v) s.astig_whwk_files=true;
+          else if(["true","false","1","0","yes","no","on","off"].includes(v)) s.astig_whwk_files=["true","1","yes","on"].includes(v);
+        } else if(wf===0||wf===1) s.astig_whwk_files=wf===1; }
       // logMAR list (D16): a list the config chose is kept as it is - also an
       // empty one saved with the switch on by v1.0.0, which converted nothing;
       // a config without a list, or one that was following the roles
@@ -1704,7 +1713,7 @@ function builder(){
       else if(PSM_METHODS.some(m=>m[0]===pm)) s.psm_method=pm;
       else {
         this.psmMethodNote="This config asked for the matching method “"+String(s.psm_method)+
-          "”, which this installation cannot run. Nearest-neighbour matching is used instead — check the settings below.";
+          "”, which this installation cannot run. Nearest-neighbor matching is used instead — check the settings below.";
         s.psm_method="nearest";
         alert(this.psmMethodNote);
       }
@@ -2002,11 +2011,11 @@ function builder(){
       }catch(e){
         // an aborted stream after Cancel is the expected end, not a crash
         if(!this.runError) this.runError = (e && e.name==="AbortError") || this.cancelling
-          ? "Analysis cancelled. Nothing from this run is shown." : String(e);
+          ? "Analysis canceled. Nothing from this run is shown." : String(e);
       }
       this.running=false; this._runCtl=null;
       clearTimeout(this._cancelT);
-      if(this.cancelling && !this.runError) this.runError="Analysis cancelled. Nothing from this run is shown.";
+      if(this.cancelling && !this.runError) this.runError="Analysis canceled. Nothing from this run is shown.";
       this.cancelling=false;
       // success requires a zero exit code, an actual result payload AND at
       // least one workbook - an R crash that skips the protocol's ERROR line, or
@@ -2192,7 +2201,8 @@ function builder(){
         const r=await fetch("/api/export-filtered",{method:"POST",headers:{'Content-Type':'application/json'},
           body:JSON.stringify({cfg:this.buildCfg(), dest:this.s.output_dir})});
         const j=await r.json();
-        if(r.ok) this.filteredExport={busy:false, path:j.path, rows:j.rows, error:null};
+        // grouped false: no group is defined yet, so every row passing the filters and subsets was written
+        if(r.ok) this.filteredExport={busy:false, path:j.path, rows:j.rows, error:null, grouped:j.grouped!==false};
         else this.filteredExport={busy:false, path:null, rows:null, error:j.detail||"export failed"};
       }catch(e){ this.filteredExport={busy:false, path:null, rows:null, error:String(e)}; }
     },

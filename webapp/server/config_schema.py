@@ -283,7 +283,7 @@ PSM_METHOD_NEEDS = {
     "full": "the R package optmatch",
     "genetic": "the R packages Matching and rgenoud",
     "quick": "the R package quickmatch",
-    "cardinality": "an optimisation solver (R package highs)",
+    "cardinality": "an optimization solver (R package highs)",
 }
 
 
@@ -683,7 +683,7 @@ def validate_cfg(cfg: dict, columns: list | None = None, data: Any = None) -> li
                     "use md (Mancl-DeRouen, t reference) or none (uncorrected, normal reference).")
     if _choice(cfg, "table_tests") not in TABLE_TESTS:
         errs.append(f"Table tests '{cfg.get('table_tests')}' is not supported - use auto "
-                    "(patient-clustered when a patient has two analysed eyes) or classical.")
+                    "(patient-clustered when a patient has two analyzed eyes) or classical.")
 
     bad_fmts = [f for f in (cfg.get("graph_formats") or []) if f not in GRAPH_FORMATS]
     if bad_fmts:

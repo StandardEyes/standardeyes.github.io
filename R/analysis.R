@@ -154,6 +154,9 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
   fit <- quiet_eval(suppressWarnings(geepack::geeglm(
            f, data = d, id = .cid, weights = .w, family = fam, corstr = "independence")))$value
   if (is.null(fit)) return(res(NA))
+  # a fit is accepted only when it converged (helpers.R gee_converged; the
+  # figures' weighted GEE gives the same reason)
+  if (!gee_converged(fit)) return(res(NA, "the weighted model did not converge"))
   # joint Wald test of the group terms (helpers.R gee_wald, the figures' test):
   # a numerically singular robust covariance gives no P value - the figures'
   # weighted GEE refuses it by the same rule (helpers.R gee_vcov_singular)
@@ -175,17 +178,25 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
 # Every group term is tested jointly (more than two groups: the omnibus test),
 # with the run's small-sample inference (decision D11). Working correlation:
 # exchangeable; independence on a matched cohort (matched = TRUE, decision
-# D18). Nothing is fitted - and the note says why, in the figures' words -
-# when a group has one patient, the data are below the minimum of a clustered
-# model, or there are too few patients for the t reference. A model that was
-# fitted but failed (no convergence, a numerically singular covariance) or a
-# 0/1 outcome without events (or with only events) in a group: the classical
-# test runs instead and its label says "(GEE not fitted)", exactly as on the
-# figures. Returns list(p, test, note) like group_test().
+# D18) and for the stacked level indicators. The label names the working
+# correlation that was used (R3-4, finding S4): "GEE, exchangeable working
+# correlation, clustered by patient (...)", "..., independence working
+# correlation (matched cohort), ...", or the independence refit. Nothing is
+# fitted - and the note says why, in the figures' words - when a group has one
+# patient, the data are below the minimum of a clustered model, or there are
+# too few patients for the t reference. A model that was fitted but failed
+# (no convergence, a numerically singular covariance) or a 0/1 outcome without
+# events (or with only events) in a group: a permutation test over patients
+# runs instead (helpers.R cluster_perm_test - it keeps each patient's eyes
+# together, never an eye-level test; finding S2), its label says "(GEE not
+# fitted)" and its note the cause, exactly as on the figures. Returns
+# list(p, test, note) like group_test().
 .clustered_test <- function(v, g, id, kind = c("continuous", "ordinal", "dichotomous", "categorical"),
                             matched = FALSE, unit = "patient") {
   kind <- match.arg(kind)
   cs <- if (isTRUE(matched)) "independence" else NULL
+  # the working correlation of the model, for the label
+  wc <- if (isTRUE(matched)) "independence working correlation (matched cohort)" else "exchangeable working correlation"
   num <- kind %in% c("continuous", "ordinal")
   x <- if (num) as_numeric_safe(v) else v
   use <- (if (num) is.finite(x) else !is.na(x)) & !is.na(g)
@@ -196,6 +207,8 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
     levs <- sort(unique(stats::na.omit(vv[use])))
     if (length(levs) > 2) {
       base <- "GEE on level indicators"
+      # the stacked model always has an independence working correlation
+      wc <- if (isTRUE(matched)) "independence working correlation (matched cohort)" else "independence working correlation"
       q <- max(1L, (length(levs) - 1L) * (k - 1L))
       p <- gee_categorical_p(vv, g, id, unit = unit)
     } else {
@@ -210,9 +223,10 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
     base <- if (kind == "ordinal") "GEE on ranks" else "GEE"
     p <- gee_group_p(x, g, id, "continuous", unit = unit, ranks = kind == "ordinal", corstr = cs)
   }
-  # an exchangeable fit that was not accepted: the independence refit is named (R3-4)
-  if (nzchar(as.character(attr(p, "refit") %||% "")[1])) base <- paste0(base, ", ", GEE_INDEP_REFIT)
-  lab <- paste0(base, ", clustered by ", if (identical(unit, "eye")) "eye" else "patient",
+  # an exchangeable fit that was not accepted: the independence refit is named
+  # instead (R3-4)
+  if (nzchar(as.character(attr(p, "refit") %||% "")[1])) wc <- GEE_INDEP_REFIT
+  lab <- paste0(base, ", ", wc, ", clustered by ", if (identical(unit, "eye")) "eye" else "patient",
                 " (", gee_se_label(q), ")")
   # a single group, a constant variable, "B has n = 1": no test, and no test
   # is named that never ran (the weighted test's rule)
@@ -224,16 +238,20 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
   if (is.finite(p)) return(list(p = as.numeric(p), test = lab, note = ""))
   why <- as.character(attr(p, "why") %||% "")[1]
   if (!is.na(why) && nzchar(why)) return(list(p = NA_real_, test = lab, note = why))
-  # the classical test, with the eyes treated as independent: said in the
+  # the GEE was fitted but failed: a permutation test over patients, which
+  # keeps each patient's eyes together (findings S2, T1-02) - said in the
   # label, and the cause in the note (printed after the interpretation, and
-  # listed in the run log by the table writer: .gee_fallback_take)
-  gt <- group_test(v, g, kind)
-  gt$test <- paste0(gt$test, ", eyes treated as independent (GEE not fitted)")
-  if (is.finite(gt$p)) {
-    gt$note <- paste0("GEE not fitted: ", .gee_fail_cause(v, g, kind), "; the P value treats the eyes as independent")
-    .gee_fallback_rows$n <- .gee_fallback_rows$n + 1L
-  }
-  gt
+  # counted for the run log: .gee_fallback_take)
+  pp <- cluster_perm_test(if (num) x else v, g, id, kind)
+  lab_p <- paste0(CLUSTER_PERM_TEST, " (GEE not fitted)")
+  if (!is.finite(pp))
+    return(list(p = NA_real_, test = lab_p,
+                note = paste0("GEE not fitted (", .gee_fail_cause(v, g, kind),
+                              ") and the permutation test over patients could not be computed")))
+  .gee_fallback_rows$n <- .gee_fallback_rows$n + 1L
+  list(p = pp, test = lab_p,
+       note = paste0("GEE not fitted: ", .gee_fail_cause(v, g, kind), "; the P value comes from a permutation ",
+                     "test over patients (each patient's eyes kept together)"))
 }
 
 # Why a patient-clustered GEE of a table row could not be fitted, in words: a
@@ -542,8 +560,10 @@ table_tests_text <- function(cfg, has_pid = TRUE) {
   if (!isTRUE(has_pid))
     return(paste0("classical (", classical, ") - no patient ID is mapped, so eyes are treated as independent"))
   paste0("auto - patient-clustered GEE (continuous: Gaussian; ordinal: on ranks; dichotomous: ",
-         "binomial; categorical: stacked level indicators; more than two groups: joint test) for ",
-         "every per-eye row in which a patient has two analyzed eyes; classical (", classical,
+         "binomial; categorical: stacked level indicators; more than two groups: joint test; ",
+         "exchangeable working correlation, independence for the stacked level indicators, on matched ",
+         "cohorts and where a refit is labeled) for every per-eye row in which a patient has two analyzed ",
+         "eyes, a permutation test over patients where that GEE cannot be fitted; classical (", classical,
          ") for one eye per patient and for per-patient rows")
 }
 
@@ -1009,11 +1029,21 @@ GEE_LONE_NOTE <- "SE not estimable - this level is held by 1 patient"
 # the patient's), numeric covariates averaged over the patient's analysed eyes,
 # any other covariate the first eye's, matching weights (wtd = TRUE) averaged;
 # then an ordinary model - linear (model-based SE, t reference on the residual
-# df) or logistic (model-based SE, Wald z reference). f: the model formula;
-# df2: the complete-case eyes. Returns list(tidy = the rows in the GEE sheets'
-# columns (extract_gee_tidy), n = patients, note = what was averaged, why = ""
-# or why nothing was fitted).
-.per_patient_model <- function(f, df2, preds, id_col, bin, wtd = FALSE, outcome_name = NA_character_) {
+# df) or logistic (model-based SE, Wald z reference). On a matched cohort
+# (matched = TRUE) the rows are fitted instead by a GEE with an independence
+# working correlation and the patient-clustered robust SE of the run
+# (Mancl-DeRouen, t reference on patients - coefficients; decision D18, with or
+# without unequal weights; finding S1): matching weights are not precision or
+# frequency weights, so a weighted lm / glm would understate the SE. The
+# clusters are the patients (a patient with eyes in two groups has a row in
+# each), as in the matched tables' weighted test of the same rows
+# (.weighted_wald), so a row's GEE column and its P give one P value. f: the
+# model formula; df2: the complete-case eyes. Returns list(tidy = the rows in
+# the GEE sheets' columns (extract_gee_tidy), n = patients, note = what was
+# averaged, why = "" or why nothing was fitted, gee = TRUE for the matched
+# GEE, wtd = whether it was weighted).
+.per_patient_model <- function(f, df2, preds, id_col, bin, wtd = FALSE, outcome_name = NA_character_,
+                               matched = FALSE) {
   grp <- if ("GroupLabel" %in% names(df2)) as.character(df2$GroupLabel) else ""
   k <- factor(paste(df2[[id_col]], grp, sep = "\r"))
   k <- factor(k, levels = unique(as.character(k)))
@@ -1025,9 +1055,27 @@ GEE_LONE_NOTE <- "SE not estimable - this level is held by 1 patient"
   }
   pd$.pp_w <- if (isTRUE(wtd) && "weights" %in% names(df2)) as.numeric(tapply(as.numeric(df2$weights), k, mean)) else 1
   n_par <- tryCatch(ncol(stats::model.matrix(f, pd)), error = function(e) NA_integer_)
-  out <- list(tidy = NULL, n = nrow(pd), avg = avg, why = "")
+  out <- list(tidy = NULL, n = nrow(pd), avg = avg, why = "", gee = isTRUE(matched), wtd = isTRUE(wtd))
   if (is.finite(n_par) && nrow(pd) - n_par < 1) {
     out$why <- sprintf("too few patients for this model (%d patients, %d coefficients)", nrow(pd), n_par)
+    return(out)
+  }
+  if (isTRUE(matched)) {
+    # the matched cohort's model (D18): independence GEE on the patient rows,
+    # weighted by the patients' mean matching weights when wtd; accepted only
+    # when it converged (gee_fit_checked)
+    pd$weights <- pd$.pp_w
+    fam <- if (bin) "binomial" else "gaussian"
+    fc <- gee_fit_checked(function(cs_) fit_gee(f, pd, id_col, fam, isTRUE(wtd), corstr = cs_), "independence")
+    if (is.null(fc$fit)) {
+      out$why <- if (nzchar(.gee_err$msg %||% "")) paste0("the per-patient GEE failed: ", .gee_err$msg)
+                 else paste0("the per-patient GEE ", sub("^the model ", "", fc$why))
+      return(out)
+    }
+    td <- extract_gee_tidy(fc$fit, fam, outcome_name, "patient")
+    why_t <- attr(td, "why") %||% ""
+    if (nzchar(why_t)) { out$why <- why_t; return(out) }
+    out$tidy <- td
     return(out)
   }
   fit <- tryCatch(suppressWarnings(
@@ -1066,9 +1114,16 @@ GEE_LONE_NOTE <- "SE not estimable - this level is held by 1 patient"
   out
 }
 
-# The Model text of a per-patient model (.per_patient_model)
+# The Model text of a per-patient model (.per_patient_model): "Linear
+# regression, per patient (one row per patient), 163 patients", or on a
+# matched cohort "GEE Gaussian, per patient (one row per patient), working
+# correlation: independence (weighted), 163 patients"
 .per_patient_label <- function(pp, bin, display_names = NULL)
-  paste0(if (bin) "Logistic regression" else "Linear regression", ", ", GEE_PER_PATIENT, ", ", pp$n, " patients",
+  paste0(if (isTRUE(pp$gee)) (if (bin) "GEE Binomial" else "GEE Gaussian")
+         else if (bin) "Logistic regression" else "Linear regression", ", ", GEE_PER_PATIENT,
+         if (isTRUE(pp$gee)) paste0(", working correlation: independence (",
+                                    if (isTRUE(pp$wtd)) "weighted" else "matched cohort", ")"),
+         ", ", pp$n, " patients",
          if (length(pp$avg)) paste0("; ", paste(disp_name(pp$avg, display_names), collapse = ", "),
                                     " averaged over each patient's eyes") else "")
 
@@ -1099,7 +1154,8 @@ GEE_LONE_NOTE <- "SE not estimable - this level is held by 1 patient"
 # Decision R3-4: an outcome in `patient_level` (the variables flagged as
 # per-patient parameters) is never the outcome of an eye-level GEE when a
 # patient ID is mapped - it is modeled on one row per patient by an ordinary
-# linear or logistic model (.per_patient_model), labeled GEE_PER_PATIENT; an
+# linear or logistic model (.per_patient_model; on a matched cohort by an
+# independence GEE with the robust SE, decision D18), labeled GEE_PER_PATIENT; an
 # exchangeable fit is kept only when helpers.R gee_exch_reject() accepts it,
 # otherwise the model is refitted with an independence working correlation and
 # labeled GEE_INDEP_REFIT (logged with the reason), or reported as not
@@ -1148,14 +1204,19 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
     if (!(outc %in% names(df))) next
     out_type <- get_var_type(outc, outcome_type_map); if (is.na(out_type)) out_type <- "continuous"
     if (out_type %in% c("ordinal","categorical")) {
-      # no effect estimate here; its table P comes from the clustered test of
-      # its type (D12), said so rather than seeming to contradict the tables
+      # no effect estimate here; its table P comes from the test of its type
+      # that the tables ran (D12) - said so rather than seeming to contradict
+      # the tables, whichever test that was (finding T1-06): the clustered
+      # test, its permutation fallback (GEE not fitted), or the classical test
+      # (one eye per patient, or table_tests = "classical")
       res_list[[outc]] <- na_row(outc, NA_character_,
         paste0("Skipped: ", out_type, " outcome not modeled in GEE (no effect estimate); its P value in the ",
-               "summary tables comes from ",
-               if (out_type == "ordinal") "a GEE on ranks, clustered by patient (the Wilcoxon / Kruskal-Wallis test with one eye per patient)"
-               else "a joint clustered Wald test on its level indicators (the chi-squared / Fisher's exact test with one eye per patient)",
-               " - see the Test column there")); next
+               "summary tables, if any, comes from the test named in their Test column (",
+               if (out_type == "ordinal") "a GEE on ranks clustered by patient"
+               else "a joint clustered Wald test on its level indicators",
+               ", a permutation test over patients where that GEE cannot be fitted, or the ",
+               if (out_type == "ordinal") "Wilcoxon / Kruskal-Wallis test" else "chi-squared / Fisher's exact test",
+               " with one eye per patient or with the classical table tests)")); next
     }
     preds <- predictors_clean[predictors_clean %in% names(df)]
     # a baseline variable that is also an adjustment covariate is never
@@ -1286,11 +1347,13 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
         skip_all(small, except = c(empty, names(un$out))), left_out, empty_rows)
       next
     }
-    # a per-patient variable: one row per patient, an ordinary model (R3-4)
+    # a per-patient variable: one row per patient, an ordinary model (R3-4);
+    # on a matched cohort an independence GEE with robust SE (D18, finding S1)
     if (identical(cs$unit, "patient") && outc %in% patient_level) {
-      pp <- .per_patient_model(f, df2, preds, id_col, bin, w_ind, dn(outc))
+      pp <- .per_patient_model(f, df2, preds, id_col, bin, w_ind, dn(outc), matched = ind)
       log_once(logger, sprintf(paste0("GEE sheets: '%s' is a per-patient variable - modeled on one row per ",
-                                      "patient by an ordinary %s model, never by an eye-level GEE."),
+                                      "patient by an ordinary %s model (on a matched cohort: an independence ",
+                                      "GEE with robust SE clustered by patient), never by an eye-level GEE."),
                                dn(outc), if (bin) "logistic" else "linear"))
       if (nzchar(pp$why)) {
         res_list[[outc]] <- dplyr::bind_rows(skip_all(pp$why, except = c(empty, names(un$out))),
@@ -1455,12 +1518,17 @@ build_gee_lookup <- function(gee_df, group_term) {
     }
   }
   # a model that is not the exchangeable GEE of the column is named in its
-  # cell (decision R3-4): a per-patient variable's ordinary model, or an
+  # cell (decision R3-4): a per-patient variable's ordinary model (on a
+  # matched cohort its independence GEE on one row per patient, D18), or an
   # independence refit
   mdl <- if ("Model" %in% names(rows)) as.character(rows$Model) else rep("", nrow(rows))
   mdl[is.na(mdl)] <- ""
-  tag <- ifelse(grepl(GEE_PER_PATIENT, mdl, fixed = TRUE), " [one row per patient, ordinary model]",
-                ifelse(grepl(GEE_INDEP_REFIT, mdl, fixed = TRUE), " [independence working correlation]", ""))
+  pp_row <- grepl(GEE_PER_PATIENT, mdl, fixed = TRUE)
+  pp_gee <- grepl(paste0("GEE Gaussian, ", GEE_PER_PATIENT), mdl, fixed = TRUE) |
+    grepl(paste0("GEE Binomial, ", GEE_PER_PATIENT), mdl, fixed = TRUE)
+  tag <- ifelse(pp_gee, " [one row per patient]",
+                ifelse(pp_row, " [one row per patient, ordinary model]",
+                       ifelse(grepl(GEE_INDEP_REFIT, mdl, fixed = TRUE), " [independence working correlation]", "")))
   rows <- rows %>%
     dplyr::mutate(
       # one effect style for every table (D24): "β = -9.98 (95% CI, -29.04
@@ -1774,7 +1842,7 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
     # accepted (helpers.R gee_fit_checked), else refitted with independence
     pp <- NULL; fc <- list(refit = "", why = "")
     if (identical(cs$unit, "patient") && outc %in% patient_level) {
-      pp <- .per_patient_model(fmla, df2, preds, id_col, dich, w_ind, dn(outc))
+      pp <- .per_patient_model(fmla, df2, preds, id_col, dich, w_ind, dn(outc), matched = ind)
       fit <- if (nzchar(pp$why)) NULL else pp
       n_txt <- sprintf("%d patients (%d eyes)", pp$n, n)
     } else {
@@ -1826,7 +1894,7 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
     tcr <- NULL
     fml_c <- as.formula(paste0("`", outc, "` ~ GroupLabel"))
     if (!is.null(pp)) {
-      pc <- .per_patient_model(fml_c, df2, "GroupLabel", id_col, dich, w_ind, dn(outc))
+      pc <- .per_patient_model(fml_c, df2, "GroupLabel", id_col, dich, w_ind, dn(outc), matched = ind)
       if (!nzchar(pc$why)) tcr <- pc$tidy
     } else {
       fcc <- gee_fit_checked(function(cs_) fit_gee(fml_c, df2, id_col, fam_r, use_weights, corstr = cs_),

@@ -8,7 +8,8 @@
   "patient_level_params_raw": [
     "Age_Years",
     "Sex",
-    "Smoker"
+    "Smoker",
+    "Optical_Zone_mm"
   ],
   "exclude_params_raw": [],
   "age_var": "Age_Years",
@@ -278,5 +279,5 @@
   "num_subsets": 0,
   "_title": "Two groups, full analysis",
   "_description": "Two groups with every statistical step and every figure option.",
-  "_demonstrates": "Propensity-score matching, GEE clustered on the patient, covariate-adjusted regression, the full comparative figure set with double-angle plots and the stability panel, and within-group tables analysed per patient or per eye."
+  "_demonstrates": "Propensity-score matching, GEE clustered on the patient, covariate-adjusted regression, the full comparative figure set with double-angle plots and the stability panel, and within-group tables analyzed per patient or per eye."
 }

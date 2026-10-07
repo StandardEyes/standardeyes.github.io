@@ -26,16 +26,23 @@ and settings can give different numbers than 1.0.0. A
 preset or settings file saved by 1.0.0 still loads and
 runs; a setting it does not contain takes the new default.
 Each workbook's Manifest sheet records the settings used.
-What changed, and how to get the 1.0.0 behaviour back:
+What changed, and how to get the 1.0.0 behavior back:
 
 * Tests in the tables are clustered by patient. When a
-  patient has two analysed eyes, each per-eye row of the
+  patient has two analyzed eyes, each per-eye row of the
   summary tables and the Publication Table gets its P value
   from a patient-clustered GEE test - the same P value as
-  the figure of that outcome.
+  the figure of that outcome. Where that GEE cannot be
+  fitted (a group with no events or only events, for
+  example), the table and the figure use a permutation
+  test over patients, which keeps each patient's eyes
+  together, labeled "GEE not fitted".
   Back: GEE tab, "Summary-table tests" = classical
-  (table_tests). Turning off "Cluster p-values by patient"
-  also does it.
+  (table_tests); the figures stay clustered, as in 1.0.0,
+  and the Publication Table and the figure legend files
+  say that a table and its figure can then differ.
+  Turning off "Cluster p-values by patient" makes both
+  classical.
 
 * Small-sample correction of the clustered tests: every GEE
   test and interval uses the Mancl-DeRouen corrected robust
@@ -48,10 +55,10 @@ What changed, and how to get the 1.0.0 behaviour back:
   Back: Matching tab, Distance = "propensity score,
   probability scale" (psm_distance = logit).
 
-* Visual acuity is analysed in logMAR and shown as Snellen:
+* Visual acuity is analyzed in logMAR and shown as Snellen:
   "20/20 (0.00 ± 0.05 logMAR)" - the Snellen geometric mean
   with the logMAR mean and SD - and the range in Snellen.
-  Back: Variables tab, untick "Analyse visual acuity in
+  Back: Variables tab, untick "Analyze visual acuity in
   logMAR" (do_logmar = false).
 
 * P values in journal style: .27, .003, <.001, >.99.
@@ -112,8 +119,11 @@ What changed, and how to get the 1.0.0 behaviour back:
 * GEE models of an outcome that hardly varies within a
   patient: a variable marked "per patient" is modeled on
   one row per patient by an ordinary linear or logistic
-  model on the GEE and Regression sheets, never by an
-  eye-level GEE. Any other exchangeable GEE is kept only
+  model on the GEE and Regression sheets (on a matched
+  cohort by a GEE with an independence working
+  correlation and robust SE clustered by patient, like
+  every matched model), never by an eye-level GEE. Any
+  other exchangeable GEE is kept only
   if it converged, its working correlation is below 0.95
   and one further scoring step moves no coefficient by
   more than 0.01 SE; otherwise it is refitted with an
@@ -195,6 +205,17 @@ The folder "Example Data" contains a ready-made, made-up
 dataset (Example_Refractive_Dataset.xlsx) plus a library of
 seven worked examples, so you can see a full analysis before
 touching your own data. It contains no patient information.
+Its README sheet gives the generating model, the true
+cohort effects with this file's own estimates of them
+(which scatter around the true values), and the seed.
+
+The dataset, the astigmatism validation workbook and the
+seven settings files are written by the generators in the
+"validation" folder (make_example_data.py,
+make_astig_validation_data.py, make_example_settings.py).
+With Python 3 (numpy, pandas, openpyxl),
+"python <script> --out <folder>" writes a fresh copy into
+<folder>, so you can check or extend them.
 
   1. Load  Example Data\Example_Refractive_Dataset.xlsx
   2. Click one of the "Example - ..." presets (below)
@@ -239,7 +260,7 @@ The seven examples, each showing a different capability:
 
   07_Full_figure_suite
       The full suite on three cohorts: every group on ONE
-      chart in its own colour, omnibus + vs-reference stat
+      chart in its own color, omnibus + vs-reference stat
       lines, p-values clustered by patient, and double-angle
       astigmatism plots - the presentation JCRS now
       requires - with each group's centroid, a 95% region
@@ -292,7 +313,7 @@ every feature of the app has something to act on.
                        visual-acuity notation (below)
  3. Filters .......... inclusion rules (age, follow-up,
                        first treatment...) + PRK/LASIK subsets
- 4. Matching ......... nearest-neighbour, exact, coarsened
+ 4. Matching ......... nearest-neighbor, exact, coarsened
                        exact (cem) or subclassification
                        matching, with a live matched-count
                        preview (nearest)
@@ -336,7 +357,7 @@ EVERY acuity column is written. Choose one:
 * Filters use the values exactly as written in your file.
 * Excel turns a typed 6/12 into a date: keep Snellen
   columns formatted as Text.
-* "Analyse in logMAR" is on by default for the acuity
+* "Analyze in logMAR" is on by default for the acuity
   columns you map. If your file is already in logMAR, the
   values are used as they are (never converted twice).
   Tables and figures then show the mean acuity in Snellen
@@ -377,11 +398,14 @@ crash, the next time the app starts). You get:
     pairing, in the figure formats you chose, named like
     its workbook so a later run into the same folder never
     replaces it:
-      LovePlot_<prefix>_<run>_<pairing>_<time stamp>.png
+      LovePlot_<prefix>_<run>_<pairing>_<time stamp>.<format>
+    (one file per chosen format, .tiff by default), with
+    its legend file (<same name>_legend.txt) beside it;
     for example (a run without subsets is named "All";
     with subsets the pooled run is named "Pooled" and each
     subset run by its subset name):
-      LovePlot_Ex02_Full_All_Cohort A_vs_Reference_20261004_185353.png
+      LovePlot_Ex02_Full_All_Cohort A_vs_Reference_20261004_185353.tiff
+      LovePlot_Ex02_Full_All_Cohort A_vs_Reference_20261004_185353_legend.txt
   * Figure folders: each panel as its own TIFF plus the
     combined multi-panel figure, the double-angle plots
     and the semicircle vector plots (PNG, JPEG, PDF and
@@ -421,9 +445,9 @@ crash, the next time the app starts). You get:
     Wilcox-Holladay-Wang-Koch R functions (one pair per
     plotted vector, see its README.txt; astig_whwk_files).
   * Optionally the filtered dataset as CSV: the rows that
-    are analysed (in a group, and in a subset when subsets
+    are analyzed (in a group, and in a subset when subsets
     are defined), with a GroupLabel column (and Subset)
-    leading. It holds the values as analysed, so a header
+    leading. It holds the values as analyzed, so a header
     carries a suffix where a column no longer holds what
     was recorded: acuity converted to logMAR (_logMAR; the
     recorded acuity is not repeated), acuity text read as
@@ -431,7 +455,9 @@ crash, the next time the app starts). You get:
     cylinder when the conversion is on (_minus_cyl, sphere,
     cylinder and axis of each converted set). A missing
     value is an empty cell. Matched_Data uses the same
-    headers.
+    headers. "Export filtered rows (CSV)" on the Data &
+    Groups tab writes the same rows and headers without
+    running the analysis.
 
 P values are printed in the journal style by default
 (.27, .003, <.001, >.99); "classic" keeps 0.266 / <0.001.
@@ -454,7 +480,10 @@ clustered on the patient (the approach MatchIt
 recommends), so a weighted estimate reproduces the
 weighted means and proportions shown in the table; matched
 sets are not used as clusters. Unmatched GEE keeps the
-exchangeable correlation.
+exchangeable correlation, refitted with an independence
+working correlation when the exchangeable fit is not
+accepted; per-patient variables are modeled on one row
+per patient.
 
 Small groups: a clustered model (GEE, adjusted regression,
 the figures' clustered P values) needs at least 6 usable
@@ -552,11 +581,11 @@ Two people, one shared drive
 
 
 -----------------------------------------------------------
- LICENCE
+ LICENSE
 -----------------------------------------------------------
-StandardEyes is free software under the MIT licence (see
+StandardEyes is free software under the MIT license (see
 LICENSE). The bundled Python, R packages and JavaScript
-keep their own licences: see THIRD_PARTY_NOTICES.md and
+keep their own licenses: see THIRD_PARTY_NOTICES.md and
 the "licenses" folder of the release.
 
 

@@ -372,7 +372,9 @@ def readme_rows(df, edges, exp, truth, sha):
     add("Generator", "make_astig_validation_data.py (shipped in the validation folder of the software)")
     add("Seed", str(SEED), f"numpy.random.default_rng; true PE centroids: seed {SEED_TRUTH}, {N_TRUTH:,} eyes per cohort")
     add("Software", f"Python {platform.python_version()}, numpy {np.__version__}, pandas {pd.__version__}")
-    add("SHA-256 of the data", sha, "of the 'Surgeries' table written as CSV (UTF-8, LF, no index)")
+    add("SHA-256 of the data", sha, "of the generator's 'Surgeries' table written as CSV (UTF-8, LF, no index) "
+        "before it is saved to Excel; rerun the generator to check it (a table read back from the .xlsx gives "
+        "another hash: reading changes some column types, e.g. integers with blank cells become decimals)")
     add("Size", f"{df.PatientID.nunique()} patients, {len(df)} eyes")
     add("")
     add("CONVENTION (JCRS 2025 astigmatism standard)")

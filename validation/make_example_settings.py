@@ -60,7 +60,9 @@ STABILITY_ON = {
 BASE = {
     "file_path": DATA_REL, "sheet_name": 1, "guess_max": 120000,
     "patient_id_raw": "PatientID", "eye_id_raw": "EyeID", "group_source_var": "Cohort",
-    "patient_level_params_raw": ["Age_Years", "Sex", "Smoker"], "exclude_params_raw": [],
+    # recorded once per person (the dataset's README sheet): the optical zone is
+    # patient level in the generating model, so it is analyzed per patient too
+    "patient_level_params_raw": ["Age_Years", "Sex", "Smoker", "Optical_Zone_mm"], "exclude_params_raw": [],
     "age_var": "Age_Years", "fu_var": "FollowUp_Days", "sex_var": "Sex",
     "baseline": {
         "continuous": ["Age_Years", "Preop_SEQ_D", "Preop_Sphere_D", "Preop_Cylinder_D",
@@ -176,7 +178,7 @@ EXAMPLES = [   # name, title, what it is, what it shows, settings
      "Two groups with every statistical step and every figure option.",
      "Propensity-score matching, GEE clustered on the patient, covariate-adjusted "
      "regression, the full comparative figure set with double-angle plots and the "
-     "stability panel, and within-group tables analysed per patient or per eye.",
+     "stability panel, and within-group tables analyzed per patient or per eye.",
      cfg(output_prefix="Ex02_Full", **FULL_STATS, **STABILITY_ON, **WITHIN)),
 
     ("03_Three_cohorts",

@@ -633,22 +633,38 @@ gee_exch_reject <- function(fit) {
   ""
 }
 
+# TRUE when geepack reports a fitted geeglm as converged (its error code 0).
+# A fit is only ever accepted when it converged (decision R3-4), whatever its
+# working correlation: the exchangeable fits (gee_exch_reject), their
+# independence refits, and the independence fits of matched or weighted
+# cohorts, the stacked categorical test and the weighted table test (finding
+# S5).
+gee_converged <- function(fit) {
+  if (is.null(fit)) return(FALSE)
+  err <- suppressWarnings(as.numeric(fit$geese$error))
+  length(err) > 0 && isTRUE(err[1] == 0)
+}
+
 # Fit a GEE with the working correlation `corstr`, and an exchangeable one
 # only when gee_exch_reject() accepts it: fit_fun(corstr) returns the geeglm
 # (or NULL). Returns list(fit, corstr = the working correlation of `fit`,
 # refit = why the exchangeable fit was rejected ("" when it was not), why = why
-# no fit is returned ("" when one is)).
+# no fit is returned ("" when one is)). A fit with another working correlation
+# (independence: matched or weighted cohorts) is accepted only when it
+# converged, as the refit is.
 gee_fit_checked <- function(fit_fun, corstr = "exchangeable") {
   if (!identical(corstr, "exchangeable")) {
     f <- fit_fun(corstr)
-    return(list(fit = f, corstr = corstr, refit = "", why = if (is.null(f)) "the model could not be fitted" else ""))
+    if (!gee_converged(f))
+      return(list(fit = NULL, corstr = corstr, refit = "",
+                  why = if (is.null(f)) "the model could not be fitted" else "the model did not converge"))
+    return(list(fit = f, corstr = corstr, refit = "", why = ""))
   }
   f1 <- fit_fun("exchangeable")
   why <- gee_exch_reject(f1)
   if (!nzchar(why)) return(list(fit = f1, corstr = "exchangeable", refit = "", why = ""))
   f2 <- fit_fun("independence")
-  err <- if (is.null(f2)) NA else suppressWarnings(as.numeric(f2$geese$error))[1]
-  if (is.null(f2) || !isTRUE(err == 0))
+  if (!gee_converged(f2))
     return(list(fit = NULL, corstr = "independence", refit = why,
                 why = paste0("the exchangeable fit was not accepted (", why, ") and the independence refit ",
                              if (is.null(f2)) "failed" else "did not converge")))
@@ -752,7 +768,7 @@ gee_group_p <- function(x, g, id, kind = "continuous", event = NULL, w = NULL,
   if (!is.null(why)) return(na_why(why))
   # a 0/1 outcome constant within a group has no finite estimate: a weighted
   # comparison says which group, as the matched table does; an unweighted one
-  # falls back to the classical test
+  # falls back to the permutation test over patients (cluster_perm_test)
   if (identical(kind, "proportion")) {
     s0 <- tapply(d$y, gtx, function(z) all(z == 0))
     s1 <- tapply(d$y, gtx, function(z) all(z == 1))
@@ -775,7 +791,14 @@ gee_group_p <- function(x, g, id, kind = "continuous", event = NULL, w = NULL,
            else geepack::geeglm(y ~ g, id = cid, data = d, weights = .w, family = fam,
                                 corstr = cs_)))$value, cs)
   fit <- fc$fit
-  if (is.null(fit)) return(if (nzchar(fc$refit)) na_why(fc$why) else NA_real_)
+  if (is.null(fit)) {
+    if (nzchar(fc$refit)) return(na_why(fc$why))
+    # a weighted model that did not converge has no P value, and says so (the
+    # weighted table test's reason); unweighted, the caller falls back
+    if (weighted && identical(fc$why, "the model did not converge"))
+      return(na_why("the weighted model did not converge"))
+    return(NA_real_)
+  }
   if (nzchar(fc$refit)) gee_refit_note(fc$refit)
   tag <- function(p) if (nzchar(fc$refit)) structure(p, refit = fc$refit, corstr = fc$corstr) else p
   if (isTRUE(each)) {
@@ -807,8 +830,9 @@ gee_group_p <- function(x, g, id, kind = "continuous", event = NULL, w = NULL,
 # (groups - 1) coefficients. v: the level of each eye (NA = missing); g: its
 # group; id: its patient. Returns the P value, or NA with attr "why" (the
 # guards of gee_group_p, the model counting (levels - 1) x groups
-# coefficients; gee_wald's why) or without it when the fit failed or its covariance is
-# singular (the caller falls back to the classical test, labelled).
+# coefficients; gee_wald's why) or without it when the fit failed, did not
+# converge or its covariance is singular (the caller falls back to the
+# permutation test over patients, cluster_perm_test, labelled).
 gee_categorical_p <- function(v, g, id, unit = "patient") {
   na_why <- function(why) structure(NA_real_, why = why)
   if (!requireNamespace("geepack", quietly = TRUE)) return(NA_real_)
@@ -837,7 +861,8 @@ gee_categorical_p <- function(v, g, id, unit = "patient") {
   fit <- quiet_eval(suppressWarnings(
            geepack::geeglm(f, id = cid, data = d, family = stats::gaussian(),
                            corstr = "independence")))$value
-  if (is.null(fit)) return(NA_real_)
+  # (a fit is accepted only when it converged: gee_converged)
+  if (!gee_converged(fit)) return(NA_real_)
   # the group and level:group terms, found through the model's term
   # assignment (a level name can never be mistaken for a group term)
   asg <- attr(stats::model.matrix(fit), "assign")
@@ -846,6 +871,95 @@ gee_categorical_p <- function(v, g, id, unit = "patient") {
   if (isTRUE(wt$singular)) return(structure(NA_real_, singular = TRUE))
   if (!is.finite(wt$p) && nzchar(wt$why)) return(na_why(wt$why))
   wt$p
+}
+
+# ------------------------------------------------------------
+# Permutation test over patients: THE test of a patient-clustered comparison
+# whose GEE was fitted but failed - a group whose eyes all have the event or
+# none has it (separation: no finite estimate), a level missing from a group
+# (a singular covariance), no convergence (findings S2, T1-02, A5). It keeps
+# the two eyes of a patient together, so it never counts fellow eyes as
+# independent evidence; the summary tables (analysis.R .clustered_test), the
+# figures (graphs.R p_omnibus) and the astigmatism interval tests (graphs.R
+# astig_perm_p) share it, so a table and its figure still give one P value.
+# The clusters - a patient's eyes within one group (a patient with eyes in two
+# groups is one cluster in each) - keep their eyes together; the group labels
+# are permuted across the clusters B = CLUSTER_PERM_B times with the fixed seed
+# CLUSTER_PERM_SEED (a repeated run gives the same P). Statistic, over the eyes:
+#   stat = "mean"  (a number, the ranks of an ordinal variable, a 0/1 outcome):
+#          the between-group sum of squares of the eye means,
+#          sum_g n_g (m_g - m)^2 - for a 0/1 outcome the Pearson chi-square
+#          statistic of the eye counts up to the constant p(1 - p);
+#   stat = "table" (a categorical variable): the Pearson chi-square statistic
+#          of the level x group table of eye counts.
+# P = (number of permuted statistics >= the observed one + 1) / (B + 1), so the
+# smallest P is 1 / (B + 1). y: one value per eye; g: its group; id: its
+# patient (blank ids are each their own patient). Rows with a missing value or
+# group are left out. Returns the P value, NA when there is nothing to test
+# (fewer than two groups, or no variation).
+# ------------------------------------------------------------
+CLUSTER_PERM_B <- 999L
+CLUSTER_PERM_SEED <- 20250601L
+CLUSTER_PERM_TEST <- sprintf("Permutation test over patients, %d permutations", CLUSTER_PERM_B)
+cluster_perm_p <- function(y, g, id, stat = c("mean", "table"), B = CLUSTER_PERM_B, seed = CLUSTER_PERM_SEED) {
+  stat <- match.arg(stat)
+  ok <- !is.na(y) & !is.na(g)
+  if (stat == "mean") ok <- ok & is.finite(suppressWarnings(as.numeric(y)))
+  g <- droplevels(factor(g[ok]))
+  if (nlevels(g) < 2) return(NA_real_)
+  id <- fill_missing_ids(id[ok])
+  key <- paste(as.integer(g), id, sep = "\r")
+  cl <- match(key, unique(key))
+  cg <- g[!duplicated(cl)]                        # the group of each cluster
+  sn <- rowsum(rep(1, length(cl)), cl, reorder = FALSE)[, 1]
+  if (stat == "mean") {
+    if (length(unique(as.numeric(y[ok]))) < 2) return(NA_real_)
+    sy <- rowsum(as.numeric(y[ok]), cl, reorder = FALSE)[, 1]
+    mu <- sum(sy) / sum(sn)
+    st <- function(lab) {
+      ty <- rowsum(sy, lab)[, 1]; tn <- rowsum(sn, lab)[, 1]
+      sum(tn * (ty / tn - mu)^2)
+    }
+  } else {
+    yv <- as.character(y[ok])
+    lv <- sort(unique(yv))
+    if (length(lv) < 2) return(NA_real_)
+    cm <- rowsum(vapply(lv, function(l) as.numeric(yv == l), numeric(length(yv))), cl, reorder = FALSE)
+    nl <- colSums(cm)
+    st <- function(lab) {
+      tt <- rowsum(cm, lab)
+      ex <- outer(rowSums(tt), nl) / sum(nl)
+      sum((tt - ex)^2 / ex)
+    }
+  }
+  obs <- st(cg)
+  if (!is.finite(obs)) return(NA_real_)
+  tol <- 1e-10 * max(1, abs(obs))
+  cnt <- with_local_seed(seed, sum(vapply(seq_len(B), function(b) st(sample(cg)) >= obs - tol, logical(1))))
+  (cnt + 1) / (B + 1)
+}
+
+# The permutation test over patients of one table or figure comparison, by the
+# variable's kind: "continuous" (the values), "ordinal" (their ranks over the
+# usable eyes, as the GEE on ranks), "dichotomous" / "proportion" (a 0/1 or
+# TRUE / FALSE outcome), "categorical" (two levels: the second level's 0/1
+# indicator, as the binomial GEE; more: the chi-square statistic of the level x
+# group table). Returns the P value or NA (cluster_perm_p).
+cluster_perm_test <- function(v, g, id, kind = "continuous") {
+  id <- fill_missing_ids(id)
+  if (kind %in% c("continuous", "ordinal")) {
+    y <- as_numeric_safe(v)
+    ok <- is.finite(y) & !is.na(g)
+    y <- y[ok]
+    if (identical(kind, "ordinal")) y <- rank(y)
+    return(cluster_perm_p(y, g[ok], id[ok], "mean"))
+  }
+  if (kind %in% c("dichotomous", "proportion"))
+    return(cluster_perm_p(as.numeric(if (is.logical(v)) v else as_numeric_safe(v)), g, id, "mean"))
+  vv <- as.character(v)
+  levs <- sort(unique(stats::na.omit(vv[!is.na(g)])))
+  if (length(levs) == 2) return(cluster_perm_p(ifelse(is.na(vv), NA, as.numeric(vv == levs[2])), g, id, "mean"))
+  cluster_perm_p(vv, g, id, "table")
 }
 
 # Log a message once per R session (the same notice is otherwise repeated by

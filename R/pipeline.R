@@ -1243,11 +1243,19 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
     }
 
     # the run (label + subset values) is recorded in the workbook's Manifest
-    invisible(gee_refit_take())
+    invisible(gee_refit_take()); invisible(.gee_fallback_take())
     built <- build_workbook_for_data(dat_run, cfg, res, logger, loveplot_dir = output_dir, run = run)
     # the clustered table tests whose exchangeable GEE was not accepted (R3-4)
     n_refit <- length(gee_refit_take())
     if (n_refit > 0) logger(gee_refit_log_text(n_refit, paste0("Workbook of run '", run$label, "'")))
+    # the table rows whose clustered GEE could not be fitted (findings S2, T1-02)
+    n_fb <- .gee_fallback_take()
+    if (n_fb > 0)
+      logger(sprintf(paste0("Workbook of run '%s': in %d table test(s) the patient-clustered GEE could not be fitted ",
+                            "(a group with no events or only events, no convergence, or a singular covariance) - ",
+                            "those P values come from a permutation test over patients (%d permutations), which ",
+                            "keeps each patient's eyes together; the Test column says \"GEE not fitted\" and the ",
+                            "Interpretation column gives the cause."), run$label, n_fb, CLUSTER_PERM_B))
 
     out_xlsx <- .pl_os_path(file.path(output_dir, paste0(prefix, "_", stem, "_", stamp, ".xlsx")))
     save_workbook_checked(built$wb, out_xlsx, paste0("workbook of run '", run$label, "'"))

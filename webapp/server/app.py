@@ -1237,7 +1237,7 @@ def run(req: RunReq, request: Request):
         resolver = preview.build_resolver(columns)
         if preview.subset_column_missing(cfg, resolver):
             errs.append(f"Subset column '{cfg.get('subset_col_raw')}' not found in this file. "
-                        "Re-map it or clear the subset column to analyse all rows.")
+                        "Re-map it or clear the subset column to analyze all rows.")
         grouped = _grouped_rows(analysed, cfg)
         if not errs:
             # R stops on a VA notation the values contradict, judged on the
@@ -1332,7 +1332,7 @@ def run(req: RunReq, request: Request):
                     continue
                 if ev["type"] == "done" and handle.cancelled:
                     STATE["result"] = None
-                    yield _sse({"type": "error", "message": "Analysis cancelled. Nothing from this run is shown."})
+                    yield _sse({"type": "error", "message": "Analysis canceled. Nothing from this run is shown."})
                 yield _sse(ev)
         finally:
             handle.finished = time.time()
@@ -1439,11 +1439,14 @@ def export_files(req: ExportReq):
 
 @app.post("/api/export-filtered")
 def export_filtered(req: ExportFilteredReq):
-    """Write the live-filtered dataset (standardize -> exclude -> filters ->
-    subsets) as CSV, independent of running the analysis."""
+    """Write the rows the analysis will use (standardize -> exclude ->
+    filters -> subsets -> in a group) as CSV, independent of running the
+    analysis: the rows and headers of the run's Filtered_Dataset CSV (D26),
+    GroupLabel (and Subset) first. Before a group is defined, every row
+    passing the filters and subsets (grouped = false in the answer)."""
     df = _require_df()
     try:
-        work = preview.filtered_frame(df, req.cfg or {})
+        work, grouped = preview.export_frame(df, req.cfg or {})
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"Filtering failed: {e}")
     dest = (req.dest or "").strip() or (req.cfg or {}).get("output_dir") or \
@@ -1458,7 +1461,7 @@ def export_filtered(req: ExportFilteredReq):
     except OSError as e:
         raise HTTPException(400, f"Could not write {path} ({e.strerror or e}). "
                                  "Choose a folder you can write to.")
-    return {"path": path, "rows": int(len(work)), "cols": int(work.shape[1])}
+    return {"path": path, "rows": int(len(work)), "cols": int(work.shape[1]), "grouped": bool(grouped)}
 
 
 @app.get("/api/results")

@@ -675,6 +675,72 @@ def population_truth():
 
 
 # ==================================================================================
+# The same contrasts in THIS file: sample estimates scatter around the true values
+# ==================================================================================
+def analysed_rows(df):
+    """The rows the shipped example settings analyze (make_example_settings.py):
+    first surgeries, age >= 18, the 6-month visit at 150-210 days, |preop
+    cylinder| <= 5 D. As in the app, a blank cell passes a filter rule (an eye
+    without a 6-month visit is kept, with missing outcomes)."""
+    num = lambda c: pd.to_numeric(df[c]).astype(float).to_numpy()
+    fu, age, cyl = num("FollowUp_Days"), num("Age_Years"), num("Preop_Cylinder_D")
+    keep = ((num("SurgeryNumber") == 1) & (np.isnan(age) | (age >= 18))
+            & (np.isnan(fu) | ((fu >= 150) & (fu <= 210))) & (np.isnan(cyl) | (np.abs(cyl) <= 5)))
+    return df[keep]
+
+
+def cluster_se(X, r, w, cl):
+    """Robust (sandwich) standard errors clustered by patient of the
+    estimating equation sum X'r = 0 with working weights w (OLS: w = 1;
+    logistic: w = p(1 - p))."""
+    bread = np.linalg.inv(X.T @ (X * w[:, None]))
+    _, idx = np.unique(cl, return_inverse=True)
+    S = np.zeros((idx.max() + 1, X.shape[1]))
+    np.add.at(S, idx, X * r[:, None])
+    return np.sqrt(np.diag(bread @ (S.T @ S) @ bread))
+
+
+def sample_estimates(df):
+    """The documented contrasts estimated in this file, crude and adjusted for
+    the three measured confounders (the example settings' covariates), both on
+    the eyes with the outcome and the confounders: (rows analyzed, [(label,
+    unit, contrast, true value, (crude, lo, hi), (adjusted, lo, hi), eyes,
+    patients)]). Linear or logistic models of the eyes with robust SE
+    clustered by patient; 95% CI = estimate +/- 1.96 SE."""
+    d = analysed_rows(df)
+    num = lambda c: pd.to_numeric(d[c]).astype(float).to_numpy()
+    A = (d.Cohort == "Cohort A").to_numpy(float)
+    B = (d.Cohort == "Cohort B").to_numpy(float)
+    cov = np.column_stack([num("Age_Years") - C_AGE, num("Preop_SEQ_D") - C_SEQ,
+                           (num("Preop_Pachymetry_um") - C_PACHY) / 10])
+    dry = d.DryEye_Symptoms.map({"Yes": 1.0, "No": 0.0}).astype(float).to_numpy()
+    pid = d.PatientID.astype(str).to_numpy()
+    outcomes = [("Postop SEQ (6 months)", "D (difference)", num("Postop_SEQ_D"), False,
+                 SEQ_OUT["Cohort A"], SEQ_OUT["Cohort B"]),
+                ("Postop cylinder magnitude", "D (difference)", np.abs(num("Postop_Cylinder_D")), False, 0.0, 0.0),
+                ("Postop CDVA", "logMAR (difference)", -np.log10(num("Postop_CDVA")), False, 0.0, 0.0),
+                ("Dry-eye symptoms", "odds ratio", dry, True, 2.0, 1.0)]
+    rows = []
+    for label, unit, y, logistic, true_a, true_b in outcomes:
+        ok = np.isfinite(y) & np.isfinite(cov).all(1)
+        one = np.ones(int(ok.sum()))
+        fits = []
+        for X in (np.column_stack([one, A[ok], B[ok]]), np.column_stack([one, A[ok], B[ok], cov[ok]])):
+            if logistic:
+                b = logit_fit(y[ok], X)
+                p = expit(X @ b)
+                se = cluster_se(X, y[ok] - p, p * (1 - p), pid[ok])
+            else:
+                b = ols(y[ok], X)
+                se = cluster_se(X, y[ok] - X @ b, np.ones(len(one)), pid[ok])
+            ci = [(b[j], b[j] - 1.959964 * se[j], b[j] + 1.959964 * se[j]) for j in (1, 2)]
+            fits.append([tuple(np.exp(c)) for c in ci] if logistic else ci)
+        for j, (con, t) in enumerate((("Cohort A vs Reference", true_a), ("Cohort B vs Reference", true_b))):
+            rows.append((label, unit, con, t, fits[0][j], fits[1][j], int(ok.sum()), len(set(pid[ok]))))
+    return len(d), rows
+
+
+# ==================================================================================
 # README sheet
 # ==================================================================================
 COLUMNS = [  # name, unit, description
@@ -732,7 +798,9 @@ def readme_rows(df, truth, data_sha):
     add("Seed", str(SEED), "numpy.random.default_rng; population table: seed " + str(SEED_POPULATION))
     add("Software", f"Python {platform.python_version()}, numpy {np.__version__}, pandas {pd.__version__}",
         "numpy does not guarantee identical random streams across versions")
-    add("SHA-256 of the data", data_sha, "of the 'Surgeries' table written as CSV (UTF-8, LF, no index)")
+    add("SHA-256 of the data", data_sha, "of the generator's 'Surgeries' table written as CSV (UTF-8, LF, no index) "
+        "before it is saved to Excel; rerun the generator to check it (a table read back from the .xlsx gives "
+        "another hash: reading changes some column types, e.g. integers with blank cells become decimals)")
     add("Size", f"{df.PatientID.nunique()} patients, {df.EyeID.nunique()} eyes, {len(df)} rows "
         f"({int((df.SurgeryNumber == 1).sum())} primary surgeries, {int((df.SurgeryNumber == 2).sum())} retreatments)")
     add("")
@@ -776,6 +844,34 @@ def readme_rows(df, truth, data_sha):
         add(f"True prediction-error centroid, {c}", "plus format, before rounding",
             f"{np.hypot(x, y):.3f} D @ {(np.degrees(np.arctan2(y, x)) / 2) % 180:.0f} deg (x {x:+.3f}, y {y:+.3f})",
             "identical model in every cohort: undercorrection of with-the-rule astigmatism")
+    add("")
+    n_rows, est = sample_estimates(df)
+    add(f"THIS FILE ({n_rows} rows that the example settings analyze: first surgeries, age >= 18, 6-month visit "
+        "at 150-210 days or none, |preop cylinder| <= 5 D)", "contrast", "crude / adjusted (95% CI)",
+        "linear or logistic model of the eyes with the outcome and the three confounders, robust SE clustered by "
+        "patient, 95% CI = estimate +/- 1.96 SE; adjusted = age, preop SEQ, pachymetry (the example settings' "
+        "covariates; the SEQ model is not adjusted for the target); the app's exchangeable GEE with its "
+        "small-sample correction gives slightly different values")
+    missed = []
+    for lab, unit, con, t, c, a, n_eyes, n_pat in est:
+        odds = unit == "odds ratio"
+        f = (lambda v: f"{v:.2f}") if odds else (lambda v: f"{v:+.3f}")
+        add(f"{lab} ({unit})", con, " / ".join(f"{f(e)} ({f(lo)} to {f(hi)})" for e, lo, hi in (c, a)),
+            f"true {f(t)}; {n_eyes} eyes of {n_pat} patients")
+        if not a[1] <= t <= a[2]:
+            missed.append((lab, unit, con, t, a, f))
+    if missed:
+        what = "; ".join(f"the adjusted {'OR' if u == 'odds ratio' else 'difference'} of {lab.lower()}, "
+                         f"{con}, is {f(a[0])} (95% CI, {f(a[1])} to {f(a[2])}) although its true value is "
+                         f"{f(t)}" for lab, u, con, t, a, f in missed)
+        null = all(t == (1.0 if u == "odds ratio" else 0.0) for _, u, _, t, _, _ in missed)
+        add("Sampling variation", "Sample estimates scatter around the true values. In this file " + what + (
+            ": a chance finding of the kind that about 1 in 20 contrasts without a true effect give at the 5% "
+            "level, so an adjusted model of this file reports it as statistically significant although there is "
+            "no effect." if null else ": a 95% CI misses its true value in about 1 in 20 samples."))
+    else:
+        add("Sampling variation", "Sample estimates scatter around the true values; in this file every adjusted "
+            "95% CI covers its true value.")
     add("")
     add("GENERATING MODEL", "parameter", "value", "meaning")
     P = [
@@ -872,7 +968,7 @@ def write_workbook(df, readme, path):
         ws["A1"].font = Font(bold=True, size=14)
         for row in ws.iter_rows():
             v = row[0].value
-            if isinstance(v, str) and v.isupper() or (isinstance(v, str) and v.startswith("CRUDE VERSUS")):
+            if isinstance(v, str) and v.isupper() or (isinstance(v, str) and v.startswith(("CRUDE VERSUS", "THIS FILE"))):
                 for c in row:
                     c.font = Font(bold=True)
             for c in row:
@@ -906,6 +1002,11 @@ def main():
     print("--- crude versus true (population) ---")
     for lab, unit, con, t, c, ad in truth[0]:
         print(f"  {lab:28s} {con:22s} true {t:+.3f}  crude {c:+.3f}  adjusted {ad:+.3f}  ({unit})")
+    n_rows, est = sample_estimates(df)
+    print(f"--- this file ({n_rows} analyzed rows; adjusted estimate and 95% CI) ---")
+    for lab, unit, con, t, c, ad, n_eyes, _ in est:
+        print(f"  {lab:28s} {con:22s} true {t:+.3f}  adjusted {ad[0]:+.3f} ({ad[1]:+.3f} to {ad[2]:+.3f})  "
+              f"{n_eyes} eyes  ({unit})")
     print("data SHA-256:", sha)
     print("saved:", out)
 

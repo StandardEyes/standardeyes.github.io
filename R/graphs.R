@@ -891,7 +891,9 @@ p_omnibus <- function(v, gl, glv, kind = c("continuous", "ordinal", "proportion"
   # with only events) is replaced by the permutation test over patients of the
   # tables (helpers.R cluster_perm_test, findings S2, T1-02) - it keeps each
   # patient's eyes together, never an eye-level test - labelled "(GEE not
-  # fitted)" and counted.
+  # fitted)" and counted. The few-patients caution ("robust SE can be too
+  # small") belongs to a GEE P value only, so the permutation P carries none,
+  # as in the tables (analysis.R .clustered_test).
   gee_tried <- !is.null(cid) && fellow_eyes_present(cid[keep][use])
   if (gee_tried) {
     why_c <- cluster_guard_note(cid[keep][use], g[use])
@@ -914,7 +916,6 @@ p_omnibus <- function(v, gl, glv, kind = c("continuous", "ordinal", "proportion"
     out$p <- pp
     out$test <- GR_PERM_TEST
     out$text <- p_text(pp)
-    out$few <- few_patient_groups(cid[keep][use], g[use])
     .gr_opts$n_gee_fallback <- (.gr_opts$n_gee_fallback %||% 0L) + 1L
     return(out)
   }

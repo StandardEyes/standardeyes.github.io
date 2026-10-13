@@ -1686,8 +1686,10 @@ build_gee_lookup <- function(gee_df, group_term) {
         is.na(EffectValue) ~ "not estimable",
         Effect == "OR" ~ fmt_effect("OR", EffectValue, CI_low, CI_high),
         TRUE ~ fmt_effect("beta", EffectValue, CI_low, CI_high)),
-      gee_p_label = paste0(dplyr::coalesce(fmt_p(p_shown), ""), ifelse(holm, " [Holm]", ""),
-                           ifelse(is.na(EffectValue), "", tag)))
+      # a comparison without an estimate (or without a P) reads "not
+      # estimable" in the P column too, never a bare "Cohort D: "
+      gee_p_label = ifelse(is.na(EffectValue) | !is.finite(p_shown), "not estimable",
+                           paste0(dplyr::coalesce(fmt_p(p_shown), ""), ifelse(holm, " [Holm]", ""), tag)))
   if (length(group_term) > 1 && nrow(rows) > 0) {
     rows <- rows %>%
       dplyr::mutate(.cmp = sub("^GroupLabel", "", term), .ord = match(term, group_term)) %>%

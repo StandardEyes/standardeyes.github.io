@@ -207,10 +207,26 @@ meyestro_intended_source <- function(roles, target = list(), display_names = NUL
   paste0(paste(parts, collapse = "; "), "; vertex distance 12 mm assumed")
 }
 
+# The tab of one group in an export format (fmt "mEYEstro", "AstigMATIC"):
+# "<fmt>_<group>" for the full cohort; for a matched pairing
+# "<fmt>_M<k>_<group>", k the pairing's number in the run (pairing_no), so the
+# group stays whole within Excel's 31 characters - "<fmt>_M_<group>_<pairing>"
+# was cut to "AstigMATIC_M_Cohort A_Cohort A_" (finding astig2-7). The
+# Contents sheet's full name gives the pairing: "AstigMATIC_M1_Cohort A
+# (matched pairing Cohort A_vs_Reference)". Returns the tab's name.
+export_group_tab <- function(wb, fmt, g, pairing = NULL, pairing_no = NULL) {
+  if (is.null(pairing)) return(add_or_replace_worksheet(wb, paste0(fmt, "_", g)))
+  stem <- paste0(fmt, "_M", as.integer(pairing_no %||% 1L), "_", g)
+  sh <- add_or_replace_worksheet(wb, stem)
+  assign(sh, paste0(stem, " (matched pairing ", pairing, ")"), envir = .sheet_titles)
+  sh
+}
+
 # One mEYEstro-format tab per group. pairing = NULL for the full cohort, else
-# the matched pairing label: the format and the matched marker lead the sheet
-# name ("mEYEstro_<group>", "mEYEstro_M_<group>_<pairing>") so they survive
-# Excel's 31-character truncation. Columns A-D (group, decimal acuities) are
+# the matched pairing label (pairing_no: its number in the run): the format and
+# the matched marker lead the sheet name ("mEYEstro_<group>",
+# "mEYEstro_M<k>_<group>", export_group_tab) so they survive Excel's
+# 31-character truncation. Columns A-D (group, decimal acuities) are
 # for reference; E-S are the 15 columns of the mEYEstro template in its
 # order; T (postop SEQ) is for reference. Missing roles leave a blank column
 # (logged); with fewer than 6 of the 10 roles the tabs are skipped (logged).
@@ -220,7 +236,7 @@ meyestro_intended_source <- function(roles, target = list(), display_names = NUL
 # requires, whatever the analysis data carry: a plus-cylinder row is
 # transposed in the tab only (the SEQ is unchanged by the transposition).
 make_meyestro_tabs <- function(df, wb, roles, pairing = NULL, target = list(), logger = message,
-                               display_names = NULL) {
+                               display_names = NULL, pairing_no = NULL) {
   r <- function(nm) .role_col(roles, nm)
   need_roles <- c("pre_bcva","post_ucva","post_bcva",
                   "pre_sph","pre_cyl","pre_axis","post_sph","post_cyl","post_axis","post_seq")
@@ -339,8 +355,7 @@ make_meyestro_tabs <- function(df, wb, roles, pairing = NULL, target = list(), l
       logger(sprintf("mEYEstro tab '%s': %d plus-cylinder refraction(s) written in minus-cylinder notation, as the template requires.",
                      tab_what, n_plus))
 
-    sh <- add_or_replace_worksheet(wb, if (is.null(pairing)) paste0("mEYEstro_", g)
-                                       else paste0("mEYEstro_M_", g, "_", pairing))
+    sh <- export_group_tab(wb, "mEYEstro", g, pairing, pairing_no)
     openxlsx::writeData(wb, sh, out)
     nc <- ncol(out)
     if (nc >= 1)  openxlsx::addStyle(wb, sh, gray,   1, 1:min(4, nc),   gridExpand = TRUE)
@@ -374,7 +389,8 @@ eye_codes_ambiguous <- function(x) {
   "0" %in% num
 }
 
-make_alpins_tabs <- function(df, wb, roles, pairing = NULL, logger = message, display_names = NULL) {
+make_alpins_tabs <- function(df, wb, roles, pairing = NULL, logger = message, display_names = NULL,
+                             pairing_no = NULL) {
   r <- function(nm) .role_col(roles, nm)
   need_roles <- c("eye","pre_cyl","pre_axis","post_cyl","post_axis")
   cols <- vapply(need_roles, r, character(1))
@@ -444,8 +460,7 @@ make_alpins_tabs <- function(df, wb, roles, pairing = NULL, logger = message, di
       `postoperative cylinder` = post$cyl,
       `postoperative axis` = post$axis,
       check.names = FALSE, stringsAsFactors = FALSE)
-    sh <- add_or_replace_worksheet(wb, if (is.null(pairing)) paste0("AstigMATIC_", g)
-                                       else paste0("AstigMATIC_M_", g, "_", pairing))
+    sh <- export_group_tab(wb, "AstigMATIC", g, pairing, pairing_no)
     openxlsx::writeDataTable(wb, sh, out)
   }
 }
@@ -550,8 +565,11 @@ astig_jcrs_sections <- function(cp) {
   }))
   zero <- do.call(rbind, lapply(keys, function(k) {
     z <- cp$stats[[k]]$zero
+    # a row without a P value names no test (finding T2-09): "Not tested",
+    # the reason in its Note
     data.frame(Vector = vlab(k), Cohort = z$group, Eyes = z$n, Patients = z$n_pat,
-               Test = ifelse(is.finite(z$B), paste0(z$test, sprintf(" (B = %d)", as.integer(z$B))), z$test),
+               Test = ifelse(!is.finite(z$p), "Not tested",
+                             ifelse(is.finite(z$B), paste0(z$test, sprintf(" (B = %d)", as.integer(z$B))), z$test)),
                P = pfx(z$p), `P (Holm, cohorts of this vector)` = pfx(z$p_holm),
                Note = ifelse(is.finite(z$p),
                              ifelse(if (is.null(z$floor)) FALSE else z$floor %in% TRUE,
@@ -568,7 +586,8 @@ astig_jcrs_sections <- function(cp) {
                                    paste(b$group, "vs", b$ref)),
                Measure = sub("^<= ", "≤ ", b$measure),
                Values = b$values,
-               Test = ifelse(is.finite(b$B), paste0(b$test, sprintf(" (B = %d)", as.integer(b$B))), b$test),
+               Test = ifelse(!is.finite(b$p), "Not tested",
+                             ifelse(is.finite(b$B), paste0(b$test, sprintf(" (B = %d)", as.integer(b$B))), b$test)),
                P = pfx(b$p), `P (Holm, vs reference)` = pfx(b$p_holm_ref),
                `P (Holm, family)` = pfx(b$p_holm_fam),
                Note = ifelse(is.finite(b$p), "", paste0("Not estimable - ", b$why)),
@@ -592,7 +611,7 @@ astig_jcrs_sections <- function(cp) {
                `Postop within (%)` = vapply(rows, function(r) r$post_pct, numeric(1)),
                `Improved (preop above, postop within)` = vapply(rows, function(r) r$improved, numeric(1)),
                `Worsened (preop within, postop above)` = vapply(rows, function(r) r$worsened, numeric(1)),
-               Test = vapply(rows, function(r) r$test, character(1)),
+               Test = ifelse(is.finite(p), vapply(rows, function(r) r$test, character(1)), "Not tested"),
                `Chi-squared` = vapply(rows, function(r) r$stat, numeric(1)),
                P = pfx(p), `P (Holm, intervals of this cohort)` = pfx(ph),
                Note = vapply(rows, function(r) if (nzchar(r$why)) paste0("Not estimable - ", r$why) else "",
@@ -638,7 +657,7 @@ astig_jcrs_sections <- function(cp) {
                     "'P (Holm, vs reference)' adjusts each measure across the cohorts compared with the reference (as the ",
                     "figures' 'vs' lines); the centroid-against-zero P across the cohorts of a vector; McNemar across the ",
                     "intervals of a cohort."),
-             paste0("McNemar: fewer than 25 discordant eyes - exact binomial test; otherwise the chi-square without continuity correction. ",
+             paste0("McNemar: fewer than 25 discordant eyes - exact binomial test; otherwise the chi-squared test without continuity correction. ",
                     if (cp$clustered) paste0("Clustered by patient when a patient contributes two discordant eyes: below 25 discordant ",
                                              "eyes the exact sign test on the patients' net changes, otherwise cluster-adjusted ",
                                              "(Durkalski 2003); not estimable when the discordant eyes are from 1 patient.")
@@ -737,12 +756,42 @@ matched_astig_note <- function(dat, cfg) {
          "; the weighted matched tables (Out_M_) can therefore differ.")
 }
 
+# The run-log line of a sheet's between-cohort tests whose patient-clustered
+# GEE could not be fitted (finding T2-04; the tables' line is pipeline.R's,
+# .gee_fallback_take): they ran as the permutation test over patients
+# (graphs.R astig_perm_p) or the test the Test column names, each labeled
+# "GEE not fitted" - so the log never understates how many P values did not
+# come from the stated GEE. NULL when there is none.
+astig_fallback_log_text <- function(btw, sheet_name, run_label = NULL) {
+  if (is.null(btw) || !nrow(btw)) return(NULL)
+  tst <- as.character(btw$Test); pv <- as.character(btw$P)
+  fb <- !is.na(tst) & grepl("GEE not fitted", tst, fixed = TRUE) & !is.na(pv) & nzchar(pv)
+  if (!any(fb)) return(NULL)
+  perm <- fb & grepl("permutation test over patients", tst, fixed = TRUE)
+  n_int <- sum(fb & startsWith(as.character(btw$Measure), "≤"))
+  edge <- all(grepl("0% or 100%", tst[fb], fixed = TRUE))
+  how <- c(if (any(perm)) sprintf("%s permutation test over patients (%d permutations)",
+                                  if (all(perm[fb])) "a" else paste0(sum(perm), " by a"), ASTIG_PERM_B),
+           if (any(fb & !perm)) sprintf("%d by the test the Test column names", sum(fb & !perm)))
+  sprintf(paste0("Astigmatism sheet '%s'%s: in %d between-cohort test(s)%s the patient-clustered GEE could not be ",
+                 "fitted (%s) - %s, labeled 'GEE not fitted' in the Test column."),
+          sheet_name, if (length(run_label) && !is.na(run_label[1])) paste0(" of run '", run_label[1], "'") else "",
+          sum(fb), if (n_int == sum(fb)) " of the cumulative intervals"
+                   else if (n_int > 0) sprintf(" (%d of them cumulative intervals)", n_int) else "",
+          if (edge) "a cohort at 0% or 100%"
+          else "a cohort at 0% or 100%, no convergence or a singular covariance",
+          paste(how, collapse = "; "))
+}
+
 # Write one cohort set's sheet; returns its tables (for the CSV copy), or NULL.
+# run_label: the run, named in the run-log line of the GEE fallbacks.
 make_astig_jcrs_sheet <- function(dat, wb, cfg, res, sheet_name, cohort_label, logger = message,
-                                  matched = FALSE, vectors_sheet = FALSE) {
+                                  matched = FALSE, vectors_sheet = FALSE, run_label = NULL) {
   cp <- astig_jcrs_compute(dat, cfg, res, logger, matched = matched)
   if (is.null(cp)) return(NULL)
   secs <- astig_jcrs_sections(cp)
+  fb_txt <- astig_fallback_log_text(secs$`Comparisons between cohorts`, sheet_name, run_label)
+  if (!is.null(fb_txt)) logger(fb_txt)
   note <- paste0("Astigmatism per the JCRS 2025 standard (Koch et al., Part II), ", cohort_label,
                  ": plus-cylinder format, with-the-rule astigmatism on the left of the double-angle plots. ",
                  "Cohorts: ", paste(cp$glv, collapse = ", "), " (reference: ", cp$glv[1], "). ",
@@ -864,15 +913,31 @@ GEE_SHEET_HEADERS <- c(term = "Term", estimate = "Estimate", std.error = "SE", s
                        p.value = "P (exact)", Effect = "Effect type", EffectValue = "Effect",
                        CI_low = "95% CI lower", CI_high = "95% CI upper")
 GEE_SHEET_NUM3 <- c("Estimate", "SE", "Statistic (t or z)", "Effect", "95% CI lower", "95% CI upper")
+# the heading of an unmatched GEE sheet with more than two groups (finding T2-11)
+GEE_SHEET_HOLM_TITLE <- paste0("GEE results (P = unadjusted, per term; the summary tables print the comparisons ",
+                               "with the reference Holm-adjusted, tagged [Holm], as there are more than two groups)")
 gee_sheet_frame <- function(d, ref = NULL) {
   d <- as.data.frame(d, check.names = FALSE, stringsAsFactors = FALSE)
   if (!nrow(d)) return(d)
   if ("term" %in% names(d)) {
     t <- as.character(d$term)
+    # the intercept (finding T2-01): of a model of the group alone, the
+    # reference group's mean / odds ("Effect type" "Mean (Reference)"); of a
+    # model with covariates, the value at every covariate = 0, with no effect
+    # printed (analysis.R .intercept_effect, the same rule)
+    ic <- which(!is.na(t) & t == "(Intercept)")
+    oc <- if ("Outcome" %in% names(d)) as.character(d$Outcome) else rep("", nrow(d))
+    at0 <- vapply(ic, function(i) .model_has_covariates(t[!is.na(oc) & oc == oc[i]]), logical(1))
     grp <- !is.na(t) & startsWith(t, "GroupLabel")
     t[grp] <- paste0(substring(t[grp], 11), " vs ", if (length(ref)) ref[1] else "the reference group")
-    t[!is.na(t) & t == "(Intercept)"] <- if (length(ref)) paste0("Intercept (", ref[1], ")") else "Intercept"
+    t[ic] <- paste0("Intercept", if (length(ref)) paste0(" (", ref[1], ifelse(at0, ", all covariates at 0", ""), ")")
+                                 else ifelse(at0, " (all covariates at 0)", ""))
     d$term <- t
+    if ("Effect" %in% names(d) && length(ref) && length(ic)) {
+      e <- as.character(d$Effect[ic])
+      k <- !is.na(e) & e %in% c("Mean", "Odds")
+      d$Effect[ic[k]] <- paste0(e[k], " (", ref[1], ")")
+    }
   }
   if ("p.value" %in% names(d)) {
     pn <- suppressWarnings(as.numeric(d$p.value))
@@ -1062,8 +1127,14 @@ describe_within_group <- function(df_g, params_clean, type_map, dicho_pref_clean
 # hold, from the kinds of cell present (finding T1-10): means, medians, counts,
 # acuity cells, the per-cell eye counts, the effects and their reference, the
 # Holm tag, the adjusted model's eyes and, in a weighted (matched) table, the
-# weighted counts and the effective sample size.
-pub_values_note <- function(out) {
+# weighted counts and the effective sample size. va_decimal: the acuity
+# columns analyzed as decimal acuity (va_info()$as_decimal, by their headers),
+# so the units of an acuity β are named as analyzed (finding T2-02): logMAR
+# only when the table has a logMAR acuity cell.
+# The [Holm] line, also in the Manifest's Multiplicity row (finding T2-03).
+HOLM_CI_NOTE <- paste0("[Holm] = P Holm-adjusted across the comparisons with the reference group; the 95% CIs are ",
+                       "not adjusted, so a CI can exclude the null while the adjusted P is .05 or more.")
+pub_values_note <- function(out, va_decimal = character(0)) {
   cells <- unlist(lapply(out[, setdiff(names(out), "Parameter"), drop = FALSE], as.character))
   cells <- cells[!is.na(cells) & nzchar(cells)]
   hdr <- names(out)
@@ -1080,14 +1151,27 @@ pub_values_note <- function(out) {
   if (has("\\(n = [0-9]+\\)"))
     out_txt <- c(out_txt, "(n = ...) in a cell: the eyes (patients, for a row marked [per patient]) with data, where fewer than the column's n.")
   ref <- sub(" \\(n = .*$", "", hdr[grepl(" \\(n = ", hdr)][1])
-  if (has("β = "))
+  if (has("β = ")) {
+    # the units of an acuity row's β, as analyzed: logMAR (a logMAR acuity
+    # cell, the Visual acuity line's test) and / or decimal acuity (a row of
+    # an acuity column analyzed as decimal)
+    va_lm <- has("logMAR\\); range ")
+    prm <- if ("Parameter" %in% names(out)) sub(" \\[per patient\\]$", "", as.character(out$Parameter)) else character(0)
+    va_dec <- length(va_decimal) > 0 && any(prm %in% va_decimal)
+    va_txt <- if (va_lm && va_dec) " (logMAR for the acuity rows shown in Snellen, decimal acuity - higher = better - for the others)"
+              else if (va_lm) " (logMAR for acuity)"
+              else if (va_dec) " (decimal acuity for visual acuity, higher = better)"
+              else ""
     out_txt <- c(out_txt, paste0("β = difference from ", if (!is.na(ref)) ref else "the reference group",
-                                 " in the variable's units (logMAR for acuity), with its 95% CI."))
+                                 " in the variable's units", va_txt, ", with its 95% CI."))
+  }
   if (has("OR = "))
     out_txt <- c(out_txt, paste0("OR = odds ratio of the level named in the row vs ",
                                  if (!is.na(ref)) ref else "the reference group", ", with its 95% CI."))
+  # (the CIs are not adjusted, finding T2-03: said so, as a CI that excludes
+  # the null beside an adjusted P of .05 or more is no contradiction)
   if (has("\\[Holm\\]"))
-    out_txt <- c(out_txt, "[Holm] = Holm-adjusted across the comparisons with the reference group.")
+    out_txt <- c(out_txt, HOLM_CI_NOTE)
   if (any(grepl("Adjusted model n", hdr, fixed = TRUE)))
     out_txt <- c(out_txt, "Adjusted model n (eyes): the complete-case eyes of the adjusted model.")
   if (any(grepl("ESS = ", hdr, fixed = TRUE)) || has("^[0-9]+\\.[0-9]+/[0-9]+\\.[0-9]+ \\("))
@@ -1099,12 +1183,15 @@ pub_values_note <- function(out) {
 # tests_note: an optional footnote line under "Tests behind the P values",
 # printed when the table has a classical (eye-level) test - the statement that
 # the classical table tests can differ from the figures' clustered P values
-# (table_tests = "classical", finding S3).
-make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_note = NULL) {
+# (table_tests = "classical", finding S3). va_decimal: the acuity columns
+# analyzed as decimal acuity, by their headers (pub_values_note).
+make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_note = NULL,
+                                   va_decimal = character(0)) {
   drop_cols <- c("Test", "Practical Interpretation")
   secs <- list()
   ne_why <- character(0); ne_row <- character(0)
   t_lab <- character(0); t_row <- character(0)
+  c_txt <- character(0); c_row <- character(0)
   for (nm in names(sections)) {
     d <- sections[[nm]]
     if (is.null(d) || nrow(d) == 0) next
@@ -1118,6 +1205,15 @@ make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_
       as.character(d[["Practical Interpretation"]]) else rep(NA_character_, nrow(d))
     ne <- grepl("^Not estimable", interp)
     ne[is.na(ne)] <- FALSE
+    # the few-patients caution of a row's P value or GEE column (D19, finding
+    # S2-3): the Interpretation column is not in this sheet, so a footnote
+    # names it with the rows it applies to
+    ci <- which(!ne & !is.na(interp) & grepl("Caution: ", interp, fixed = TRUE))
+    if (length(ci)) {
+      c_txt <- c(c_txt, sub("^.*?Caution: ([^.]*)\\..*$", "\\1", interp[ci], perl = TRUE))
+      c_row <- c(c_row, if (!is.null(rv)) rv[ci] else if ("Parameter" %in% names(d)) d$Parameter[ci]
+                        else rep(nm, length(ci)))
+    }
     # the test of every row that prints a P value
     if (all(c("Test", "p_value") %in% names(d))) {
       pv <- as.character(d$p_value); tl <- as.character(d$Test)
@@ -1194,7 +1290,7 @@ make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_
   }
   # what the cells hold (finding T1-10; the JCRS table rules): built from the
   # kinds of cell the table actually has
-  vals <- pub_values_note(out)
+  vals <- pub_values_note(out, va_decimal)
   if (length(vals)) foot <- c(foot, if (length(foot)) "", vals)
   if (length(t_lab)) {
     # one line per test, in order of first appearance (decision D12)
@@ -1205,6 +1301,14 @@ make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_
               }, character(1), USE.NAMES = FALSE))
     if (length(tests_note) && nzchar(tests_note[1]) && any(!grepl("GEE|Weighted|ermutation", t_lab)))
       foot <- c(foot, tests_note[1])
+  }
+  if (length(c_txt)) {
+    # one line per caution, with its rows (finding S2-3)
+    foot <- c(foot, if (length(foot)) "", "Caution - few patients in a group of a clustered comparison:",
+              vapply(unique(c_txt), function(ct) {
+                rr <- unique(c_row[c_txt == ct])
+                paste0("- ", ct, ": ", paste(rr, collapse = "; "), ".")
+              }, character(1), USE.NAMES = FALSE))
   }
   if (length(foot))
     openxlsx::writeData(wb, sn, foot, startRow = top + nrow(out) + 2, startCol = 1)
@@ -1358,9 +1462,9 @@ psm_settings_table <- function(psm, reference_group, patient_id_raw = NULL, pair
   has_scale <- exists("psm_score_scale", mode = "function")
   if (!("distance" %in% nu)) {
     sc <- if (has_scale) psm_score_scale(psm$distance) else NA_character_
-    # in words, MatchIt's name kept in brackets (T1-08)
-    rows[[length(rows) + 1]] <- c("Distance", if (!is.na(sc)) paste0("propensity score, ", sc, " (",
-                                                                      fmt_setting(psm$distance), ")")
+    # in words, MatchIt's setting kept in brackets (T1-08, T2-06): "propensity
+    # score, logit scale (MatchIt link linear.logit)"
+    rows[[length(rows) + 1]] <- c("Distance", if (!is.na(sc)) psm_distance_text(psm$distance)
                                               else fmt_setting(psm$distance))
     if (!is.na(sc)) rows[[length(rows) + 1]] <- c("Propensity score scale", sc)
   }
@@ -1412,7 +1516,10 @@ psm_settings_text <- function(psm) {
     else paste0(cal, if (cal != "none" && isTRUE(as.logical(one(psm$std_caliper, "TRUE"))))
                        " (SD of the propensity score)" else "")
   parts <- c(method_txt,
-    if (!("distance" %in% nu)) paste("distance", one(psm$distance, "linear.logit")),
+    # in words (T2-06): "distance: propensity score, logit scale (MatchIt link linear.logit)"
+    if (!("distance" %in% nu)) paste0("distance: ", if (exists("psm_distance_text", mode = "function"))
+                                                      psm_distance_text(one(psm$distance, "linear.logit"))
+                                                    else one(psm$distance, "linear.logit")),
     if (!("ratio" %in% nu))    paste("ratio", one(psm$ratio, "1")),
     if (!("replace" %in% nu))  paste("replacement", if (isTRUE(as.logical(one(psm$replace, "FALSE")))) "on" else "off"),
     if (!("caliper" %in% nu))  paste0("caliper ", cal_txt),
@@ -1562,8 +1669,12 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
   init <- make_initial_summary(dat, res$patient_id_clean, res$age_clean, res$fu_clean, res$sex_clean,
                                logger = logger)
   qc <- dat %>% dplyr::count(!!rlang::sym(res$group_source_clean), GroupLabel, name = "N") %>%
-    dplyr::arrange(dplyr::desc(N)) %>%
-    dplyr::rename(Group_Source_Value = !!rlang::sym(res$group_source_clean))
+    dplyr::arrange(dplyr::desc(N))
+  # headers in words, the source column as typed in the file (finding T2-06)
+  qc <- as.data.frame(qc, check.names = FALSE, stringsAsFactors = FALSE)
+  names(qc)[1:2] <- c(paste0("Value in ", dn(res$group_source_clean)), "Group")
+  ov_groups <- as.data.frame(init$groups, check.names = FALSE, stringsAsFactors = FALSE)
+  names(ov_groups)[names(ov_groups) == "GroupLabel"] <- "Group"
   vi <- va_info(dat, cfg, res)
   va_notes <- c(
     if (length(vi$in_logmar))
@@ -1577,7 +1688,7 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
     `Notes` = if (length(va_notes)) data.frame(Note = va_notes, stringsAsFactors = FALSE) else NULL,
     `Initial Summary` = init$initial,
     `Sex (per patient)` = init$gender,
-    `Groups` = init$groups,
+    `Groups` = ov_groups,
     `QC - group assignment by source value` = qc))
 
   # the table tests (decision D12): patient-clustered wherever a patient has
@@ -1702,7 +1813,8 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
     make_publication_table(wb, "Publication Table",
       list(`Baseline characteristics`      = baseline_tbl,
            `Preoperative / intraoperative` = preop_tbl,
-           `Outcomes`                      = outcome_tbl), tests_note = tests_note)
+           `Outcomes`                      = outcome_tbl), tests_note = tests_note,
+      va_decimal = dn(vi$as_decimal))
 
   if (isTRUE(cfg$make_meyestro))
     optional_tab("mEYEstro tabs", make_meyestro_tabs(dat, wb, res$roles, pairing = NULL,
@@ -1718,13 +1830,18 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
   if (astig_on)
     optional_tab("Astigmatism (JCRS 2025) sheet", {
       tb <- make_astig_jcrs_sheet(dat, wb, cfg, res, "Astigmatism (JCRS 2025)", "all analyzed eyes",
-                                  logger = logger, vectors_sheet = TRUE)
+                                  logger = logger, vectors_sheet = TRUE, run_label = run$label)
       if (!is.null(tb)) astig_tables[["All analyzed eyes"]] <- tb
     })
 
   # --- Unmatched GEE sheets (models fitted above) ---
+  # with more than two groups the heading says which P is which (finding
+  # T2-11): the sheet's P per term are unadjusted, the summary tables' Holm-
+  # adjusted
+  gee_title <- if (length(glevels) > 2) GEE_SHEET_HOLM_TITLE else "GEE results"
   gee_sheet <- function(g, name)
-    write_stacked_tables(wb, name, list(`GEE results` = g), note = gee_skip_note(g), model_ref = glevels[1])
+    write_stacked_tables(wb, name, stats::setNames(list(g), gee_title), note = gee_skip_note(g),
+                         model_ref = glevels[1])
   if (!is.null(gee_un$main)) {
     gee_sheet(gee_un$main$b, "GEE_Main_Unmatched_Base")
     gee_sheet(gee_un$main$p, "GEE_Main_Unmatched_Preop")
@@ -1756,9 +1873,12 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
       c(paste0("Adjusted regression - ", cohort_label, " (covariates: ", reg_covs_txt, "; ",
                gee_se_label(1), "; working correlation: ",
                if (startsWith(cohort_label, "matched")) "independence"
-               else "exchangeable unless the Model column names another",
+               # (that block has no Model column: the full models' names it, T2-11)
+               else "exchangeable unless the Model column of the full models below names another",
                "; crude columns: the group alone, fitted on the same eyes)"),
-        "Full models (every term)")), note = note, model_ref = ref_of(rr))
+        if (length(rr$pub) && REG_HOLM_P %in% names(rr$pub))
+          "Full models (every term; P unadjusted per term - the Holm-adjusted comparisons are in the 'P (Holm)' column above)"
+        else "Full models (every term)")), note = note, model_ref = ref_of(rr))
   }
   reg_write <- function(data, sheet, cohort_label, use_w = FALSE, matched = FALSE) {
     rr <- run_regression_models(data, res$outcome_params_clean, res$outcome_type_map,
@@ -2029,20 +2149,27 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
         make_publication_table(wb, paste0("Pub_M_", lab),
           list(`Baseline characteristics`      = b_m,
                `Preoperative / intraoperative` = p_m,
-               `Outcomes`                      = o_m), note = w_note, tests_note = tests_note)
+               `Outcomes`                      = o_m), note = w_note, tests_note = tests_note,
+          va_decimal = dn(vi$as_decimal))
 
+      # the pairing's number names its export tabs ("AstigMATIC_M1_<group>")
+      pair_no <- match(lab, vapply(pairings, function(q) as.character(q$label)[1], character(1)))
       if (isTRUE(cfg$make_meyestro))
         optional_tab("mEYEstro tabs", make_meyestro_tabs(md, wb, res$roles, pairing = lab,
                                                          target = res$astig_target %||% list(),
-                                                         logger = logger, display_names = dmap))
+                                                         logger = logger, display_names = dmap,
+                                                         pairing_no = pair_no))
       if (isTRUE(cfg$make_alpins))
         optional_tab("AstigMATIC tabs", make_alpins_tabs(md, wb, res$roles, pairing = lab, logger = logger,
-                                                         display_names = dmap))
+                                                         display_names = dmap, pairing_no = pair_no))
       if (astig_on)
         optional_tab("Astigmatism (JCRS 2025) sheet", {
+          # in text the pairing reads "Cohort A vs Reference"; the underscore
+          # form stays in the sheet name only (finding T2-06)
           tb <- make_astig_jcrs_sheet(md, wb, cfg, res, paste0("Astig_M_", lab),
-                                      paste0("matched cohort ", lab), logger = logger, matched = TRUE)
-          if (!is.null(tb)) astig_tables[[paste0("Matched ", lab)]] <- tb
+                                      paste0("matched cohort ", gsub("_vs_", " vs ", lab, fixed = TRUE)),
+                                      logger = logger, matched = TRUE, run_label = run$label)
+          if (!is.null(tb)) astig_tables[[paste0("Matched ", gsub("_vs_", " vs ", lab, fixed = TRUE))]] <- tb
         })
 
       md$Pairing <- lab
@@ -2107,9 +2234,12 @@ describe_sheet <- function(nm) {
     c("^Baseline & Preop",    "Baseline and preoperative tables, with within-group sections."),
     c("^Outcome Summary$",    "Outcome comparisons (GEE / adjusted columns merged in when requested)."),
     c("^Publication Table$",  "Manuscript-ready stacked table."),
-    c("^mEYEstro_M_",         paste("mEYEstro-format export of one group of a matched pairing (matched rows, unweighted):", mey)),
+    # (a matched pairing's tabs, export_group_tab: "<fmt>_M<k>_<group> (matched pairing <pairing>)")
+    c("^mEYEstro_M[0-9]+_.* \\(matched pairing .*\\)$",
+                              paste("mEYEstro-format export of one group of a matched pairing (matched rows, unweighted):", mey)),
     c("^mEYEstro_",           paste("mEYEstro-format export of one group (all rows):", mey)),
-    c("^AstigMATIC_M_",       paste("AstigMATIC input for one group of a matched pairing (matched rows, unweighted):", ast)),
+    c("^AstigMATIC_M[0-9]+_.* \\(matched pairing .*\\)$",
+                              paste("AstigMATIC input for one group of a matched pairing (matched rows, unweighted):", ast)),
     c("^AstigMATIC_",         paste("AstigMATIC input for one group (all rows):", ast)),
     c("^Astigmatism \\(JCRS 2025\\)$", paste("Astigmatism per the JCRS 2025 standard (all analyzed eyes; a CSV copy is written beside the workbook),", jcrs)),
     c("^Astigmatism vectors$", paste0("Per eye: the astigmatism vectors PE, SIA, PRE, POST and the Alpins TIA and DV - ",
@@ -2495,7 +2625,8 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
                                        "regression 'P (Holm)' and 'Crude P (Holm), same eyes'; figure 'vs ",
                                        "reference' lines, from the same GEE of all groups as the GEE column ",
                                        "when the figure's test is a GEE); omnibus P ",
-                                       "values and single comparisons unadjusted")),
+                                       "values and single comparisons unadjusted; the 95% CIs are not adjusted, so ",
+                                       "a CI can exclude the null while the adjusted P is .05 or more")),
       if (matching_on) c("Matched analyses", matched_analysis_note()),
       c("GEE stage",            gee_stage),
       c("GEE adjustment covariates", gee_adj_txt),
@@ -2528,7 +2659,7 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
       if (!stacked && exists("gr_figure_settings", mode = "function"))
         c("Figures",            gr_figure_settings_text(gr_figure_settings(cfg))),
       if (!stacked)
-        c("Figure p-values",    if (!isTRUE(cfg$cluster_by_patient %||% TRUE)) "eyes treated as independent"
+        c("Figure P values",    if (!isTRUE(cfg$cluster_by_patient %||% TRUE)) "eyes treated as independent"
                                 else if (!fig_clustered)
                                   "eyes treated as independent (clustering requested, but no patient ID column is mapped)"
                                 else paste0("clustered by patient (GEE, exchangeable working correlation - ",

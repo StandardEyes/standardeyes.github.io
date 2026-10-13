@@ -1684,15 +1684,24 @@ function builder(){
       // aliases the engine reads as the same setting
       if(s.astig_region==="depth") s.astig_region="polygon";
       if(s.p_style==="jcrs") s.p_style="ama";
-      // the WHWK input files switch is read as the server reads it: blank = the
-      // default (on), "true" / "false" (yes / no, on / off) text and 1 / 0 the
-      // switch; any other value is kept, so the run's check names it
-      { const wf=s.astig_whwk_files;
-        if(typeof wf==="string"){
-          const v=wf.trim().toLowerCase();
-          if(!v) s.astig_whwk_files=true;
-          else if(["true","false","1","0","yes","no","on","off"].includes(v)) s.astig_whwk_files=["true","1","yes","on"].includes(v);
-        } else if(wf===0||wf===1) s.astig_whwk_files=wf===1; }
+      // the on/off settings are read as the server reads them (config_schema
+      // SWITCHES): blank = the default, "true" / "false" (yes / no, on / off)
+      // text and 1 / 0 the switch; any other value is kept, so the run's check
+      // names it - never a "false" that a checkbox and the summary show as on
+      { const d0=defaultState();
+        for(const k of ["do_matching","psm_replace","psm_std_caliper","run_main_gee","run_adjusted_gee",
+                        "use_matching_weights_in_gee","add_gee_columns","do_standardize_minus_cyl","do_logmar",
+                        "make_meyestro","make_alpins","make_pub_table","export_filtered_csv","make_graphs",
+                        "stability_figs","stability_include_preop","astig_panels","double_angle_figs",
+                        "semicircle_figs","astig_sheet","astig_whwk_files","astig_jcrs_standard",
+                        "cluster_by_patient","do_regression"]){
+          const sw=s[k];
+          if(typeof sw==="string"){
+            const v=sw.trim().toLowerCase();
+            if(!v) s[k]=d0[k];
+            else if(["true","false","1","0","yes","no","on","off"].includes(v)) s[k]=["true","1","yes","on"].includes(v);
+          } else if(sw===0||sw===1) s[k]=sw===1;
+        } }
       // logMAR list (D16): a list the config chose is kept as it is - also an
       // empty one saved with the switch on by v1.0.0, which converted nothing;
       // a config without a list, or one that was following the roles
@@ -1700,7 +1709,7 @@ function builder(){
       const lmc=c.logmar_cols_raw;
       s.logmar_cols_raw = Array.isArray(lmc) ? lmc.map(String) : [];
       this._logmarUser = Array.isArray(lmc) && (c.logmar_cols_user===true ||
-        (c.logmar_cols_user===undefined && (lmc.length>0 || c.do_logmar!==false)));
+        (c.logmar_cols_user===undefined && (lmc.length>0 || s.do_logmar!==false)));
       // figure width: blank (null / missing) = each figure's own size; a value is
       // kept as given so the server's check names one that is not a width
       s.figure_width_cm = (c.figure_width_cm===undefined||c.figure_width_cm===null) ? "" : String(c.figure_width_cm).trim();
@@ -2107,7 +2116,7 @@ function builder(){
                  both:"depth-based convex polygon and normal ellipse"}[s.astig_region] || s.astig_region;
       const cr={bootstrap:"bootstrap convex polygon (as in the WHWK functions)", hotelling:"Hotelling T² ellipse"}[s.astig_centroid_region] || s.astig_centroid_region;
       const unit=(s.cluster_by_patient && pid) ? "patients" : "eyes";
-      const tm={robust:"robust (centroid vs 0 as in the WHWK functions; between cohorts trimmed; bootstrap of "+unit+")",
+      const tm={robust:"robust (centroid vs 0 as in the WHWK functions; between cohorts trimmed (untrimmed where not defined); bootstrap of "+unit+")",
                 gee:"clustered GEE Wald", classic:"classic (eyes independent)"}[s.astig_test_method] || s.astig_test_method;
       out.push(["Astigmatism", "region of the eyes: "+reg+"; centroid CI: "+cr+"; tests: "+tm+
         "; JCRS 2025 sheet "+(s.astig_sheet ? "on" : "off")+

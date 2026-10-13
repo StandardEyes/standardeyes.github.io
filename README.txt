@@ -35,8 +35,17 @@ What changed, and how to get the 1.0.0 behavior back:
   the figure of that outcome. Where that GEE cannot be
   fitted (a group with no events or only events, for
   example), the table and the figure use a permutation
-  test over patients, which keeps each patient's eyes
-  together, labeled "GEE not fitted".
+  test over patients (9999 permutations, fixed seed),
+  which keeps each patient's eyes together - the eyes of
+  a patient with eyes in two groups exchange their labels
+  within the patient, so a contralateral pairing is kept -
+  labeled "GEE not fitted". A GEE P value from a group of
+  2-9 patients carries a caution (Interpretation column,
+  a Publication Table footnote). Matched tables use the
+  independence GEE of the matched analyses: a per-patient
+  row on one row per patient, and with unequal weights a
+  categorical row with more than two levels by a weighted
+  Wald test on its level indicators.
   Back: GEE tab, "Summary-table tests" = classical
   (table_tests); the figures stay clustered, as in 1.0.0,
   and the Publication Table and the figure legend files
@@ -61,7 +70,8 @@ What changed, and how to get the 1.0.0 behavior back:
   Back: Variables tab, untick "Analyze visual acuity in
   logMAR" (do_logmar = false).
 
-* P values in journal style: .27, .003, <.001, >.99.
+* P values in journal style: .27, .003, <.001, >.99; an
+  exact half is rounded up (.065 is printed .07).
   Back: GEE tab, "P value style" = classic (p_style).
 
 * Journal-style figures: white, no frames, section bands,
@@ -81,12 +91,17 @@ What changed, and how to get the 1.0.0 behavior back:
   convex polygon and the centroid's 95% confidence region
   the bootstrap convex polygon of the centroid, both built
   as in the WHWK functions (the journal's reference tool).
+  In a cohort of up to about 180 eyes the depth rule often
+  removes no eye; the polygon is then the convex hull of
+  all eyes, and the sheet and the legend file say so.
   Each centroid is tested against zero by the bootstrap
   projection-distance test of the same functions (with
   999 resamples P = .001 is its floor). The robust tests
   resample patients; their 20% trimming and winsorizing
   follow the standard order-statistic definitions
-  (Wilcox).
+  (Wilcox). Where the trimmed statistic is not defined
+  (common with quarter-diopter data) the same bootstrap
+  test runs untrimmed and is labeled so.
   Back: the plus-cylinder vectors and the plot set have no
   switch (1.0.0 mishandled the cylinder sign). On the
   Special outputs tab, "95% region of the eyes" = normal,
@@ -382,9 +397,11 @@ included; presets you save appear beside them.
 -----------------------------------------------------------
  OUTPUT
 -----------------------------------------------------------
-Results are held inside the app first so you can preview
-them. Nothing is written to your output folder until you
-choose to save. Until then a temporary copy is kept in
+RUN & SAVE (the default) writes every result straight into
+the output folder. With "Preview only" ticked, the results
+are held inside the app so you can look at them first, and
+nothing is written to your output folder until you choose
+to save. Until then a temporary copy is kept in
 webapp\.runs inside this folder; it is deleted when the
 next run starts or when you close the app (or, after a
 crash, the next time the app starts). You get:
@@ -427,7 +444,9 @@ crash, the next time the app starts). You get:
     fit a panel at that size are listed in the legend file.
     A combined figure taller than a page (23 cm) is written
     as pages (_p1, _p2 ...), each with its own legend file,
-    the panel letters continuing. EPS is vector, but
+    the panel letters continuing: at 17.77 cm the six-panel
+    set is one page with up to four cohorts and two with
+    five or more. EPS is vector, but
     PostScript has no
     transparency: the semi-transparent points and regions
     inside it are embedded as images at 1200 dpi (or the
@@ -454,10 +473,14 @@ crash, the next time the app starts). You get:
     decimal (_decimal), and refraction transposed to minus
     cylinder when the conversion is on (_minus_cyl, sphere,
     cylinder and axis of each converted set). A missing
-    value is an empty cell. Matched_Data uses the same
-    headers. "Export filtered rows (CSV)" on the Data &
-    Groups tab writes the same rows and headers without
-    running the analysis.
+    value is an empty cell. Matched_Data (the matched-only
+    workbook) uses the same headers, with GroupLabel and
+    MatchIt's own columns at the end: distance (the
+    propensity score, on the scale the Manifest names),
+    weights (the matching weight) and subclass (the
+    matched set), then Pairing. "Export filtered rows
+    (CSV)" on the Data & Groups tab writes the same rows
+    and headers without running the analysis.
 
 P values are printed in the journal style by default
 (.27, .003, <.001, >.99); "classic" keeps 0.266 / <0.001.

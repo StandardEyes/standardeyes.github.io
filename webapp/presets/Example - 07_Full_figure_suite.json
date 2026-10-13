@@ -9,7 +9,8 @@
     "Age_Years",
     "Sex",
     "Smoker",
-    "Optical_Zone_mm"
+    "Optical_Zone_mm",
+    "Surgeon"
   ],
   "exclude_params_raw": [],
   "age_var": "Age_Years",

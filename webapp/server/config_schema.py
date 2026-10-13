@@ -168,7 +168,8 @@ DEFAULTS: dict[str, Any] = {
     # astigmatism tests (decision D7, R3-2): "robust" = the centroid against
     # zero by the bootstrap projection-distance test of the WHWK functions, and
     # between cohorts trimmed Hotelling T2 / trimmed means calibrated by a
-    # bootstrap resampling patients within each cohort; "gee" = clustered GEE
+    # bootstrap resampling patients within each cohort (untrimmed where the
+    # trimmed statistic is not defined, R2-5); "gee" = clustered GEE
     # Wald; "classic" = one-sample Hotelling / Hotelling-MANOVA / Welch, eyes
     # independent
     "astig_test_method": "robust",
@@ -232,6 +233,38 @@ VA_ROLES = ("pre_ucva", "pre_bcva", "post_ucva", "post_bcva")
 ASTIG_REGIONS = ("polygon", "depth", "normal", "both")
 ASTIG_CENTROID_REGIONS = ("bootstrap", "hotelling")
 ASTIG_TEST_METHODS = ("robust", "gee", "classic")
+# the on/off settings the engine reads as logicals, with the name the interface
+# gives each (decision D28; normalize_cfg / validate_cfg). Not here: the legacy
+# subset_pooled (preview.subset_mode reads it as R does) and the GUI-only
+# std_triples_user / logmar_cols_user, which the engine ignores
+SWITCHES = {
+    "do_matching": "Enable matching",
+    "psm_replace": "Matching with replacement",
+    "psm_std_caliper": "Standardized caliper",
+    "run_main_gee": "Main GEE",
+    "run_adjusted_gee": "Adjusted GEE",
+    "use_matching_weights_in_gee": "Use matching weights in matched GEE",
+    "add_gee_columns": "GEE columns in the summary tables",
+    "do_standardize_minus_cyl": "Convert plus-cylinder to minus-cylinder",
+    "do_logmar": "Analyze visual acuity in logMAR",
+    "stability_figs": "Stability over time",
+    "stability_include_preop": "Start the stability curve at the preoperative refraction",
+    "make_meyestro": "mEYEstro tabs",
+    "make_alpins": "Alpins / AstigMATIC tabs",
+    "make_pub_table": "Publication Table",
+    "make_graphs": "Figures",
+    "astig_panels": "Astigmatism panels",
+    "double_angle_figs": "Double-angle plots",
+    "semicircle_figs": "Semicircle plots",
+    "astig_sheet": "Astigmatism sheet",
+    "astig_whwk_files": "WHWK input files",
+    "astig_jcrs_standard": "JCRS 2025 astigmatism standard",
+    "cluster_by_patient": "Cluster p-values by patient",
+    "do_regression": "Adjusted regression",
+    "export_filtered_csv": "Export filtered CSV",
+}
+_ON_TEXT = ("true", "1", "yes", "on")
+_OFF_TEXT = ("false", "0", "no", "off")
 
 
 def figure_width_cm(cfg: dict) -> Any:
@@ -272,6 +305,20 @@ def safe_filename(x: Any, max_chars: int = 100, fallback: str = "StandardEyes") 
 
 def _blank(v: Any) -> bool:
     return v is None or (isinstance(v, str) and v.strip() == "")
+
+
+def _switch(out: dict, key: str) -> None:
+    """An on/off setting as the engine needs it (true / false): blank or
+    missing = its default; "true" / "false" text (yes / no, on / off, 1 / 0, in
+    any case) and the numbers 1 / 0 are read as the switch. Any other value is
+    left as given, so validate_cfg names it (R would read it as off unseen)."""
+    v = out.get(key)
+    if _blank(v):
+        out[key] = DEFAULTS[key]
+    elif isinstance(v, str) and v.strip().lower() in _ON_TEXT + _OFF_TEXT:
+        out[key] = v.strip().lower() in _ON_TEXT
+    elif isinstance(v, (int, float)) and not isinstance(v, bool) and v in (0, 1):
+        out[key] = bool(v)
 
 
 # MatchIt methods that run with the R packages bundled in runtime/Rlib (each
@@ -441,15 +488,12 @@ def normalize_cfg(cfg: dict, file_path: str, sheet: Any = None) -> dict:
     # astigmatism choices (D5-D7): absent or blank = the v1.1.0 defaults
     for k in ("astig_region", "astig_centroid_region", "astig_test_method"):
         out[k] = _choice(out, k)
-    # the WHWK input files (R3-3): a settings file without the key - or with a
-    # blank value - gets the default (on); "true" / "false" text is read as such
-    wf = out.get("astig_whwk_files")
-    if wf is None or (isinstance(wf, str) and not wf.strip()):
-        out["astig_whwk_files"] = True
-    elif isinstance(wf, str) and wf.strip().lower() in ("true", "false", "1", "0", "yes", "no", "on", "off"):
-        out["astig_whwk_files"] = wf.strip().lower() in ("true", "1", "yes", "on")
-    elif isinstance(wf, (int, float)) and not isinstance(wf, bool) and wf in (0, 1):
-        out["astig_whwk_files"] = bool(wf)
+    # the on/off settings - the WHWK input files (R3-3), the astigmatism sheets
+    # (D8) and every other switch: a settings file without the key - or with a
+    # blank value - gets the default; "true" / "false" text and 1 / 0 are read
+    # as such (R's isTRUE() would read the text "true" as off)
+    for k in SWITCHES:
+        _switch(out, k)
     # logMAR for the mapped acuity columns when the settings name no list
     # (D16; the same rule as R/pipeline.R va_columns)
     if "logmar_cols_raw" not in (cfg or {}) and out.get("do_logmar"):
@@ -704,7 +748,9 @@ def validate_cfg(cfg: dict, columns: list | None = None, data: Any = None) -> li
                     "(no frames, bands or shading; legend text in a file) or annotated (the v1.0.0 look).")
     fw = figure_width_cm(cfg)
     if fw is not None and not (isinstance(fw, float) and math.isfinite(fw) and 0 < fw <= FIGURE_WIDTH_MAX_CM):
-        errs.append(f"Figure width '{cfg.get('figure_width_cm')}' must be a width in cm (above 0, at most "
+        # the width as typed (0, -3, 61), not its decimal form (0.0, -3.0, 61.0)
+        shown = (str(int(fw)) if fw.is_integer() else repr(fw)) if isinstance(fw, float) else str(fw)
+        errs.append(f"Figure width '{shown}' must be a width in cm (above 0, at most "
                     f"{FIGURE_WIDTH_MAX_CM}), or blank for each figure's own size - the journal column "
                     "widths are " + ", ".join(f"{w:g}" for w in JOURNAL_WIDTHS_CM) + " cm.")
     if _P_STYLE_ALIASES.get(_choice(cfg, "p_style"), _choice(cfg, "p_style")) not in P_STYLES:
@@ -717,8 +763,11 @@ def validate_cfg(cfg: dict, columns: list | None = None, data: Any = None) -> li
         errs.append(f"Centroid confidence region '{cfg.get('astig_centroid_region')}' is not supported - use "
                     "bootstrap (bootstrap convex polygon of the centroid, as in the WHWK functions) or "
                     "hotelling (T² ellipse).")
-    if not isinstance(cfg.get("astig_whwk_files", True), bool):
-        errs.append(f"WHWK input files '{cfg.get('astig_whwk_files')}' must be on or off (true / false).")
+    # an on/off setting that normalize_cfg could not read as a switch
+    for k, label in SWITCHES.items():
+        v = cfg.get(k)
+        if not _blank(v) and not isinstance(v, bool):
+            errs.append(f"{label} '{v}' must be on or off (true / false).")
     if _choice(cfg, "astig_test_method") not in ASTIG_TEST_METHODS:
         errs.append(f"Astigmatism test method '{cfg.get('astig_test_method')}' is not supported - use robust, "
                     "gee or classic.")

@@ -901,19 +901,34 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
       logger(sprintf("Astigmatism setting %s = '%s' is not known (use %s) - %s is used.", k,
                      as.character(unlist(cfg[[k]]))[1], paste(okv, collapse = ", "), okv[1]))
   }
-  # the WHWK input files (decision R3-3): absent or blank = on; true / false
-  # also as text; anything else is named and the default used
-  wf <- cfg$astig_whwk_files
-  if (!is.null(wf) && !(is.logical(wf) && length(wf) == 1 && !is.na(wf))) {
-    v <- tolower(trimws(as.character(unlist(wf))[1]))
-    cfg$astig_whwk_files <- if (length(v) && !is.na(v) && v %in% c("true", "1", "yes", "on")) TRUE
-      else if (length(v) && !is.na(v) && v %in% c("false", "0", "no", "off")) FALSE
-      else {
-        if (length(v) && !is.na(v) && nzchar(v))
-          logger(sprintf("Astigmatism setting astig_whwk_files = '%s' is not known (use true or false) - true is used.",
-                         as.character(unlist(wf))[1]))
-        TRUE
-      }
+  # the on/off settings - the WHWK input files (decision R3-3), the astigmatism
+  # sheets (D8) and every other switch (the defaults of webapp/server
+  # config_schema.py): true / false also as text or 1 / 0 (a bare isTRUE() would
+  # read the text "true" as off); blank = the default; anything else is named
+  # and the default used. A switch the settings do not give is left to its
+  # reader, as before
+  switch_defaults <- c(do_matching = TRUE, psm_replace = FALSE, psm_std_caliper = TRUE, run_main_gee = TRUE,
+                       run_adjusted_gee = FALSE, use_matching_weights_in_gee = TRUE, add_gee_columns = TRUE,
+                       do_standardize_minus_cyl = TRUE, do_logmar = TRUE, stability_figs = FALSE,
+                       stability_include_preop = TRUE, make_meyestro = TRUE, make_alpins = TRUE,
+                       make_pub_table = TRUE, make_graphs = TRUE, astig_panels = TRUE, double_angle_figs = TRUE,
+                       semicircle_figs = TRUE, astig_sheet = TRUE, astig_whwk_files = TRUE,
+                       astig_jcrs_standard = TRUE, cluster_by_patient = TRUE, do_regression = TRUE,
+                       export_filtered_csv = TRUE)
+  for (k in names(switch_defaults)) {
+    wf <- cfg[[k]]
+    if (!is.null(wf) && !(is.logical(wf) && length(wf) == 1 && !is.na(wf))) {
+      v <- tolower(trimws(as.character(unlist(wf))[1]))
+      cfg[[k]] <- if (length(v) && !is.na(v) && v %in% c("true", "1", "yes", "on")) TRUE
+        else if (length(v) && !is.na(v) && v %in% c("false", "0", "no", "off")) FALSE
+        else {
+          if (length(v) && !is.na(v) && nzchar(v))
+            logger(sprintf("%s %s = '%s' is not known (use true or false) - %s is used.",
+                           if (startsWith(k, "astig_")) "Astigmatism setting" else "Setting", k,
+                           as.character(unlist(wf))[1], tolower(switch_defaults[[k]])))
+          switch_defaults[[k]]
+        }
+    }
   }
   # the figure style, width, resolution and formats, read once here so an
   # unknown value is named at the start of every run - with or without
@@ -1253,9 +1268,9 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
     if (n_fb > 0)
       logger(sprintf(paste0("Workbook of run '%s': in %d table test(s) the patient-clustered GEE could not be fitted ",
                             "(a group with no events or only events, no convergence, or a singular covariance) - ",
-                            "those P values come from a permutation test over patients (%d permutations), which ",
-                            "keeps each patient's eyes together; the Test column says \"GEE not fitted\" and the ",
-                            "Interpretation column gives the cause."), run$label, n_fb, CLUSTER_PERM_B))
+                            "those P values come from a permutation test over patients (%d permutations; %s); ",
+                            "the Test column says \"GEE not fitted\" and the ",
+                            "Interpretation column gives the cause."), run$label, n_fb, CLUSTER_PERM_B, CLUSTER_PERM_UNITS))
 
     out_xlsx <- .pl_os_path(file.path(output_dir, paste0(prefix, "_", stem, "_", stamp, ".xlsx")))
     save_workbook_checked(built$wb, out_xlsx, paste0("workbook of run '", run$label, "'"))
@@ -1309,6 +1324,13 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
       wbm <- openxlsx::createWorkbook(creator = WORKBOOK_CREATOR)   # never the user name (D25)
       md_sheet <- add_or_replace_worksheet(wbm, "Matched_Data")
       openxlsx::writeDataTable(wbm, md_sheet, mo)
+      # three decimals for the propensity score, the matching weight and the
+      # acuity converted to logMAR (finding T2-07); the cells keep full precision
+      n3 <- which((names(mo) %in% c("distance", "weights") | endsWith(names(mo), "_logMAR")) &
+                    vapply(mo, is.numeric, logical(1)))
+      if (length(n3) && nrow(mo))
+        openxlsx::addStyle(wbm, md_sheet, openxlsx::createStyle(numFmt = "0.000"), rows = 1 + seq_len(nrow(mo)),
+                           cols = n3, gridExpand = TRUE, stack = TRUE)
       # built$matched_only stacks the pairings (a reference eye matched twice
       # is in it twice): the Manifest counts it per pairing and as distinct eyes
       add_contents_and_manifest(wbm, built$matched_only, cfg, res, logger, run = run,

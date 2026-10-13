@@ -831,14 +831,22 @@ gee_group_p <- function(x, g, id, kind = "continuous", event = NULL, w = NULL,
 # group; id: its patient. Returns the P value, or NA with attr "why" (the
 # guards of gee_group_p, the model counting (levels - 1) x groups
 # coefficients; gee_wald's why) or without it when the fit failed, did not
-# converge or its covariance is singular (the caller falls back to the
-# permutation test over patients, cluster_perm_test, labelled).
-gee_categorical_p <- function(v, g, id, unit = "patient") {
+# converge or its covariance is singular (attr "singular"; unweighted, the
+# caller falls back to the permutation test over patients, cluster_perm_test,
+# labelled). w: optional matching weights, one per eye (a matched cohort with
+# unequal weights, finding S2-4): eyes with a missing or non-positive weight
+# are left out, as in the weighted tables, and each eye's stacked records carry
+# its weight - the weighted independence GEE of the matched tables' other rows
+# (analysis.R .weighted_wald), with the same convergence and singularity checks.
+gee_categorical_p <- function(v, g, id, unit = "patient", w = NULL) {
   na_why <- function(why) structure(NA_real_, why = why)
   if (!requireNamespace("geepack", quietly = TRUE)) return(NA_real_)
   glv <- if (is.factor(g)) levels(g) else unique(as.character(g[!is.na(g)]))
   vv <- as.character(v)
   ok <- !is.na(vv) & !is.na(g)
+  wt <- if (is.null(w)) rep(1, length(vv)) else suppressWarnings(as.numeric(w))
+  if (!is.null(w)) ok <- ok & is.finite(wt) & wt > 0
+  wt <- wt[ok]
   vv <- vv[ok]
   gg <- droplevels(factor(as.character(g[ok]), levels = glv))
   idk <- fill_missing_ids(id)[ok]
@@ -854,13 +862,15 @@ gee_categorical_p <- function(v, g, id, unit = "patient") {
   if (!is.null(why)) return(na_why(why))
   cid <- as.integer(factor(idk))
   d <- do.call(rbind, lapply(levs[-1], function(l)
-    data.frame(ind = as.numeric(vv == l), lev = l, g = gg, cid = cid, stringsAsFactors = FALSE)))
+    data.frame(ind = as.numeric(vv == l), lev = l, g = gg, cid = cid, .w = wt, stringsAsFactors = FALSE)))
   d$lev <- factor(d$lev, levels = levs[-1])
   d <- d[order(d$cid), , drop = FALSE]
   f <- if (length(levs) > 2) ind ~ lev * g else ind ~ g
   fit <- quiet_eval(suppressWarnings(
-           geepack::geeglm(f, id = cid, data = d, family = stats::gaussian(),
-                           corstr = "independence")))$value
+           if (is.null(w)) geepack::geeglm(f, id = cid, data = d, family = stats::gaussian(),
+                                           corstr = "independence")
+           else geepack::geeglm(f, id = cid, data = d, weights = .w, family = stats::gaussian(),
+                                corstr = "independence")))$value
   # (a fit is accepted only when it converged: gee_converged)
   if (!gee_converged(fit)) return(NA_real_)
   # the group and level:group terms, found through the model's term
@@ -882,10 +892,18 @@ gee_categorical_p <- function(v, g, id, unit = "patient") {
 # independent evidence; the summary tables (analysis.R .clustered_test), the
 # figures (graphs.R p_omnibus) and the astigmatism interval tests (graphs.R
 # astig_perm_p) share it, so a table and its figure still give one P value.
-# The clusters - a patient's eyes within one group (a patient with eyes in two
-# groups is one cluster in each) - keep their eyes together; the group labels
-# are permuted across the clusters B = CLUSTER_PERM_B times with the fixed seed
-# CLUSTER_PERM_SEED (a repeated run gives the same P). Statistic, over the eyes:
+# A patient whose eyes all lie in one group is one cluster, and the group
+# labels are permuted across those clusters. A patient with eyes in two or more
+# groups (a contralateral design: PRK in one eye, LASIK in the other) keeps
+# that pairing (finding S2-6): the labels of its eyes are exchanged within the
+# patient, so each such patient still has its eyes in the same groups, in
+# random order. Under the null hypothesis both moves leave the distribution of
+# the data unchanged, so the test stays exact; with no such patient it is the
+# plain permutation of the clusters. B = CLUSTER_PERM_B permutations (9999,
+# finding S2-5: the Monte Carlo SE of a P near .005 is then about .0007), with
+# the fixed seed CLUSTER_PERM_SEED (a repeated run gives the same P). The
+# statistic is computed from cluster sums (rowsum), so 9999 permutations take
+# well under a second. Statistic, over the eyes:
 #   stat = "mean"  (a number, the ranks of an ordinal variable, a 0/1 outcome):
 #          the between-group sum of squares of the eye means,
 #          sum_g n_g (m_g - m)^2 - for a 0/1 outcome the Pearson chi-square
@@ -898,9 +916,12 @@ gee_categorical_p <- function(v, g, id, unit = "patient") {
 # group are left out. Returns the P value, NA when there is nothing to test
 # (fewer than two groups, or no variation).
 # ------------------------------------------------------------
-CLUSTER_PERM_B <- 999L
+CLUSTER_PERM_B <- 9999L
 CLUSTER_PERM_SEED <- 20250601L
 CLUSTER_PERM_TEST <- sprintf("Permutation test over patients, %d permutations", CLUSTER_PERM_B)
+# what is permuted, in the words of the notes, legend files and run log
+CLUSTER_PERM_UNITS <- paste0("each patient's eyes kept together; the eyes of a patient with eyes in two groups ",
+                             "exchanged within the patient")
 cluster_perm_p <- function(y, g, id, stat = c("mean", "table"), B = CLUSTER_PERM_B, seed = CLUSTER_PERM_SEED) {
   stat <- match.arg(stat)
   ok <- !is.na(y) & !is.na(g)
@@ -908,9 +929,30 @@ cluster_perm_p <- function(y, g, id, stat = c("mean", "table"), B = CLUSTER_PERM
   g <- droplevels(factor(g[ok]))
   if (nlevels(g) < 2) return(NA_real_)
   id <- fill_missing_ids(id[ok])
-  key <- paste(as.integer(g), id, sep = "\r")
+  # the patients with eyes in more than one group: each of their eyes is a
+  # unit of its own (its label is exchanged within the patient); every other
+  # patient's eyes are one unit
+  n_grp <- tapply(as.integer(g), id, function(z) length(unique(z)))
+  mixed <- unname(n_grp[id] > 1)
+  key <- ifelse(mixed, paste0("eye\r", seq_along(id)), paste(as.integer(g), id, sep = "\r"))
   cl <- match(key, unique(key))
-  cg <- g[!duplicated(cl)]                        # the group of each cluster
+  first <- !duplicated(cl)
+  cg <- g[first]                                  # the group of each unit
+  # one permutation of the labels: across the whole-patient units; within the
+  # patient for the eyes of a patient in two groups (their units in patient
+  # order, shuffled within each patient by order(patient, runif))
+  mx <- which(mixed[first])
+  perm <- if (!length(mx)) function() sample(cg) else {
+    mp <- id[first][mx]
+    o <- order(mp); mx <- mx[o]; mp <- mp[o]
+    whole <- which(!mixed[first])
+    function() {
+      lab <- cg
+      if (length(whole) > 1) lab[whole] <- cg[whole][sample.int(length(whole))]
+      lab[mx] <- cg[mx][order(mp, stats::runif(length(mx)))]
+      lab
+    }
+  }
   sn <- rowsum(rep(1, length(cl)), cl, reorder = FALSE)[, 1]
   if (stat == "mean") {
     if (length(unique(as.numeric(y[ok]))) < 2) return(NA_real_)
@@ -935,7 +977,7 @@ cluster_perm_p <- function(y, g, id, stat = c("mean", "table"), B = CLUSTER_PERM
   obs <- st(cg)
   if (!is.finite(obs)) return(NA_real_)
   tol <- 1e-10 * max(1, abs(obs))
-  cnt <- with_local_seed(seed, sum(vapply(seq_len(B), function(b) st(sample(cg)) >= obs - tol, logical(1))))
+  cnt <- with_local_seed(seed, sum(vapply(seq_len(B), function(b) st(perm()) >= obs - tol, logical(1))))
   (cnt + 1) / (B + 1)
 }
 
@@ -1178,7 +1220,8 @@ safe_colname <- function(x, max_chars = 60) {
 #   "ama" (default, the JCRS / AMA style): two decimals; three when P < .01;
 #         more when fewer would round a value below .05 up to ".05" (so the
 #         printed value never sits on the wrong side of .05); no leading zero;
-#         "<.001" and ">.99" - never 0 or 1. Test vector (reporting.md C01):
+#         "<.001" and ">.99" - never 0 or 1; an exact half is rounded up
+#         (.065 -> .07, .0025 -> .003). Test vector (reporting.md C01):
 #         4e-5 .0049 .0123 .0498 .051 .5118 .996 1 ->
 #         <.001 .005 .01 .0498 .05 .51 >.99 >.99
 #   "classic": the v1.0.0 formats - three decimals with a leading zero in the
@@ -1212,19 +1255,27 @@ p_style_text <- function(style = p_style()) {
   if (identical(style, "classic"))
     "classic - three decimals with a leading zero in the tables, four on the figures (as v1.0.0)"
   else paste0("ama - two decimals, three below .01 (more only where needed to stay below .05), ",
-              "no leading zero, <.001 and >.99")
+              "an exact half rounded up, no leading zero, <.001 and >.99")
 }
+
+# p with d decimals, an exact decimal half rounded UP (.065 -> "0.07"). A
+# bootstrap or permutation P is a multiple of 1/1000, so one in ten printed
+# with two decimals sits on a half: R's sprintf on Windows rounds most of
+# those down (.065 -> "0.06", .645 -> "0.64") and round() follows the binary
+# value, so the printed P depended on the C library (finding astig2-4). The
+# 1e-9 takes a half stored a hair below its decimal value as the half.
+.p_round_txt <- function(p, d) sprintf(paste0("%.", d, "f"), floor(p * 10^d + 0.5 + 1e-9) / 10^d)
 
 # one P in the "ama" style (p finite)
 .fmt_p_ama1 <- function(p) {
   if (p < 0.001) return("<.001")
   if (p > 0.99) return(">.99")
   d <- if (p < 0.01) 3L else 2L
-  s <- sprintf(paste0("%.", d, "f"), p)
+  s <- .p_round_txt(p, d)
   # a value below .05 is never printed as ".05" (or ".050"): add a decimal
   while (p < 0.05 && as.numeric(s) >= 0.05 && d < 10L) {
     d <- d + 1L
-    s <- sprintf(paste0("%.", d, "f"), p)
+    s <- .p_round_txt(p, d)
   }
   sub("^0", "", s)
 }
@@ -1314,16 +1365,27 @@ fmt_pct <- function(num, den) {
   ifelse(is.finite(den) & den > 0, paste0(fmt_fix(100 * num / den, 1), "%"), "n/a")
 }
 # A median [IQR] cell: whole numbers when all three are whole (an ordinal
-# score of 1-5), otherwise two decimals for all three.
-fmt_quartiles <- function(q) {
+# score of 1-5), otherwise two decimals for all three. d: the decimals chosen
+# once for a whole table row (quartile_digits; finding T2-08), so the cells of
+# one row never mix "4 [4–5]" and "4.50 [4.00–5.00]"; NULL decides per cell.
+fmt_quartiles <- function(q, d = NULL) {
   q <- suppressWarnings(as.numeric(q))
-  d <- if (all(is.finite(q)) && all(abs(q - round(q)) < 1e-9)) 0 else 2
+  if (is.null(d)) d <- quartile_digits(q)
   paste0(fmt_fix(q[1], d), " [", fmt_fix(q[2], d), "–", fmt_fix(q[3], d), "]")
+}
+# 0 when every value given (the medians and quartiles of all the groups of a
+# row) is a whole number, otherwise 2
+quartile_digits <- function(q) {
+  q <- suppressWarnings(as.numeric(q))
+  if (all(is.finite(q)) && all(abs(q - round(q)) < 1e-9)) 0 else 2
 }
 
 # One effect style for every table (decision D24):
 #   "β = -9.98 (95% CI, -29.04 to 9.08)"   kind "beta" (linear models)
 #   "OR = 3.02 (95% CI, 1.21 to 7.57)"     kind "OR"   (logistic models)
+# and, for the intercept of a model of the group alone (finding T2-01), the
+# reference group's "Mean = 181.60 (95% CI, ...)" (kind "mean") or
+# "Odds = 0.14 (95% CI, ...)" (kind "odds");
 # without an interval (lo / hi missing) only the estimate is given. digits: one
 # number, or one per row (effect_digits).
 fmt_effect <- function(kind, est, lo = NA_real_, hi = NA_real_, digits = 2) {
@@ -1332,7 +1394,8 @@ fmt_effect <- function(kind, est, lo = NA_real_, hi = NA_real_, digits = 2) {
     kind <- rep_len(kind, n); est <- rep_len(est, n); lo <- rep_len(lo, n); hi <- rep_len(hi, n)
     return(vapply(seq_len(n), function(i) fmt_effect(kind[i], est[i], lo[i], hi[i], digits[i]), character(1)))
   }
-  sym <- ifelse(toupper(kind) == "OR", "OR", "β")
+  sym <- ifelse(toupper(kind) == "OR", "OR",
+                ifelse(tolower(kind) == "odds", "Odds", ifelse(tolower(kind) == "mean", "Mean", "β")))
   ci <- ifelse(is.finite(lo) & is.finite(hi),
                paste0(" (95% CI, ", fmt_fix(lo, digits), " to ", fmt_fix(hi, digits), ")"), "")
   paste0(sym, " = ", fmt_fix(est, digits), ci)
@@ -1840,7 +1903,9 @@ few_patient_groups <- function(id, g, unit = "patient") {
 # standard errors can be too small with few eyes".
 # Every caution handed out is recorded for the run log (few_patients_flush),
 # with the output that carries it (`source`): "tables" (the Note column of the
-# GEE / regression sheets), "figures" (a figure's clustered or weighted GEE P)
+# GEE / regression sheets), "summary" (a clustered or weighted GEE P of the
+# summary tables, in their Interpretation column and a Publication Table
+# footnote; finding S2-3), "figures" (a figure's clustered or weighted GEE P)
 # or "bootstrap" (the robust centroid test). By default: "bootstrap" when
 # bootstrap = TRUE, "figures" for the short form, "tables" otherwise.
 few_patients_caution <- function(id, g, short = FALSE, unit = "patient", source = NULL) {
@@ -1895,19 +1960,25 @@ few_patients_flush <- function(logger = NULL, where = "") {
   per <- if (identical(units, "eye")) "eyes per group (each eye is its own cluster when no patient ID is in scope)"
          else if (identical(units, "patient")) "patients per group"
          else "patients (or eyes, where each eye is its own cluster) per group"
-  se <- if (all(c("tables", "figures") %in% src)) "GEE, adjusted-regression and clustered figure P values"
-        else if ("tables" %in% src) "GEE and adjusted-regression P values"
-        else if ("figures" %in% src) "clustered figure P values"
+  # "a, b and c"
+  and_list <- function(x) if (length(x) > 1) paste0(paste(x[-length(x)], collapse = ", "), " and ", x[length(x)]) else x
+  # the outputs whose P values carry the caution: the GEE / regression sheets,
+  # the summary tables' clustered or weighted GEE tests (finding S2-3) and the
+  # figures
+  kinds <- c(if ("tables" %in% src) c("GEE", "adjusted-regression"), if ("summary" %in% src) "summary-table",
+             if ("figures" %in% src) "clustered figure")
+  se <- if (length(kinds)) paste0(and_list(kinds), " P values")
   outs <- c(if (length(se)) paste0(se, " (robust standard errors)"),
             if ("bootstrap" %in% src) "the bootstrap P value of the robust centroid test")
   if (!length(outs)) outs <- "P values with robust standard errors"
   places <- c(if ("tables" %in% src) "in the Note column of the GEE / regression sheets",
+              if ("summary" %in% src) "in the Interpretation column of the summary tables (a Publication Table footnote)",
               if (any(c("figures", "bootstrap") %in% src)) "under the figure's P values")
   if (!length(places)) places <- "next to those P values"
   logger(sprintf(paste0("WARNING%s: %s in a clustered comparison - %s can be too small with fewer ",
                         "than %d %s. Those results carry a caution %s."),
                  where, paste(what, collapse = ", "), paste(outs, collapse = " and "),
-                 GEE_FEW_PATIENTS, per, paste(places, collapse = " and ")))
+                 GEE_FEW_PATIENTS, per, and_list(places)))
   invisible(TRUE)
 }
 

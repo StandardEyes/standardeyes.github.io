@@ -9,7 +9,8 @@
     "Age_Years",
     "Sex",
     "Smoker",
-    "Optical_Zone_mm"
+    "Optical_Zone_mm",
+    "Surgeon"
   ],
   "exclude_params_raw": [],
   "age_var": "Age_Years",
@@ -270,5 +271,5 @@
   "num_subsets": 0,
   "_title": "Three groups",
   "_description": "Three groups: an overall test for each variable, and one adjusted estimate for each group against the reference group.",
-  "_demonstrates": "Shows Welch ANOVA and the Kruskal\u2013Wallis test, the adjusted effect of each comparison, and all three groups on every figure in their own colors."
+  "_demonstrates": "Shows the omnibus tests with three groups (patient-clustered GEE; Welch ANOVA or the chi-squared test for the per-patient variables), each group against the reference Holm-adjusted, the adjusted effect of each comparison, and all three groups on every figure in their own colors."
 }

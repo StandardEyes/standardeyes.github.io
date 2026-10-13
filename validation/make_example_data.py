@@ -846,18 +846,31 @@ def readme_rows(df, truth, data_sha):
             "identical model in every cohort: undercorrection of with-the-rule astigmatism")
     add("")
     n_rows, est = sample_estimates(df)
-    add(f"THIS FILE ({n_rows} rows that the example settings analyze: first surgeries, age >= 18, 6-month visit "
-        "at 150-210 days or none, |preop cylinder| <= 5 D)", "contrast", "crude / adjusted (95% CI)",
+    # the rows each example analyzes (make_example_settings.py): the three-group
+    # examples 03 and 07 all of them, the two-group examples the Reference and
+    # Cohort A rows, example 04 (PRK and LASIK subsets) those treated by PRK or LASIK
+    d = analysed_rows(df)
+    two = d.Cohort.isin(["Reference", "Cohort A"])
+    n_two, n_sub = int(two.sum()), int((two & d.Procedure.isin(["PRK", "LASIK"])).sum())
+    add(f"THIS FILE (the {n_rows} rows that pass the example settings' filters: first surgeries, age >= 18, "
+        f"6-month visit at 150-210 days or none, |preop cylinder| <= 5 D; examples 03 and 07 analyze all of them, "
+        f"the two-group examples only the {n_two} Reference and Cohort A rows, example 04 the {n_sub} of those "
+        "treated by PRK or LASIK)", "contrast", "crude / adjusted (95% CI)",
         "linear or logistic model of the eyes with the outcome and the three confounders, robust SE clustered by "
         "patient, 95% CI = estimate +/- 1.96 SE; adjusted = age, preop SEQ, pachymetry (the example settings' "
         "covariates; the SEQ model is not adjusted for the target); the app's exchangeable GEE with its "
-        "small-sample correction gives slightly different values")
+        "small-sample correction gives slightly different values; the cylinder rows use the magnitude |cyl|: "
+        "the app analyzes Postop_Cylinder_D as the signed minus cylinder (the example settings convert the "
+        "preoperative and postoperative refractions to minus cylinder), so its β for the same contrast has the "
+        "opposite sign")
     missed = []
     for lab, unit, con, t, c, a, n_eyes, n_pat in est:
         odds = unit == "odds ratio"
         f = (lambda v: f"{v:.2f}") if odds else (lambda v: f"{v:+.3f}")
         add(f"{lab} ({unit})", con, " / ".join(f"{f(e)} ({f(lo)} to {f(hi)})" for e, lo, hi in (c, a)),
-            f"true {f(t)}; {n_eyes} eyes of {n_pat} patients")
+            f"true {f(t)}; {n_eyes} eyes of {n_pat} patients" +
+            ("; magnitude |cyl| (the app's signed minus cylinder gives the opposite sign)"
+             if lab.startswith("Postop cylinder") else ""))
         if not a[1] <= t <= a[2]:
             missed.append((lab, unit, con, t, a, f))
     if missed:

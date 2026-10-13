@@ -60,9 +60,11 @@ STABILITY_ON = {
 BASE = {
     "file_path": DATA_REL, "sheet_name": 1, "guess_max": 120000,
     "patient_id_raw": "PatientID", "eye_id_raw": "EyeID", "group_source_var": "Cohort",
-    # recorded once per person (the dataset's README sheet): the optical zone is
-    # patient level in the generating model, so it is analyzed per patient too
-    "patient_level_params_raw": ["Age_Years", "Sex", "Smoker", "Optical_Zone_mm"], "exclude_params_raw": [],
+    # recorded once per person (the dataset's README sheet): the optical zone and
+    # the surgeon are patient level in the generating model, so they are analyzed
+    # per patient too (the surgeon by the chi-squared test of one row per patient)
+    "patient_level_params_raw": ["Age_Years", "Sex", "Smoker", "Optical_Zone_mm", "Surgeon"],
+    "exclude_params_raw": [],
     "age_var": "Age_Years", "fu_var": "FollowUp_Days", "sex_var": "Sex",
     "baseline": {
         "continuous": ["Age_Years", "Preop_SEQ_D", "Preop_Sphere_D", "Preop_Cylinder_D",
@@ -185,8 +187,10 @@ EXAMPLES = [   # name, title, what it is, what it shows, settings
      "Three groups",
      "Three groups: an overall test for each variable, and one adjusted estimate for "
      "each group against the reference group.",
-     "Shows Welch ANOVA and the Kruskal–Wallis test, the adjusted effect of each "
-     "comparison, and all three groups on every figure in their own colors.",
+     "Shows the omnibus tests with three groups (patient-clustered GEE; Welch ANOVA or the "
+     "chi-squared test for the per-patient variables), each group against the reference "
+     "Holm-adjusted, the adjusted effect of each comparison, and all three groups on every "
+     "figure in their own colors.",
      cfg(output_prefix="Ex03_Three", **THREE, **FULL_STATS, **STABILITY_ON)),
 
     ("04_Subsets_PRK_LASIK",

@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Download for Windows — StandardEyes</title>
-<meta name="description" content="Download the StandardEyes app for Windows 10 and 11. One ZIP, no installer. Install steps, requirements, checksum, privacy notes and troubleshooting.">
+<meta name="description" content="Download StandardEyes for Windows 10 and 11. One ZIP, no installer. What is new in 1.1.0, install steps, requirements, checksum and troubleshooting.">
 <link rel="canonical" href="https://standardeyes.github.io/download.html">
 <meta property="og:title" content="Download for Windows — StandardEyes">
-<meta property="og:description" content="Download the StandardEyes app for Windows 10 and 11. One ZIP, no installer. Install steps, requirements, checksum, privacy notes and troubleshooting.">
+<meta property="og:description" content="Download StandardEyes for Windows 10 and 11. One ZIP, no installer. What is new in 1.1.0, install steps, requirements, checksum and troubleshooting.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://standardeyes.github.io/download.html">
 <meta property="og:site_name" content="StandardEyes">
@@ -64,7 +64,7 @@
   <div class="wrap">
     <div class="dl">
       <div class="main">
-        <h2>StandardEyes 1.0.0 for Windows</h2>
+        <h2>StandardEyes 1.1.0 for Windows</h2>
         <p>The complete app: the interface, the statistical engine, the example data and the user manual.</p>
         <div class="cta" style="margin-top:22px">
           <a class="btn lg light" href="https://github.com/StandardEyes/standardeyes.github.io/releases/latest/download/StandardEyes-windows.zip">
@@ -76,15 +76,39 @@
       </div>
       <div class="side">
         <dl class="kv">
-          <dt>Version</dt><dd>1.0.0 <span class="fine" style="font-weight:400">(build 2026-10-02-se.9)</span></dd>
+          <dt>Version</dt><dd>1.1.0 <span class="fine" style="font-weight:400">(build 2026-10-04-se.10)</span></dd>
           <dt>System</dt><dd>Windows 10 or 11, 64-bit</dd>
           <dt>Also needs</dt><dd><a href="https://cran.r-project.org/bin/windows/base/old/4.5.2/">R 4.5.2 for Windows</a></dd>
           <dt>Disk space</dt><dd>About 250 MB after extracting</dd>
-          <dt>SHA-256</dt><dd><span class="hash" id="sha">2efbf507f1636eae13539bb86da17a4fbecf3e3963cfb96539603dbaeae53106</span><br><button class="btn sm ghost" data-copy="#sha" style="margin-top:8px">Copy checksum</button></dd>
+          <dt>SHA-256</dt><dd><span class="hash" id="sha">763f95528f3a41bbcdb770ebfa9691dd4d086f932e7569e5e8e80e507e4bcb9d</span><br><button class="btn sm ghost" data-copy="#sha" style="margin-top:8px">Copy checksum</button></dd>
         </dl>
-        <p class="fine" style="margin:16px 0 0"><a href="https://github.com/StandardEyes/standardeyes.github.io/releases">All releases and release notes</a> · <a href="https://github.com/StandardEyes/standardeyes.github.io">Source code</a></p>
+        <p class="fine" style="margin:16px 0 0"><a href="#new">What is new in 1.1.0</a> · <a href="https://github.com/StandardEyes/standardeyes.github.io/releases">All releases and release notes</a> · <a href="https://github.com/StandardEyes/standardeyes.github.io">Source code</a></p>
       </div>
     </div>
+  </div>
+</section>
+
+<section class="block alt" id="new">
+  <div class="wrap narrow prose">
+    <h2>What is new in 1.1.0</h2>
+    <p>Version 1.1.0 brings the tables, figures and astigmatism analysis in line with the reporting rules of the <i>Journal of Cataract &amp; Refractive Surgery</i>, including the JCRS 2025 astigmatism standard. It changes several defaults, so the same data and settings can give different numbers than 1.0.0. A preset or settings file saved by 1.0.0 still loads and runs: a setting it does not contain takes the 1.1.0 default, and every workbook's Manifest sheet records the settings used. Each change, and how to get the 1.0.0 behavior back (interface tab, then the settings-file key):</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>What changed in 1.1.0</th><th>To get the 1.0.0 behavior</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Tests in the tables are clustered by patient.</strong> When a patient has two analyzed eyes, the P value of every per-eye row of the summary tables and the Publication Table comes from a patient-clustered GEE test, the same P value as the figure of that outcome. Where that GEE cannot be fitted, the table and the figure use a permutation test over patients (9999 permutations), labeled “GEE not fitted”.</td><td>GEE tab, <b>Summary-table tests</b> = classical (<code>table_tests: "classical"</code>). The figures stay clustered.</td></tr>
+        <tr><td><strong>Small-sample correction of the clustered tests.</strong> Every GEE test and interval uses the Mancl-DeRouen bias-corrected robust standard error with a t reference (F for joint tests; df = patients minus model coefficients).</td><td>GEE tab, <b>GEE small-sample inference</b> = none (<code>gee_small_sample: "none"</code>).</td></tr>
+        <tr><td><strong>The caliper is on the logit scale:</strong> 0.2 SD of the logit of the propensity score (Austin 2011).</td><td>Matching tab, <b>Distance</b> = propensity score, probability scale (<code>psm_distance: "logit"</code>).</td></tr>
+        <tr><td><strong>Visual acuity is analyzed in logMAR and shown as Snellen</strong>: “20/20 (0.00 ± 0.05 logMAR)”, the Snellen geometric mean with the logMAR mean ± SD, and the range in Snellen.</td><td>Variables &amp; Types tab, untick <b>Analyze visual acuity in logMAR</b> (<code>do_logmar: false</code>).</td></tr>
+        <tr><td><strong>P values in journal style</strong>: .27, .003, &lt;.001, &gt;.99.</td><td>GEE tab, <b>P value style</b> = classic (<code>p_style: "classic"</code>).</td></tr>
+        <tr><td><strong>Journal-style figures</strong>: white, no frames, section bands, captions or shaded wedges; each figure's title, method notes and abbreviations go to <code>&lt;figure&gt;_legend.txt</code> beside it.</td><td>Special outputs tab, <b>Figure style</b> = annotated (<code>figure_style: "annotated"</code>).</td></tr>
+        <tr><td><strong>Astigmatism follows the JCRS 2025 standard</strong>, in plus-cylinder format (with-the-rule on the left). The double-angle plots show the preoperative astigmatism, SIA and the prediction error (PE = postoperative − target), plus the postoperative astigmatism when a target is not plano; the correction-index polar plots are gone (its histogram stays). The 95% region of the eyes is the depth-based convex polygon and the centroid's 95% confidence region the bootstrap convex polygon of the centroid, both built as in the WHWK functions (the journal's reference tool). Each centroid is tested against zero by the bootstrap projection-distance test of the same functions; the between-cohort tests resample patients, with 20% trimming as Wilcox defines it, untrimmed where the trimmed statistic does not exist.</td><td>The plus-cylinder vectors and the plot set have no switch (1.0.0 mishandled the cylinder sign). Special outputs tab: <b>95% region of the eyes</b> = normal, <b>Centroid 95% confidence region</b> = Hotelling, <b>Astigmatism tests</b> = classic. Hull peeling is no longer offered.</td></tr>
+        <tr><td><strong>New sheets</strong> “Astigmatism (JCRS 2025)” (centroids, total SD, magnitudes, cumulative intervals and the standard's tests; also written as a CSV) and “Astigmatism vectors” (per eye).</td><td>Special outputs tab, untick <b>Astigmatism (JCRS 2025) sheet</b> (<code>astig_sheet: false</code>).</td></tr>
+        <tr><td><strong>Input files for the WHWK functions</strong>: a <code>WHWK input</code> folder in each run's figure folder holds <code>&lt;vector&gt;_vector.txt</code> and <code>&lt;vector&gt;_magnitude.txt</code> for every plotted vector, with a README. The functions are at <a href="https://osf.io/xhe8u/">osf.io/xhe8u</a>.</td><td>Special outputs tab, untick <b>Input files for the WHWK functions</b> (<code>astig_whwk_files: false</code>).</td></tr>
+        <tr><td><strong>GEE of an outcome that hardly varies within a patient.</strong> A per-patient variable is modeled on one row per patient; any other exchangeable GEE is kept only if it converged, its working correlation is below 0.95 and a further scoring step moves no coefficient by more than 0.01 SE, and is otherwise refitted with an independence working correlation. The output names the model used.</td><td>No switch.</td></tr>
+      </tbody>
+    </table></div>
+    <p>Also new: EPS figure files, up to 1200 dpi, and a figure width in cm (8.76, 12.69 and 17.77 cm are the journal column widths; tall combined figures are split into pages). Without a switch: comparisons with the reference in the tables are Holm-adjusted; tables use fixed decimals and one effect style; every model of a matched cohort uses an independence working correlation; the Regression sheet also gives the crude estimate on the same eyes; the Run &amp; Results tab lists how the numbers will be computed before you run; workbooks name “StandardEyes” as their author.</p>
+    <p>The <a href="examples.html">example data</a> are new as well: a simulated dataset with the cohorts Reference, Cohort A and Cohort B, generated from a documented model with a fixed seed and described in its own README sheet, and a new astigmatism validation dataset. The generators ship in the <code>validation</code> folder of the download.</p>
   </div>
 </section>
 
@@ -125,8 +149,8 @@
         <ul style="margin:8px 0 0; padding-left:20px">
           <li>The app and its statistical engine (R code you can read).</li>
           <li>A private Python runtime for the interface, and the 48 R packages the analysis uses. Nothing is installed into Windows and nothing is downloaded later.</li>
-          <li>The <a href="examples.html">example datasets</a> with seven worked studies.</li>
-          <li>The user manual and the licence texts of every bundled component.</li>
+          <li>The simulated <a href="examples.html">example datasets</a> with seven worked studies, and the generators that wrote them (<code>validation</code> folder).</li>
+          <li>The user manual and the license texts of every bundled component.</li>
         </ul>
       </div>
       <div class="card">
@@ -222,7 +246,7 @@
       <div class="brand small"><span class="wm">Standard<b>Eyes</b></span></div>
       <p>Standardized comparative analysis and outcomes reporting for refractive surgery. Free, local, reproducible.</p>
       <p><b style="color:#fff">For Ophthalmologists, By Ophthalmologists.</b></p>
-      <p class="fine">Version 1.0.0 · MIT License · © 2026 Noyman DBE, Mimouni M, Safir M</p>
+      <p class="fine">Version 1.1.0 · MIT License · © 2026 Noyman DBE, Mimouni M, Safir M</p>
     </div>
     <div>
       <h2 class="fh">The app</h2>

@@ -1,23 +1,23 @@
 WEBVTT
 
-00:00:00.678 --> 00:00:04.129
+00:00:00.612 --> 00:00:04.062
 Tutorial three. Inclusion rules and subsets.
 
-00:00:08.472 --> 00:00:17.031
+00:00:08.408 --> 00:00:16.967
 Build your inclusion criteria as rules. Each rule has a column, an operator and a value. Add as many as your protocol needs.
 
-00:00:17.332 --> 00:00:25.427
+00:00:17.144 --> 00:00:25.239
 Each rule shows how many rows remain, and how many each group lost. It is a live version of the participant flow diagram.
 
-00:00:25.661 --> 00:00:28.834
+00:00:25.434 --> 00:00:28.606
 The group counts in the sidebar follow every change.
 
-00:00:29.117 --> 00:00:37.491
+00:00:28.881 --> 00:00:37.255
 Subsets run a complete analysis for each value. Here, one preset gives a full PRK analysis and a full LASIK analysis.
 
-00:00:37.767 --> 00:00:44.004
-Preview the rows that will be analysed. You can export them as a CSV file to keep with the manuscript.
+00:00:37.495 --> 00:00:45.544
+Preview the rows that will be analyzed. You can export them as a CSV file, with the group of each row, to keep with the manuscript.
 
-00:00:44.803 --> 00:00:49.275
+00:00:46.509 --> 00:00:50.981
 StandardEyes. For ophthalmologists, by ophthalmologists.
 

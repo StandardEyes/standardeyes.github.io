@@ -3,7 +3,7 @@ message: "If StandardEyes contributes to a publication, please cite it as below.
 title: "StandardEyes: standardized comparative analysis and outcomes reporting for refractive surgery"
 type: software
 version: "1.1.0"
-date-released: "2026-10-04"
+date-released: "2026-10-14"
 repository-code: "https://github.com/StandardEyes/standardeyes.github.io"
 url: "https://standardeyes.github.io"
 license: MIT

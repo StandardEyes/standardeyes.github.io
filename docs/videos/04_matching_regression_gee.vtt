@@ -1,23 +1,35 @@
 WEBVTT
 
-00:00:00.682 --> 00:00:04.597
+00:00:00.686 --> 00:00:04.602
 Tutorial four. Matching, regression and GEE.
 
-00:00:10.954 --> 00:00:20.163
+00:00:11.032 --> 00:00:20.241
 Propensity-score matching makes the groups comparable. Choose the covariates to match on. The method, the ratio and the caliper are all yours to set.
 
-00:00:20.417 --> 00:00:27.676
+00:00:20.413 --> 00:00:32.037
+By default the propensity score is matched on the logit scale, so the caliper is zero point two standard deviations of the logit of the score. The probability scale is still available.
+
+00:00:32.238 --> 00:00:39.496
 A live preview runs the real matching on your settings. You see how many eyes each group keeps, before you commit to a run.
 
-00:00:27.970 --> 00:00:36.065
-The regression tab adds a covariate-adjusted model for every outcome. The adjusted effect is written beside the crude comparison.
+00:00:39.789 --> 00:00:49.230
+The regression tab adds a covariate-adjusted model for every outcome. The adjusted effect is written beside the crude estimate, fitted on the same eyes.
 
-00:00:36.332 --> 00:00:43.545
+00:00:49.486 --> 00:00:56.698
 GEE models are clustered on the patient, so two eyes of one person are never counted as independent evidence.
 
-00:00:43.783 --> 00:00:49.138
+00:00:56.901 --> 00:01:04.207
+Every GEE test and interval uses the Mancl-DeRouen small-sample correction, with a t reference.
+
+00:01:04.518 --> 00:01:16.002
+The summary tables are clustered too. When a patient has two analyzed eyes, the P value of each row comes from a patient-clustered GEE, the same P value its figure prints.
+
+00:01:16.195 --> 00:01:22.339
+P values are printed in journal style, with two decimals, or three below point zero one.
+
+00:01:22.507 --> 00:01:27.861
 The GEE effect and its P value can be added as columns to the summary tables.
 
-00:00:49.925 --> 00:00:54.398
+00:01:28.705 --> 00:01:33.177
 StandardEyes. For ophthalmologists, by ophthalmologists.
 

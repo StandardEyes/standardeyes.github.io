@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>How it works — StandardEyes</title>
-<meta name="description" content="How StandardEyes analyses your data: layout, which test is used when, matching, GEE for two eyes, the figures, astigmatism, the outputs and FAQ.">
+<meta name="description" content="How StandardEyes analyzes your data: layout, which test is used when, matching, GEE for two eyes, the figures, astigmatism, the outputs and FAQ.">
 <link rel="canonical" href="https://standardeyes.github.io/guide.html">
 <meta property="og:title" content="How it works — StandardEyes">
-<meta property="og:description" content="How StandardEyes analyses your data: layout, which test is used when, matching, GEE for two eyes, the figures, astigmatism, the outputs and FAQ.">
+<meta property="og:description" content="How StandardEyes analyzes your data: layout, which test is used when, matching, GEE for two eyes, the figures, astigmatism, the outputs and FAQ.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://standardeyes.github.io/guide.html">
 <meta property="og:site_name" content="StandardEyes">
@@ -56,7 +56,7 @@
   <div class="wrap">
     <div class="kicker">How it works</div>
     <h1>What StandardEyes does with your data</h1>
-    <p class="lead">A plain account of each step: what is computed, which test is used when, and what the output means. The <a href="tutorials.html#documents">statistical reference</a> gives the full detail.</p>
+    <p class="lead">A plain account of each step in version 1.1.0: what is computed, which test is used when, and what the output means. The <a href="tutorials.html#documents">statistical reference</a> gives the full detail, and the <a href="download.html#new">list of changes</a> says what is new in 1.1.0.</p>
   </div>
 </section>
 
@@ -88,10 +88,10 @@
       <div class="tablewrap"><table>
         <thead><tr><th>You point the app to</th><th>It is used for</th></tr></thead>
         <tbody>
-          <tr><td>Patient ID</td><td>Linking the two eyes of one person. The patient is the cluster in every clustered model and the unit for patient-level variables.</td></tr>
+          <tr><td>Patient ID</td><td>Linking the two eyes of one person. The patient is the cluster in every clustered test and model, the resampling unit of the astigmatism bootstrap, and the unit for patient-level variables.</td></tr>
           <tr><td>Eye ID</td><td>Identifying the row.</td></tr>
           <tr><td>Group source column</td><td>The column whose values define the groups you compare.</td></tr>
-          <tr><td>Refraction and acuity columns</td><td>Preoperative and postoperative sphere, cylinder, axis, spherical equivalent (SEQ), uncorrected and corrected distance visual acuity (UDVA, CDVA). They feed the figures and the export tabs.</td></tr>
+          <tr><td>Refraction and acuity columns</td><td>Preoperative and postoperative sphere, cylinder, axis, spherical equivalent (SEQ), uncorrected and corrected distance visual acuity (UDVA, CDVA). They feed the figures, the astigmatism analysis and the export tabs.</td></tr>
         </tbody>
       </table></div>
       <ul>
@@ -101,31 +101,33 @@
       </ul>
 
       <h2 id="groups">Groups and the reference group</h2>
-      <p>A group is a set of values of the group source column. You can define two groups or more. One group is the <strong>reference</strong>: every effect estimate, every matching pairing and every adjusted model is expressed relative to it. It is usually the control group or the standard technique.</p>
-      <p>Variables that describe the person and not the eye (age, sex, a systemic disease) can be marked <strong>per patient</strong>. They are then summarized once per patient, and the table headers show both counts, for example <code>Control (n = 108 eyes; 73 patients)</code>.</p>
+      <p>A group is a set of values of the group source column. You can define two groups or more. One group is the <strong>reference</strong>: every effect estimate, every matching pairing, every adjusted model and every versus-reference line is expressed relative to it. It is usually the control group or the standard technique. In the example dataset the groups are <code>Reference</code>, <code>Cohort A</code> and <code>Cohort B</code>.</p>
+      <p>Variables that describe the person and not the eye (age, sex, a systemic disease) can be marked <strong>per patient</strong>. They are then summarized and tested once per patient, and the table headers show both counts, for example <code>Reference (n = 226 eyes; 136 patients)</code>.</p>
 
       <h2 id="types">Variable types and tests</h2>
-      <p>Each variable you analyse is given one of four types. The type decides how it is summarized and which test compares the groups.</p>
+      <p>Each variable you analyze is given one of four types. The type decides how it is summarized and which test compares the groups. When a patient ID is mapped and at least one patient has two analyzed eyes, the P value of every per-eye row is <strong>clustered by patient</strong>; otherwise the classical tests run.</p>
       <div class="tablewrap"><table>
-        <thead><tr><th>Type</th><th>Reported as</th><th>Two groups</th><th>Three or more groups</th></tr></thead>
+        <thead><tr><th>Type</th><th>Reported as</th><th>Clustered by patient (default)</th><th>Classical: two groups / three or more</th></tr></thead>
         <tbody>
-          <tr><td>Continuous</td><td>mean ± SD</td><td>Welch t-test</td><td>Welch ANOVA</td></tr>
-          <tr><td>Ordinal</td><td>median [IQR]</td><td>Wilcoxon rank-sum</td><td>Kruskal–Wallis</td></tr>
-          <tr><td>Dichotomous</td><td>n (%)</td><td colspan="2">χ² test, or Fisher's exact test</td></tr>
-          <tr><td>Categorical</td><td>n (%) per level</td><td colspan="2">χ² test, or Fisher's exact test</td></tr>
+          <tr><td>Continuous</td><td>mean ± SD</td><td>Gaussian GEE</td><td>Welch t-test / Welch ANOVA</td></tr>
+          <tr><td>Ordinal</td><td>median [IQR]</td><td>GEE on ranks</td><td>Wilcoxon rank-sum / Kruskal–Wallis</td></tr>
+          <tr><td>Dichotomous</td><td>n (%)</td><td>Binomial (logistic) GEE</td><td>χ² test, or Fisher's exact test</td></tr>
+          <tr><td>Categorical</td><td>n (%) per level</td><td>Joint Wald test on the level indicators</td><td>χ² test, or Fisher's exact test</td></tr>
         </tbody>
       </table></div>
       <ul>
-        <li>Welch tests are used because they do not assume that the groups have equal variances. Groups of different size and spread seldom do.</li>
-        <li>The χ² test is used when every expected count is at least 5. Otherwise Fisher's exact test is used.</li>
-        <li><strong>The summary sheets write the test that was used beside every P value.</strong> The publication-style table leaves the test column out, so take the test names from the summary sheets for your methods section.</li>
-        <li>These tests work on eyes. When patients contribute two eyes, add the <a href="#gee">clustered models</a>.</li>
+        <li>The clustered test is the same test the figure of that outcome prints, so a table and its figure give the same P value. With more than two groups it is one joint (overall) test. Where that GEE cannot be fitted (for example a group with no events, or only events), the table and the figure use a permutation test over patients (9999 permutations, fixed seed) that keeps each patient's eyes together, labeled “GEE not fitted”.</li>
+        <li>The classical tests run for per-patient variables, when every patient has one analyzed eye, without a patient ID, and when you set <b>Summary-table tests</b> to classical on the GEE tab (the 1.0.0 behavior). Turning off <b>Cluster p-values by patient</b> makes both the tables and the figures classical.</li>
+        <li>Welch tests are used because they do not assume that the groups have equal variances. The χ² test is used when every expected count is at least 5; otherwise Fisher's exact test.</li>
+        <li><strong>The summary sheets write the test that was used beside every P value.</strong> The publication-style table has no test column; a footnote under it names the test behind every P value.</li>
         <li>When a test cannot be done (a group with a single value, a variable that has the same value in every eye), the row says “Not estimable” and gives the reason. It is never reported as “no difference”.</li>
-        <li>P values in the summary tables are not adjusted for multiple comparisons.</li>
+        <li>Comparisons of each group with the reference (the GEE columns and any pairwise columns) are Holm-adjusted within each variable and marked <code>[Holm]</code>.</li>
+        <li>P values are printed in journal style by default: .27, .003, &lt;.001, &gt;.99 (two decimals, three below .01). <b>P value style</b> = classic gives 0.266 and &lt;0.001. Means and SDs have two decimals, percentages one, and effects read “β = −0.22 (95% CI, −0.32 to −0.12)” or “OR = 3.34 (95% CI, 1.59 to 7.02)”.</li>
       </ul>
 
       <h2 id="cyl">Plus and minus cylinder</h2>
-      <p>Files often mix plus- and minus-cylinder notation. When the option is on, every sphere / cylinder / axis set you list is transposed to minus cylinder: new sphere = sphere + cylinder, new cylinder = −cylinder, new axis = axis ± 90°. A cylinder value above zero is taken as plus notation, so no notation column is needed. Rows already in minus cylinder are left alone. All later steps, including the astigmatism vectors, then work on one notation.</p>
+      <p>Files often mix plus- and minus-cylinder notation. For the tables, every sphere / cylinder / axis set you list is transposed to minus cylinder when the option is on: new sphere = sphere + cylinder, new cylinder = −cylinder, new axis = axis ± 90°. A cylinder value above zero is taken as plus notation, so no notation column is needed. Rows already in minus cylinder are left alone.</p>
+      <p>The astigmatism vectors do not depend on that switch. They read the sign of each cylinder and work in plus-cylinder format, as the JCRS 2025 standard asks: −2.00 × 180 and +2.00 × 90 give the same vector, also in a row that mixes the two forms and for a target typed in either form.</p>
 
       <h2 id="va">Visual acuity notations</h2>
       <p>One setting, <b>VA notation in your file</b> on the <b>Variables &amp; Types</b> tab, says how every acuity column is recorded.</p>
@@ -134,12 +136,12 @@
         <tbody>
           <tr><td>Decimal (default)</td><td><code>1.0</code>, <code>0.5</code></td><td>As written. 1.0 is 20/20.</td></tr>
           <tr><td>logMAR</td><td><code>0.00</code>, <code>0.30</code>, <code>-0.10</code></td><td>decimal = 10<sup>−logMAR</sup></td></tr>
-          <tr><td>Snellen</td><td><code>20/40</code>, <code>6/12</code>, <code>20/25-2</code></td><td>Feet or metres. Each letter missed or gained shifts logMAR by 0.02.</td></tr>
+          <tr><td>Snellen</td><td><code>20/40</code>, <code>6/12</code>, <code>20/25-2</code></td><td>Feet or meters. Each letter missed or gained shifts logMAR by 0.02.</td></tr>
           <tr><td>ETDRS letters</td><td><code>85</code></td><td>logMAR = 1.7 − 0.02 × letters, so 85 letters is 20/20.</td></tr>
         </tbody>
       </table></div>
       <ul>
-        <li>The tables, tests and models can run in logMAR (optional). A file already in logMAR is never converted twice.</li>
+        <li><b>Analyze visual acuity in logMAR</b> is on by default for the acuity columns you map: the tables, tests and models run in logMAR. A cell then reads the Snellen geometric mean with the logMAR mean ± SD, for example <code>20/20 (0.00 ± 0.05 logMAR)</code>, and the range is given in Snellen. A mean on a chart line prints that line (20/16, 20/20, 20/25 …); otherwise the denominator is rounded (20/23). A file already in logMAR is never converted twice. Untick the switch to analyze acuity as recorded (the 1.0.0 default).</li>
         <li>The figures and the mEYEstro tab always work from decimal acuity derived from your notation, so they are the same whichever notation the file uses.</li>
         <li>Counting fingers, hand motion and light perception (CF, HM, LP, NLP) become missing values and are counted in the log. They are not given an invented acuity.</li>
         <li>If the values clearly cannot be in the notation you chose (most cells unreadable, a decimal value of 0 or below, a logMAR value outside −0.5 to 3, or decimal values declared as ETDRS letters), the run stops and names the column. Subtler mismatches, such as decimal values declared as logMAR, give a warning in the interface and in the log, so read the warnings.</li>
@@ -148,32 +150,33 @@
       </ul>
 
       <h2 id="filters">Inclusion rules and subsets</h2>
-      <p>Inclusion criteria are rules on columns, combined with AND: equal to, in a list, greater or less than, between, missing or not missing, text contains, and absolute-value versions for cylinder (so “absolute value ≤ 5” keeps −5.00 D and +5.00 D alike). Rules see refraction after the plus-to-minus transposition, and acuity in your file's own notation. As you add a rule, the app shows how many rows remain and how many each group lost.</p>
+      <p>Inclusion criteria are rules on columns, combined with AND: equal to, in a list, greater or less than, between, missing or not missing, text contains, and absolute-value versions for cylinder (so “absolute value ≤ 5” keeps −5.00 D and +5.00 D alike). Rules see refraction after the plus-to-minus transposition, and acuity in your file's own notation. As you add a rule, the app shows how many rows remain and how many each group lost. The sidebar counts as “in analysis” only the rows that fall in a group.</p>
       <figure class="shot" style="margin:22px 0"><img src="assets/shot_filters.jpg" alt="Filter rules with the rows each group keeps" loading="lazy" width="1920" height="1200"><figcaption>Each rule shows the rows that remain and what each group lost to it.</figcaption></figure>
       <p>A <strong>subset</strong> column (for example the procedure) splits one preset into a complete, separate analysis for each value: a full PRK analysis and a full LASIK analysis, each with its own workbook and figures.</p>
 
       <h2 id="matching">Matching</h2>
-      <p>Matching makes the groups comparable on the baseline variables you choose. The propensity score is each eye's estimated chance of being in the compared group, given those variables. Eyes with similar scores are paired. StandardEyes uses the R package MatchIt and matches each group to the reference group. The default is 1:1 nearest-neighbour matching on the propensity score, without replacement, with a caliper (the largest allowed difference) of 0.2 standard deviations of the propensity score. Exact matching, coarsened exact matching and subclassification are also available.</p>
+      <p>Matching makes the groups comparable on the baseline variables you choose. The propensity score is each eye's estimated chance of being in the compared group, given those variables. Eyes with similar scores are paired. StandardEyes uses the R package MatchIt and matches each group to the reference group. The default is 1:1 nearest-neighbor matching without replacement on the <strong>logit of the propensity score</strong>, with a caliper (the largest allowed difference) of 0.2 standard deviations of the logit of the propensity score (Austin 2011). The probability scale of version 1.0.0 stays selectable under <b>Distance</b>. Exact matching, coarsened exact matching and subclassification are also available.</p>
       <ul>
-        <li>A <strong>live preview</strong> (for nearest-neighbour matching) runs the real matching on your current settings and shows, for each pairing, how many eyes had complete covariates and how many were matched.</li>
-        <li><strong>Balance</strong> is reported as standardized mean differences before and after matching, against the usual 0.1 threshold. A love plot shows the difference for each covariate before and after matching.</li>
+        <li>A <strong>live preview</strong> (for nearest-neighbor matching) runs the real matching on your current settings and shows, for each pairing, how many eyes had complete covariates and how many were matched.</li>
+        <li><strong>Balance</strong> is reported as standardized mean differences before and after matching, against the usual 0.1 threshold. A love plot shows the difference for each covariate before and after matching. The PSM sheet, the Manifest and the love plot name the scale of the propensity score.</li>
         <li>When the matching weights are not all 1 (matching with replacement, k:1 matching in which some eyes find fewer than k controls, or exact, coarsened exact or subclassification matching), the matched tables, models and figure P values use the weights, and the headers show the effective sample size.</li>
       </ul>
       <figure class="shot" style="margin:22px 0"><img src="assets/shot_matching.jpg" alt="The live matched-count preview" loading="lazy" width="1920" height="1200"><figcaption>The live preview: eyes per group, eyes with complete covariates, eyes matched, and the eyes that found no match.</figcaption></figure>
       <div class="callout"><p>Matching deals with measured confounders only. It does not turn an observational comparison into a randomized one.</p></div>
 
       <h2 id="gee">Two eyes per patient</h2>
-      <p>Two eyes of one person are more alike than two eyes of different people. A test that treats them as independent gives P values that are too small. StandardEyes offers generalized estimating equations (GEE), a regression method that takes the patient as a cluster and uses robust standard errors (R package geepack). The working correlation is exchangeable. On a matched group whose matching weights are not all 1, the model is weighted and uses an independence working correlation, the estimator that MatchIt recommends.</p>
+      <p>Two eyes of one person are more alike than two eyes of different people. A test that treats them as independent gives P values that are too small. StandardEyes uses generalized estimating equations (GEE), a regression method that takes the patient as a cluster and uses robust standard errors (R package geepack).</p>
       <ul>
-        <li>Continuous outcomes give a mean difference. Dichotomous outcomes give an odds ratio. Both come with a 95% confidence interval.</li>
-        <li>The GEE effect and P value can be added as columns to the summary tables.</li>
-        <li>The P values printed on the figures are clustered by patient by default.</li>
-        <li>A clustered model needs at least 6 usable eyes from at least 3 patients, and every compared group needs 2 eyes from 2 patients. Otherwise the row says it is not estimable and why. A group with 2 to 9 patients gets a P value with a caution, because robust standard errors can be too small with few patients.</li>
+        <li><strong>Small-sample correction.</strong> Every GEE test and interval uses the Mancl-DeRouen bias-corrected robust standard error with a t reference (degrees of freedom = patients minus model coefficients), and an F reference for joint tests. <b>GEE small-sample inference</b> = none gives the uncorrected robust SE with a normal reference of version 1.0.0.</li>
+        <li><strong>Working correlation.</strong> Unmatched models use an exchangeable working correlation. That fit is kept only if it converged, its working correlation is below 0.95 and one further scoring step moves no coefficient by more than 0.01 SE; otherwise the model is refitted with an independence working correlation (the robust SE stays clustered by patient) and labeled so. Every model of a matched cohort uses an independence working correlation with SE clustered by patient, weighted or not (the approach MatchIt recommends); matched sets are not used as clusters.</li>
+        <li>A variable marked per patient is never the outcome of an eye-level GEE: it is modeled on one row per patient by an ordinary linear or logistic model.</li>
+        <li>Continuous outcomes give a mean difference. Dichotomous outcomes give an odds ratio. Both come with a 95% confidence interval. The GEE effect and P value can be added as columns to the summary tables.</li>
+        <li>A clustered model needs at least 6 usable eyes from at least 3 patients, and every compared group needs 2 eyes from 2 patients. Otherwise the row says it is not estimable and why. A group with 2 to 9 patients gets a P value with a caution, in the tables, the GEE sheets and the figures.</li>
       </ul>
       <p>If every patient contributes one eye, the ordinary tests are appropriate and GEE adds nothing.</p>
 
       <h2 id="regression">Adjusted regression</h2>
-      <p>For each outcome the app can fit a model of the outcome on the group and the covariates you choose, again clustered on the patient. The adjusted effect, its 95% confidence interval and P value are written next to the crude comparison in the outcome table, and the full models go to their own sheet.</p>
+      <p>For each outcome the app can fit a model of the outcome on the group and the covariates you choose, again clustered on the patient. The adjusted effect, its 95% confidence interval and P value are written next to the crude comparison in the outcome table, which also states the number of eyes in the adjusted model. The Regression sheet holds the full models and the crude estimate fitted on the same complete-case eyes, so crude and adjusted can be compared directly.</p>
       <ul>
         <li>The app suggests covariates by baseline imbalance (standardized mean difference above 0.10), plus age and sex. Choose covariates for imbalance, not for their effect on the P value.</li>
         <li>A covariate that is constant after the inclusion rules is dropped, with a note.</li>
@@ -182,31 +185,49 @@
       <p>Matching and adjustment can be combined in one run: match on the measured confounders, then adjust for what is still imbalanced.</p>
 
       <h2 id="figures">The figures</h2>
-      <p>The figures follow the standard graphs for reporting refractive-surgery outcomes (Dupps et al., <i>J Cataract Refract Surg</i> 2011;37:1–3. Reinstein et al., <i>J Cataract Refract Surg</i> 2017;43:435–439), with one difference: <strong>every group is drawn on the same chart</strong>, in its own colour.</p>
+      <p>The figures follow the standard graphs for reporting refractive-surgery outcomes (Dupps et al., <i>J Cataract Refract Surg</i> 2011;37:1–3. Reinstein et al., <i>J Cataract Refract Surg</i> 2017;43:435–439), with one difference: <strong>every group is drawn on the same chart</strong>, in its own color.</p>
       <div class="tablewrap"><table>
         <thead><tr><th>Panel set</th><th>Contains</th></tr></thead>
         <tbody>
-          <tr><td>Full</td><td>Visual acuity, efficacy, safety, spherical-equivalent accuracy, attempted versus achieved, defocus equivalent, refractive astigmatism, the vector panels, and stability over time when visits are mapped.</td></tr>
+          <tr><td>Full</td><td>Visual acuity, efficacy, safety, spherical-equivalent accuracy, attempted versus achieved, defocus equivalent, refractive astigmatism, TIA versus SIA, the correction-index and angle-of-error histograms, and stability over time when visits are mapped.</td></tr>
           <tr><td>Refractive</td><td>The Full set without defocus equivalent, stability and the vector panels.</td></tr>
           <tr><td>Cataract</td><td>The Refractive set without safety and attempted versus achieved. Efficacy is measured against postoperative CDVA.</td></tr>
         </tbody>
       </table></div>
       <ul>
-        <li>With two groups each panel prints one test and names it. With three or more it prints an overall test and each group against the reference. Those comparisons are corrected for multiple testing by the Holm method and marked <code>[Holm]</code>.</li>
+        <li><strong>Journal style</strong> (the default): white background, no frames, section bands, captions or shaded wedges. Each figure's title, method notes and abbreviations (in alphabetical order) are written to <code>&lt;figure&gt;_legend.txt</code> beside it, ready for the figure legend. <b>Figure style</b> = annotated keeps them inside the image (the 1.0.0 look).</li>
+        <li><strong>Files.</strong> Each panel is written as its own file and inside the combined figure, as TIFF (300 dpi by default, up to 1200 for line art), PNG, JPEG, PDF or EPS. EPS is vector; PostScript has no transparency, so the semi-transparent points and regions are embedded as images at 1200 dpi or more. Colors are RGB: convert to CMYK outside the app if the journal asks.</li>
+        <li><strong>Width.</strong> A <b>Figure width</b> of 8.76, 12.69 or 17.77 cm (the journal column widths) lays every figure out at that width, so its text keeps its size (never below 6 pt). A combined figure then has two panels per row (one at 8.76 cm), and one taller than a 23-cm page is written as pages <code>_p1</code>, <code>_p2</code>, each with its own legend file, the panel letters continuing. Statistics lines that do not fit a panel at that size are listed in the legend file.</li>
+        <li>The bins carry the exact standard labels (≤ 0.25 D, &gt; 2.00 D …); safety has seven categories under the axis title “Change in Snellen lines of CDVA”; stability is plotted as “Mean ± SD SEQ (D)”; percentage axes end at 100.</li>
+        <li>With two groups each panel prints one test and names it. With three or more it prints an overall test and each group against the reference, Holm-adjusted and marked <code>[Holm]</code>. The P values are clustered by patient by default.</li>
         <li><strong>Stability over time</strong> plots mean ± SD spherical equivalent at each mapped visit, at the median day actually observed, with the number of eyes under each point. Nothing is carried forward.</li>
         <li>An optional target column holds the intended spherical equivalent of each eye (monovision, a myopic target). Without it, eyes are taken as aimed at plano.</li>
-        <li>Each panel is written as its own file and inside the combined figure, as TIFF (300 dpi by default), PNG, JPEG or PDF.</li>
       </ul>
-      <figure class="shot" style="margin:22px 0"><img src="assets/shot_figures.jpg" alt="The figure options in the app" loading="lazy" width="1920" height="1200"><figcaption>The figure options. The line “You will get” lists the panels the current choices produce.</figcaption></figure>
+      <figure class="shot" style="margin:22px 0"><img src="assets/shot_figures.jpg" alt="The figure options in the app" loading="lazy" width="1920" height="1200"><figcaption>The figure options: formats, resolution, figure style and figure width. The line “You will get” further down lists the panels the current choices produce.</figcaption></figure>
 
       <h2 id="astig">Astigmatism</h2>
-      <p>Astigmatism is analysed as vectors by the Alpins method: target induced astigmatism (TIA), surgically induced astigmatism (SIA), the difference vector and the correction index. The vectors are computed from the preoperative and postoperative cylinder and axis you map, or read from your own columns.</p>
-      <p>The plots follow the JCRS standards for astigmatism analysis (Koch et al., <i>J Cataract Refract Surg</i> 2025;51:447–455):</p>
+      <p>The astigmatism analysis follows the JCRS 2025 standards for analyzing astigmatic outcomes (Koch et al., <i>J Cataract Refract Surg</i> 2025;51:447–455). All vectors are in <strong>plus-cylinder format</strong>: magnitude at the plus axis, x = M cos 2θ, y = M sin 2θ. On every double-angle plot with-the-rule astigmatism (plus axis 90) lies on the left and against-the-rule (plus axis 180) on the right.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Vector</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td>PRE</td><td>Preoperative refractive astigmatism.</td></tr>
+          <tr><td>SIA</td><td>Surgically induced astigmatism = postoperative − preoperative.</td></tr>
+          <tr><td>PE</td><td>Prediction error = postoperative − target; equal to the postoperative astigmatism when the target is plano. The standard's main outcome.</td></tr>
+          <tr><td>POST</td><td>Postoperative refractive astigmatism; plotted on its own only when a target column is mapped and a target is not plano.</td></tr>
+        </tbody>
+      </table></div>
+      <p>The Alpins quantities stay available for the standard graphs: target induced astigmatism (TIA = target − PRE), the difference vector (DV = −PE), the correction index, the angle of error (missing when SIA is zero), the magnitude of error and the index of success. The vectors are computed from the preoperative and postoperative cylinder and axis you map, against an optional target, or read from your own magnitude and plus-axis columns.</p>
       <ul>
-        <li><strong>Double-angle plots</strong>, with each group's centroid (its mean vector), the 95% confidence region of the centroid, and a 95% region of the eyes drawn as a convex polygon. An ellipse is available for normally distributed data.</li>
-        <li>For each group: the centroid, the total standard deviation, the mean and median vector magnitude, and the share of eyes within 0.25, 0.50, 0.75 and 1.00 D.</li>
-        <li>Centroids are compared with one two-dimensional test, not two separate tests on x and y. The default is a robust test on trimmed means with a bootstrap that resamples patients. A clustered GEE test and the classical Hotelling test are also offered.</li>
-        <li>Every figure prints the method that produced its numbers.</li>
+        <li><strong>Double-angle plots</strong> of PRE, SIA and PE (and POST when it applies). For each cohort: the number of eyes and patients, the centroid (mean vector, M @ θ and x, y), the total SD (population denominator), the magnitude mean ± SD, median, range and root mean square.</li>
+        <li><strong>95% region of the eyes</strong>: the depth-based convex polygon, built as in the WHWK functions (the Wilcox-Holladay-Wang-Koch R functions, the journal's reference tool). Depths tie, so it can hold more than 95% of the eyes; in a cohort of up to about 180 eyes the depth rule often removes no eye, and the polygon is then the convex hull of all eyes. The sheet and the legend file give the count. The bivariate-normal ellipse is the other choice.</li>
+        <li><strong>95% confidence region of the centroid</strong>: the bootstrap convex polygon of the centroid, as in the WHWK functions (999 bootstrap centroids, patients resampled when clustered). The Hotelling T² ellipse is the other choice.</li>
+        <li><strong>Each centroid against zero</strong>: the bootstrap projection-distance test of the same functions. With 999 resamples P = .001 is its floor, and the legend file says so. The one-sample Hotelling test is the classic alternative.</li>
+        <li><strong>Between cohorts</strong>, for each vector: the centroid, the precision (distances of the eyes to their cohort centroid) and the mean magnitude, by 20%-trimmed tests calibrated by a bootstrap that resamples patients within each cohort. Trimming and winsorizing follow the standard order-statistic definitions (Wilcox). Where the trimmed statistic is not defined, as is common with quarter-diopter data, the same bootstrap test runs untrimmed and is labeled so. A clustered GEE test and the classical Hotelling / Welch tests are also offered (<b>Astigmatism tests</b>).</li>
+        <li><strong>Cumulative percentages</strong> of eyes with a magnitude of ≤ 0.25, ≤ 0.50 … ≤ 2.00 D and &gt; 1.00 D: between cohorts by a patient-clustered logistic GEE (Fisher's exact test without clustering), and PRE against POST within a cohort by McNemar's test, in its cluster-adjusted form when clustering is on.</li>
+        <li>P values are given nominal and Holm-adjusted, within each vector across centroid, precision, magnitude and intervals, and across the comparisons with the reference.</li>
+        <li><strong>Sheets.</strong> “Astigmatism (JCRS 2025)” holds all of the above with the region vertices and the method notes, and is also written as a CSV beside the workbook; “Astigmatism vectors” lists every eye's vectors (magnitude, plus axis, x, y), ready for other tools.</li>
+        <li><strong>Input files for the WHWK functions.</strong> With the double-angle plots, a <code>WHWK input</code> folder inside the run's figure folder holds, for each plotted vector, <code>&lt;vector&gt;_vector.txt</code> (columns <code>&lt;Cohort&gt;.x</code>, <code>&lt;Cohort&gt;.y</code>) and <code>&lt;vector&gt;_magnitude.txt</code>, tab-delimited, with a README. The functions are obtained from <a href="https://osf.io/xhe8u/">osf.io/xhe8u</a>; they treat eyes as independent and refuse values beyond 6 D.</li>
+        <li>The semicircle (single-angle) plots of TIA, SIA and DV at plus axes are kept for familiarity; they are not part of the standard.</li>
       </ul>
 
       <h2 id="multi">More than two groups</h2>
@@ -215,43 +236,45 @@
         <tbody>
           <tr><td>Table P value</td><td>The two groups differ</td><td>At least one group differs (an overall test)</td></tr>
           <tr><td>Matching</td><td>One pairing</td><td>Each group is matched to the reference separately</td></tr>
-          <tr><td>GEE and regression</td><td>One estimate</td><td>One estimate for each group against the reference</td></tr>
+          <tr><td>GEE and regression</td><td>One estimate</td><td>One estimate for each group against the reference (Holm-adjusted)</td></tr>
           <tr><td>Figures</td><td>One test per panel</td><td>Overall test, plus each group against the reference (Holm-adjusted)</td></tr>
+          <tr><td>Astigmatism</td><td>One comparison per vector</td><td>Omnibus test, plus each cohort against the reference (Holm-adjusted)</td></tr>
         </tbody>
       </table></div>
       <p>With several groups, the overall P value says only that the groups are not all alike. Which groups differ is answered by the rows that compare each group with the reference.</p>
 
       <h2 id="outputs">What a run produces</h2>
-      <p>Results are first held inside the app, where you can open every figure and sheet. Nothing is written to your output folder until you click <b>Save ALL to output folder</b> or save single files.</p>
+      <p>Before you run, the <b>Run &amp; Results</b> tab lists how the numbers will be computed and shown. With <b>Preview only</b> ticked, results are held inside the app, where you can open every figure and sheet, and nothing is written to your output folder until you click <b>Save ALL to output folder</b> or save single files.</p>
       <div class="tablewrap"><table>
         <thead><tr><th>Output</th><th>Contents</th></tr></thead>
         <tbody>
-          <tr><td>Main workbook</td><td>Contents, Manifest, overview, baseline and preoperative summary, outcome summary, publication-style table, a matching sheet for each pairing, GEE sheets, regression sheets, and the same for the matched groups.</td></tr>
-          <tr><td>Matched-only workbook</td><td>The matched rows of every pairing.</td></tr>
-          <tr><td>Figure folder</td><td>Every panel on its own and the combined figures, before matching and for each matched pairing.</td></tr>
-          <tr><td>Love plots</td><td>Covariate balance before and after matching.</td></tr>
-          <tr><td>Filtered dataset (optional)</td><td>The exact rows that were analysed, as CSV.</td></tr>
+          <tr><td>Main workbook</td><td>Contents, Manifest, overview, baseline and preoperative summary, outcome summary, publication-style table, the astigmatism sheets, a matching sheet for each pairing, GEE sheets, regression sheets, and the same for the matched groups.</td></tr>
+          <tr><td>Matched-only workbook</td><td>The matched rows of every pairing, with MatchIt's distance, weights and matched set.</td></tr>
+          <tr><td>Figure folder</td><td>Every panel on its own and the combined figures, before matching and for each matched pairing, each with its legend file, and the <code>WHWK input</code> folder.</td></tr>
+          <tr><td>Love plots</td><td>Covariate balance before and after matching, in the figure formats you chose, with a legend file.</td></tr>
+          <tr><td>CSV files</td><td>The “Astigmatism (JCRS 2025)” sheet, and (optional) the analyzed rows, with a GroupLabel column and the values as analyzed.</td></tr>
         </tbody>
       </table></div>
-      <p>Optional tabs lay the data out for mEYEstro and AstigMATIC, for users who want to check the same eyes in those tools.</p>
-      <figure class="shot" style="margin:22px 0"><img src="assets/shot_pubtable.jpg" alt="The publication-style table in Excel" loading="lazy" width="1500" height="686"><figcaption>The publication-style table: baseline, preoperative and outcome blocks in one sheet.</figcaption></figure>
+      <p>Optional tabs lay the data out for mEYEstro and AstigMATIC (<code>mEYEstro_&lt;group&gt;</code>, <code>AstigMATIC_&lt;group&gt;</code>; for matched pairing k <code>mEYEstro_M&lt;k&gt;_&lt;group&gt;</code>), for users who want to check the same eyes in those tools.</p>
+      <figure class="shot" style="margin:22px 0"><img src="assets/shot_pubtable.jpg" alt="The publication-style table in Excel" loading="lazy" width="1500" height="718"><figcaption>The publication-style table: baseline, preoperative and outcome blocks in one sheet.</figcaption></figure>
       <p>You can download complete sample outputs from the <a href="examples.html#outputs">examples page</a>.</p>
 
       <h2 id="repro">Reproducibility</h2>
       <ul>
-        <li>A <strong>preset</strong> stores every setting of a study in one small JSON file. Loading it restores the analysis exactly, on your computer or a colleague's.</li>
-        <li>The <strong>Manifest</strong> sheet of every workbook records the StandardEyes version and build (for runs started from the app), the R and package versions, the input file and its checksum, the number of inclusion rules, the acuity, matching, GEE and regression settings, and the random seeds. The preset holds every setting, so keep it with the workbook.</li>
-        <li>Steps that use random numbers (matching order, the bootstrap, Monte-Carlo exact tests) use fixed seeds, so the same input gives the same output.</li>
+        <li>A <strong>preset</strong> stores every setting of a study in one small JSON file. Loading it restores the analysis exactly, on your computer or a colleague's. A preset saved by version 1.0.0 still loads; a setting it does not contain takes the 1.1.0 default.</li>
+        <li>The <strong>Manifest</strong> sheet of every workbook records the StandardEyes version and build (also for runs started from the command line), the run duration, the R and package versions, the input file and its checksum, the settings that shape the numbers (matching scale, GEE inference, table tests, P value style, acuity, figure and astigmatism settings) and the random seeds. Workbooks name “StandardEyes” as their author, never your Windows user name.</li>
+        <li>Steps that use random numbers (matching order, the bootstraps, permutation and Monte-Carlo exact tests) use fixed seeds, so the same input gives the same output.</li>
         <li>All numbers are computed by the R engine, which also runs from the command line with the same settings file.</li>
       </ul>
 
       <h2 id="limits">Known limits</h2>
       <ul>
         <li>The ready-to-run download is for Windows and needs R 4.5. Other systems can run from source.</li>
-        <li>On a matched group with weights that are not all 1, there is no weighted test for a categorical variable with more than two levels, nor for a proportion when one group has no events. Those cells say so.</li>
-        <li>The robust astigmatism centroid test has no weighted form. On such a matched group the figure states that it does not use the weights.</li>
-        <li>Confidence intervals of the clustered models are Wald intervals without small-sample correction, hence the caution for groups with few patients.</li>
+        <li>On a matched cohort with unequal weights, the astigmatism tests other than a GEE centroid test do not use the matching weights; the output says so.</li>
+        <li>Left eyes are not mirrored in the astigmatism analysis. With a mapped eye column the sheet lists the right-eye and left-eye centroids apart.</li>
+        <li>Clustered P values from a group with 2 to 9 patients carry a caution even with the small-sample correction.</li>
         <li>PDF figures cannot render right-to-left text (Hebrew, Arabic) in group labels. Use PNG or TIFF for those.</li>
+        <li>Figures are written in RGB. R cannot write CMYK files.</li>
         <li>One analysis runs at a time.</li>
       </ul>
 
@@ -260,15 +283,17 @@
       <details class="qa"><summary>Is it free? May I use it for a commercial study?</summary><div class="a"><p>Yes to both. It is released under the MIT License.</p></div></details>
       <details class="qa"><summary>Do I need to know R?</summary><div class="a"><p>No. R must be installed, but you never open it. Everything is done in the app's interface.</p></div></details>
       <details class="qa"><summary>Does it run on a Mac?</summary><div class="a"><p>The ready-to-run download is for Windows 10 and 11. On macOS or Linux the app runs from source with Python and R 4.5. The <a href="https://github.com/StandardEyes/standardeyes.github.io#running-from-source-any-operating-system">README</a> lists the steps.</p></div></details>
+      <details class="qa"><summary>Why do I get different numbers than with version 1.0.0?</summary><div class="a"><p>Version 1.1.0 changes several defaults: clustered table tests, the small-sample correction of GEE, the logit caliper, logMAR acuity, the journal P value style and the astigmatism analysis. Each change, and the setting that gives the 1.0.0 behavior back, is listed under <a href="download.html#new">what is new in 1.1.0</a>. The Manifest sheet records the settings of every run.</p></div></details>
       <details class="qa"><summary>My data is in CSV or an old .xls file. Can I use it?</summary><div class="a"><p>Open it in Excel and save it as <code>.xlsx</code>. The app reads <code>.xlsx</code> and <code>.xlsm</code> files.</p></div></details>
       <details class="qa"><summary>My acuity is in Snellen or logMAR. Do I have to convert it?</summary><div class="a"><p>No. Choose the notation on the <b>Variables &amp; Types</b> tab and the app reads it as it is. See <a href="#va">visual acuity notations</a>.</p></div></details>
       <details class="qa"><summary>Can I use it for one group only?</summary><div class="a"><p>StandardEyes is built for comparisons and needs at least two groups. For a single group, the tools mEYEstro and AstigMATIC are a good fit.</p></div></details>
-      <details class="qa"><summary>Can I use it for cataract or lens surgery?</summary><div class="a"><p>Yes. The Cataract panel set measures efficacy against postoperative CDVA, and the optional target column handles eyes that were not aimed at plano.</p></div></details>
+      <details class="qa"><summary>Can I use it for cataract or lens surgery?</summary><div class="a"><p>Yes. The Cataract panel set measures efficacy against postoperative CDVA, and the optional target columns handle eyes that were not aimed at plano.</p></div></details>
       <details class="qa"><summary>Is anything saved before I choose to save?</summary><div class="a"><p>With <b>Preview only</b> ticked, no. Results are held inside the app so you can look at them, and nothing is written to your output folder until you save. Without it, the run saves straight to the output folder.</p></div></details>
-      <details class="qa"><summary>Why does a table show one P value and the figure another?</summary><div class="a"><p>The table P value comes from the eye-level test named beside it. The figure, by default, prints the P value clustered by patient. Switch on the GEE columns (source: main model) to show the clustered P value in the table as well. With two groups it then equals the figure's P value, provided a patient ID is mapped and, on a matched group with unequal weights, <b>Use matching weights</b> is on. With three or more groups the figure prints an overall test, while the GEE columns compare each group with the reference.</p></div></details>
-      <details class="qa"><summary>Are the P values corrected for multiple comparisons?</summary><div class="a"><p>Only the group-against-reference lines on the figures, by the Holm method. The P values in the tables, the GEE sheets and the regression sheets are not adjusted. Name a primary outcome in advance, and read borderline P values with the number of tests in mind.</p></div></details>
+      <details class="qa"><summary>Why does a table show one P value and the figure another?</summary><div class="a"><p>By default they are the same: with a patient ID mapped, the table and the figure of an outcome use the same patient-clustered test. They can differ when <b>Summary-table tests</b> is set to classical (the figures stay clustered, and the Publication Table and the legend files say so). With three or more groups the figure prints an overall test, while the GEE columns compare each group with the reference; the figure's versus-reference lines come from the same model, Holm-adjusted as in the tables.</p></div></details>
+      <details class="qa"><summary>Are the P values corrected for multiple comparisons?</summary><div class="a"><p>The comparisons of each group with the reference are Holm-adjusted within each variable, in the tables and on the figures, and marked <code>[Holm]</code>. The astigmatism tests are Holm-adjusted within each vector, and the sheet prints the family. P values of different variables are not adjusted against each other: name a primary outcome in advance, and read borderline P values with the number of tests in mind.</p></div></details>
+      <details class="qa"><summary>Can I check the astigmatism results in the journal's reference tool?</summary><div class="a"><p>Yes. Each run with double-angle plots writes a <code>WHWK input</code> folder with tab-delimited files for the Wilcox-Holladay-Wang-Koch R functions (<a href="https://osf.io/xhe8u/">osf.io/xhe8u</a>). That tool treats eyes as independent, so with both eyes of patients its P values ignore the pairing that StandardEyes takes into account.</p></div></details>
       <details class="qa"><summary>How do I share a study with a colleague?</summary><div class="a"><p>Save the study as a preset and send the <code>.json</code> file from <code>webapp\presets</code>, or use <b>Download config JSON</b>. The preset holds the settings only, not the data. Your colleague loads the same spreadsheet and the preset, and gets the same analysis.</p></div></details>
-      <details class="qa"><summary>How should I describe the analysis in my methods section?</summary><div class="a"><p>Name the tests shown in the Test column of your summary sheets, describe the matching and GEE settings listed in the Manifest sheet, give the StandardEyes version, and <a href="about.html#cite">cite the software</a>. The statistical reference has wording you can adapt.</p></div></details>
+      <details class="qa"><summary>How should I describe the analysis in my methods section?</summary><div class="a"><p>Name the tests shown in the Test column of your summary sheets (or the footnote of the publication-style table), describe the matching, GEE and astigmatism settings listed in the Manifest sheet, use the figure legend files for the figure legends, give the StandardEyes version, and <a href="about.html#cite">cite the software</a>. The statistical reference has wording you can adapt.</p></div></details>
       <details class="qa"><summary>I found a problem. Where do I report it?</summary><div class="a"><p><a href="https://github.com/StandardEyes/standardeyes.github.io/issues">Open an issue on GitHub</a> or write to <a href="mailto:dror.ben.ephraim@gmail.com">dror.ben.ephraim@gmail.com</a>. Please include the version and the run log, and never send patient data.</p></div></details>
     </div>
   </div>
@@ -282,7 +307,7 @@
       <div class="brand small"><span class="wm">Standard<b>Eyes</b></span></div>
       <p>Standardized comparative analysis and outcomes reporting for refractive surgery. Free, local, reproducible.</p>
       <p><b style="color:#fff">For Ophthalmologists, By Ophthalmologists.</b></p>
-      <p class="fine">Version 1.0.0 · MIT License · © 2026 Noyman DBE, Mimouni M, Safir M</p>
+      <p class="fine">Version 1.1.0 · MIT License · © 2026 Noyman DBE, Mimouni M, Safir M</p>
     </div>
     <div>
       <h2 class="fh">The app</h2>

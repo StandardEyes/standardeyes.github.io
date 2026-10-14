@@ -1,41 +1,62 @@
 WEBVTT
 
-00:00:00.688 --> 00:00:03.535
+00:00:00.604 --> 00:00:03.451
 Tutorial five. The StandardEyes figures.
 
-00:00:07.879 --> 00:00:14.488
-The standard refractive surgery figures are drawn from your data, with every group on each panel, in its own colour.
+00:00:07.752 --> 00:00:14.268
+The standard refractive surgery figures are drawn from your data, with every group on each panel, in its own color.
 
-00:00:14.761 --> 00:00:23.784
+00:00:14.474 --> 00:00:24.565
+Figures are drawn in journal style: white, with no frames or shading. Each figure's title, method notes and abbreviations go to a legend file beside it.
+
+00:00:24.735 --> 00:00:33.620
+You can lay every figure out at a journal column width. The text then keeps its size, and a combined figure taller than a page is split into pages.
+
+00:00:33.871 --> 00:00:42.895
 For stability over time, map one row for each follow-up visit. The spherical equivalent is read from a column, or computed from sphere and cylinder.
 
-00:00:24.091 --> 00:00:28.006
+00:00:43.173 --> 00:00:47.088
 Choose the panel set: full, refractive, or cataract.
 
-00:00:28.415 --> 00:00:34.188
+00:00:47.525 --> 00:00:53.298
 The app tells you exactly which panels you will get, and the list updates as you change the options.
 
-00:00:34.480 --> 00:00:44.433
-Astigmatism follows the JCRS standard: double-angle plots with the centroid, a ninety-five percent region, and one test that compares the centroids.
+00:00:53.547 --> 00:01:06.472
+Astigmatism follows the JCRS 2025 standard: double-angle plots of the preoperative astigmatism, the surgically induced astigmatism and the prediction error, in plus-cylinder format.
 
-00:00:44.710 --> 00:00:50.901
-The P values on the figures are clustered by patient, and each figure prints the test that produced its numbers.
+00:01:06.641 --> 00:01:17.662
+Each cohort gets a ninety-five percent region of its eyes: a depth-based convex polygon, built as in the WHWK functions, the journal's reference tool.
 
-00:00:51.173 --> 00:00:57.550
+00:01:17.846 --> 00:01:26.777
+The centroid gets a ninety-five percent confidence region from nine hundred and ninety-nine bootstrap centroids, and each centroid is tested against zero.
+
+00:01:26.994 --> 00:01:34.531
+The cohorts are compared on the centroid, the precision and the mean magnitude, with robust tests that resample patients.
+
+00:01:34.717 --> 00:01:42.905
+The workbook gets two astigmatism sheets: one with every statistic and test of the standard, and one with the vectors of each eye.
+
+00:01:43.071 --> 00:01:50.934
+And the run writes input files for the WHWK functions, so the same eyes can be checked in the journal's reference tool.
+
+00:01:51.117 --> 00:01:57.679
+The P values on the figures are clustered by patient, and each figure names the test that produced its numbers.
+
+00:01:57.878 --> 00:02:04.254
 Map the refraction and acuity columns once. The figures and the export tabs all read the same roles.
 
-00:00:57.794 --> 00:01:04.263
+00:02:04.578 --> 00:02:11.047
 Optional workbook tabs add a publication-style table, and tabs laid out for mEYEstro and AstigMATIC.
 
-00:01:05.107 --> 00:01:10.508
+00:02:12.395 --> 00:02:17.796
 This is what you get. The combined figure shows every panel, with every group on it.
 
-00:01:11.688 --> 00:01:19.597
-The double-angle plot shows each group's centroid and ninety-five percent region, with the centroid comparison printed on the figure.
+00:02:18.918 --> 00:02:26.688
+The double-angle plot of the prediction error shows each cohort's centroid, its confidence region, and the region of the eyes.
 
-00:01:20.772 --> 00:01:27.938
+00:02:27.851 --> 00:02:35.017
 And stability over time shows the mean spherical equivalent at each visit, with the number of eyes behind every point.
 
-00:01:28.696 --> 00:01:33.168
+00:02:35.910 --> 00:02:40.383
 StandardEyes. For ophthalmologists, by ophthalmologists.
 

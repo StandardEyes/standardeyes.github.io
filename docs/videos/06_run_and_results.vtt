@@ -1,38 +1,41 @@
 WEBVTT
 
-00:00:00.705 --> 00:00:03.877
+00:00:00.710 --> 00:00:03.882
 Tutorial six. Run, preview and save.
 
-00:00:04.942 --> 00:00:09.508
+00:00:08.166 --> 00:00:16.215
+Before you run, the Run tab lists how the numbers will be computed and shown. The workbook's Manifest sheet records the same settings.
+
+00:00:16.401 --> 00:00:20.966
 Tick Preview only, if you want to look at the results before anything is saved.
 
-00:00:12.291 --> 00:00:19.179
+00:00:23.660 --> 00:00:30.548
 Press Run. The log lists every step as it happens: filters, conversions, tests and figures.
 
-00:00:19.434 --> 00:00:23.674
+00:00:30.723 --> 00:00:34.963
 A full run takes a minute or two. It is shown here speeded up.
 
-00:00:30.767 --> 00:00:33.475
+00:00:50.141 --> 00:00:52.849
 Done. The workbook and the figures are ready.
 
-00:00:33.746 --> 00:00:39.380
-Previews of the figures appear in the app. Each panel is also written as its own file.
+00:00:53.032 --> 00:01:00.012
+Previews of the figures appear in the app. Each figure is also written as its own file, with a legend file beside it.
 
-00:00:40.196 --> 00:00:44.111
+00:01:00.810 --> 00:01:04.726
 Here is the combined figure, with every panel and every group.
 
-00:00:45.288 --> 00:00:47.856
-And the double-angle astigmatism plots.
+00:01:05.805 --> 00:01:13.063
+And the double-angle plots of the preoperative astigmatism, the surgically induced astigmatism and the prediction error.
 
-00:00:48.731 --> 00:00:52.228
+00:01:13.943 --> 00:01:17.440
 You can open any sheet of the workbook without leaving the app.
 
-00:00:54.815 --> 00:01:03.188
+00:01:20.035 --> 00:01:28.409
 This is the outcome table, exactly as it is written to Excel: a column for each group, the P value, and the test that was used.
 
-00:01:03.471 --> 00:01:09.523
+00:01:28.622 --> 00:01:34.674
 When you are happy with the results, save everything to your output folder, or only the files you want.
 
-00:01:10.361 --> 00:01:14.834
+00:01:35.629 --> 00:01:40.102
 StandardEyes. For ophthalmologists, by ophthalmologists.
 

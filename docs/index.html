@@ -65,7 +65,7 @@
         </a>
         <a class="btn lg ghost" href="tutorials.html">Watch the tutorials</a>
       </div>
-      <p class="meta"><b>Free · v1.0.0 · Windows 10 / 11</b> · 73 MB ZIP, no installer · needs <a href="https://cran.r-project.org/bin/windows/base/old/4.5.2/">R 4.5.2</a> · MIT License</p>
+      <p class="meta"><b>Free · v1.1.0 · Windows 10 / 11</b> · 73 MB ZIP, no installer · needs <a href="https://cran.r-project.org/bin/windows/base/old/4.5.2/">R 4.5.2</a> · MIT License · <a href="download.html#new">What is new in 1.1.0</a></p>
     </div>
     <div class="frame">
       <div class="bar"><i></i><i></i><i></i><span>127.0.0.1 — StandardEyes</span></div>
@@ -92,32 +92,32 @@
       <div class="card feature">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h16M9 5v14M15 5v14"/></svg></div>
         <h3>Group tables with the right test</h3>
-        <p>Continuous, ordinal, dichotomous and categorical variables each get a fitting summary and test, for two groups or more. The summary sheets name the test beside every P value. Visual acuity can be decimal, logMAR, Snellen or ETDRS letters.</p>
+        <p>Continuous, ordinal, dichotomous and categorical variables each get a fitting summary and test, for two groups or more, clustered by patient when both eyes are analyzed. The summary sheets name the test beside every P value, in journal style (.27, &lt;.001). Acuity typed as decimal, logMAR, Snellen or ETDRS letters is analyzed in logMAR and shown as Snellen.</p>
       </div>
       <div class="card feature">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="12" r="5"/><circle cx="16" cy="12" r="5"/></svg></div>
         <h3>Propensity-score matching</h3>
-        <p>A live preview shows how many eyes each group keeps before you run. Balance is shown as standardized mean differences and in a love plot, a chart of each covariate's imbalance before and after matching.</p>
+        <p>Matching on the logit of the propensity score, with the usual 0.2-SD caliper. A live preview shows how many eyes each group keeps before you run. Balance is shown as standardized mean differences and in a love plot, a chart of each covariate's imbalance before and after matching.</p>
       </div>
       <div class="card feature">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.8"/></svg></div>
         <h3>Two eyes, one patient</h3>
-        <p>Statistical models (GEE, generalized estimating equations) treat the two eyes of one patient as related. Patient-level variables are counted once per person, and the P values on the figures account for the pairing too.</p>
+        <p>Statistical models (GEE, generalized estimating equations) treat the two eyes of one patient as related, with a small-sample correction for studies with few patients. Patient-level variables are counted once per person, and the P values in the tables and on the figures account for the pairing.</p>
       </div>
       <div class="card feature">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V4M4 20h16M8 16v-5M12 16V8M16 16v-7M20 16v-3"/></svg></div>
         <h3>The StandardEyes figures</h3>
-        <p>The standard refractive-surgery graphs with every group on one chart in its own colour, and a stability-over-time curve built from your follow-up visits.</p>
+        <p>The standard refractive-surgery graphs with every group on one chart in its own color, and a stability-over-time curve built from your follow-up visits. Journal style, at a journal column width if you like, as TIFF, PNG, JPEG, PDF or EPS, with each figure's legend text in a file beside it.</p>
       </div>
       <div class="card feature">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18"/><circle cx="15.5" cy="9" r="1.4" fill="currentColor"/></svg></div>
-        <h3>Astigmatism to the JCRS standard</h3>
-        <p>Double-angle plots show each group's mean astigmatism vector (the centroid) with its confidence region and a 95% region of the eyes. The centroids are compared with one two-dimensional test.</p>
+        <h3>Astigmatism to the JCRS 2025 standard</h3>
+        <p>Double-angle plots of the preoperative astigmatism, the surgically induced astigmatism and the prediction error, in plus-cylinder format. Each group's centroid with its confidence region and a 95% region of the eyes, built as in the journal's reference tool, and the standard's tests on a sheet of their own.</p>
       </div>
       <div class="card feature">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h7"/></svg></div>
         <h3>Workbooks a reviewer can open</h3>
-        <p>Excel files with a contents page, a publication-style table and a sheet that lists the main settings and the software versions of the run.</p>
+        <p>Excel files with a contents page, a publication-style table, the astigmatism sheets and a Manifest sheet that lists the settings, the version and the build of the run.</p>
       </div>
     </div>
   </div>
@@ -131,9 +131,9 @@
       <p>Simulated groups, one run, nothing edited afterwards. Click a figure to enlarge it.</p>
     </div>
     <div class="gallery">
-      <figure class="fig"><button class="zoom" data-caption="The combined figure: all groups on every panel, with an overall test and each group against the reference group."><img src="assets/fig_composite.jpg" alt="StandardEyes combined figure with three groups on every panel" loading="lazy" width="1400" height="1352"></button><figcaption>The combined figure: all groups on every panel, with an overall test and each group against the reference group.</figcaption></figure>
+      <figure class="fig"><button class="zoom" data-caption="The combined figure: all groups on every panel, with an overall test and each group against the reference group."><img src="assets/fig_composite.jpg" alt="StandardEyes combined figure with three groups on every panel" loading="lazy" width="1400" height="1225"></button><figcaption>The combined figure: all groups on every panel, with an overall test and each group against the reference group.</figcaption></figure>
       <div class="col">
-        <figure class="fig"><button class="zoom" data-caption="Double-angle plot: the mean vector, its confidence region and a 95% region for each group."><img src="assets/fig_double_angle.jpg" alt="Double-angle astigmatism plot with a mean vector and 95% region per group" loading="lazy" width="1020" height="990"></button><figcaption>Double-angle plot with a mean vector and a 95% region per group.</figcaption></figure>
+        <figure class="fig"><button class="zoom" data-caption="Double-angle plot of the prediction error: each group's centroid, its 95% confidence region and the 95% region of the eyes."><img src="assets/fig_double_angle.jpg" alt="Double-angle plot of the astigmatic prediction error with a centroid and 95% regions per group" loading="lazy" width="1020" height="990"></button><figcaption>Double-angle plot of the prediction error, with each group's centroid and 95% regions.</figcaption></figure>
         <figure class="fig"><button class="zoom" data-caption="Stability over time, with the number of eyes at every visit."><img src="assets/fig_stability.jpg" alt="Stability of spherical equivalent over time for each group" loading="lazy" width="975" height="810"></button><figcaption>Stability over time, with the number of eyes at every visit.</figcaption></figure>
       </div>
     </div>
@@ -180,7 +180,7 @@
     <div class="sechead">
       <div class="kicker">Who made it</div>
       <h2>For Ophthalmologists, By Ophthalmologists</h2>
-      <p>We are ophthalmologists who analyse this kind of data. StandardEyes grew out of our own refractive-surgery research, where each comparative study meant rebuilding the same analysis by hand.</p>
+      <p>We are ophthalmologists who analyze this kind of data. StandardEyes grew out of our own refractive-surgery research, where each comparative study meant rebuilding the same analysis by hand.</p>
     </div>
     <div class="cta">
       <a class="btn ghost" href="about.html#authors">Meet the authors</a>
@@ -194,7 +194,7 @@
     <h2>Ready to run your first comparison?</h2>
     <p>Download the app, open one of the example studies, and press Run. It takes about five minutes.</p>
     <div class="cta">
-      <a class="btn lg light" href="download.html">Download StandardEyes 1.0.0</a>
+      <a class="btn lg light" href="download.html">Download StandardEyes 1.1.0</a>
     </div>
   </div>
 </section>
@@ -207,7 +207,7 @@
       <div class="brand small"><span class="wm">Standard<b>Eyes</b></span></div>
       <p>Standardized comparative analysis and outcomes reporting for refractive surgery. Free, local, reproducible.</p>
       <p><b style="color:#fff">For Ophthalmologists, By Ophthalmologists.</b></p>
-      <p class="fine">Version 1.0.0 · MIT License · © 2026 Noyman DBE, Mimouni M, Safir M</p>
+      <p class="fine">Version 1.1.0 · MIT License · © 2026 Noyman DBE, Mimouni M, Safir M</p>
     </div>
     <div>
       <h2 class="fh">The app</h2>

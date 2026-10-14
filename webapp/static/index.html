@@ -151,7 +151,7 @@
       <template x-if="file && counts">
         <div>
           <div class="counts">
-            <div class="countbox"><div class="n" x-text="(counts.after_subsets ?? counts.after_filters).toLocaleString()"></div><div class="l">in analysis</div></div>
+            <div class="countbox"><div class="n" x-text="(counts.in_analysis ?? counts.after_subsets ?? counts.after_filters).toLocaleString()"></div><div class="l">in analysis</div></div>
             <div class="countbox"><div class="n" x-text="counts.total_rows.toLocaleString()"></div><div class="l">total rows</div></div>
           </div>
           <div style="margin-top:8px" class="small">
@@ -298,10 +298,10 @@
           <button class="btn secondary sm" @click="exportFiltered()" :disabled="filteredExport.busy">
             <span x-text="filteredExport.busy ? 'exporting…' : '⭳ Export filtered rows (CSV)'"></span>
           </button>
-          <span class="muted small">writes the rows currently passing filters/subsets to the output folder — no analysis run needed</span>
+          <span class="muted small">writes the rows the analysis will use (in a group, after filters and subsets), GroupLabel first, to the output folder — the rows of the run's filtered CSV, no analysis run needed</span>
         </div>
         <p class="small" style="color:var(--ok-tx)" x-show="filteredExport.path"
-           x-text="'Saved '+(filteredExport.rows!==null?filteredExport.rows.toLocaleString():'')+' rows to '+filteredExport.path"></p>
+           x-text="'Saved '+(filteredExport.rows!==null?filteredExport.rows.toLocaleString():'')+' rows to '+filteredExport.path+(filteredExport.grouped===false?' (no group is defined yet, so every row passing the filters and subsets)':'')"></p>
         <p class="small" style="color:var(--err)" x-show="filteredExport.error" x-text="filteredExport.error"></p>
         <template x-if="!file"><p class="muted">No file loaded.</p></template>
         <template x-if="file">
@@ -446,7 +446,7 @@
             </select>
           </div>
         </div>
-        <p class="opt-hint" style="margin-left:0">Applies to every column mapped to a VA role (Pre/Post UCVA and BCVA, Special outputs tab) and to the LogMAR columns below. Snellen may be written 20/x or 6/x, with letter suffixes such as 20/25-2. Off-chart entries (CF, HM, LP, NLP) become missing and are counted in the run log; they are never given an invented acuity. The run stops if most of a column cannot be read in the chosen notation, and when a column declared as ETDRS letters looks like decimal acuity (more than half of its numbers are not whole numbers, or its largest value is below 5). Excel turns a typed 6/12 into a date, so keep Snellen columns formatted as text.</p>
+        <p class="opt-hint" style="margin-left:0">Applies to every column mapped to a VA role (Pre/Post UCVA and BCVA, Special outputs tab) and to the logMAR columns below. Snellen may be written 20/x or 6/x, with letter suffixes such as 20/25-2. Off-chart entries (CF, HM, LP, NLP) become missing and are counted in the run log; they are never given an invented acuity. The run stops if most of a column cannot be read in the chosen notation, and when a column declared as ETDRS letters looks like decimal acuity (more than half of its numbers are not whole numbers, or its largest value is below 5). Excel turns a typed 6/12 into a date, so keep Snellen columns formatted as text.</p>
         <template x-if="vaMismatch().length">
           <p class="opt-hint warnline" style="margin-left:0"><b>Check the notation:</b>
             <template x-for="m in vaMismatch()" :key="m.col">
@@ -457,25 +457,27 @@
         <template x-for="(w,wi) in vaWarn" :key="wi">
           <p class="opt-hint warnline" role="alert" style="margin-left:0" x-text="'⚠ '+w"></p>
         </template>
-        <label class="switch"><input type="checkbox" x-model="s.do_logmar"> Analyse visual-acuity columns in LogMAR</label>
-        <p class="opt-hint">LogMAR = −log10(decimal VA). Pick the VA columns to analyse in LogMAR; summaries, tests and GEE then run on the LogMAR values (lower = better vision, 0 = 20/20). <b>Filter rules and exclusions always use the values as recorded in your file</b>, so a filter typed in your own units means what it says.
-          <template x-if="s.va_format==='logmar'"><span><br>Your file is already in LogMAR: the VA columns are analysed as recorded and never converted a second time, so this switch changes nothing.</span></template></p>
+        <label class="switch"><input type="checkbox" x-model="s.do_logmar"> Analyze visual acuity in logMAR <span class="muted small">(on by default)</span></label>
+        <p class="opt-hint">logMAR = −log10(decimal VA); summaries, tests and GEE run on the logMAR values (lower = better vision, 0 = 20/20). An acuity cell then reads the <b>Snellen geometric mean with the logMAR mean ± SD</b>, e.g. “20/20 (0.00 ± 0.05 logMAR)”, and the range in Snellen. Untick to analyze acuity as recorded (the v1.0.0 default). <b>Filter rules and exclusions always use the values as recorded in your file</b>, so a filter typed in your own units means what it says.
+          <template x-if="s.va_format==='logmar'"><span><br>Your file is already in logMAR: the VA columns are analyzed as recorded and never converted a second time, so this switch changes nothing.</span></template></p>
         <div x-show="s.do_logmar">
-          <label class="field">Columns to analyse in LogMAR</label>
+          <label class="field">Columns to analyze in logMAR</label>
           <div class="ms" x-data="{q:''}">
-            <div class="chips"><template x-for="v in s.logmar_cols_raw" :key="v"><button type="button" class="chip" @click="toggle(s.logmar_cols_raw,v)" :aria-label="'remove '+v" :title="'remove '+v" x-text="v"></button></template></div>
+            <div class="chips"><template x-for="v in s.logmar_cols_raw" :key="v"><button type="button" class="chip" @click="toggleLogmar(v)" :aria-label="'remove '+v" :title="'remove '+v" x-text="v"></button></template></div>
             <input class="ms-search" placeholder="filter…" x-model="q">
             <div class="ms-list"><template x-for="c in filterOpts(cols,q)" :key="c">
-              <label class="ms-item"><input type="checkbox" :checked="has(s.logmar_cols_raw,c)" @change="toggle(s.logmar_cols_raw,c)"><span x-text="c"></span></label>
+              <label class="ms-item"><input type="checkbox" :checked="has(s.logmar_cols_raw,c)" @change="toggleLogmar(c)"><span x-text="c"></span></label>
             </template></div>
           </div>
-          <p class="opt-hint" style="margin-left:0">The figures and the mEYEstro / Alpins export tabs always read acuity as decimal (converted from the notation above) — you can convert any column freely; only the statistical analysis switches to LogMAR.</p>
+          <p class="opt-hint" style="margin-left:0" x-show="!_logmarUser">The list follows the columns mapped to the four VA roles (Pre/Post UCVA and BCVA, Special outputs tab) until you edit it.</p>
+          <p class="opt-hint warnline" style="margin-left:0" x-show="s.do_logmar && s.va_format!=='logmar' && logmarRolesLeftOut().length" x-text="'Not in the list, so analyzed as recorded: '+logmarRolesLeftOut().join(', ')+'.'"></p>
+          <p class="opt-hint" style="margin-left:0">The figures and the mEYEstro / Alpins export tabs always read acuity as decimal (converted from the notation above) — you can convert any column freely; only the statistical analysis switches to logMAR.</p>
         </div>
       </div>
 
       <div class="card">
         <h3>Variable roles &amp; statistical types</h3>
-        <p class="hint">Assign each variable to a section (Baseline / Preop-Intraop / Outcome) and a type. Type controls the summary style and test (t-test/ANOVA, Wilcoxon/Kruskal, χ²/Fisher).</p>
+        <p class="hint">Assign each variable to a section (Baseline / Preop-Intraop / Outcome) and a type. Type controls the summary style and test: with a patient ID mapped and a patient with two analyzed eyes, a per-eye row's P comes from a patient-clustered GEE matching its type (linear, on ranks, logistic, joint test of the levels); otherwise from t-test/ANOVA, Wilcoxon/Kruskal, χ²/Fisher (see <b>Summary-table tests</b>, GEE tab).</p>
         <div class="grid4">
           <template x-for="f in typingFields()" :key="f.key">
             <div class="col">
@@ -620,7 +622,7 @@
     <div x-show="tab==='filters'" x-cloak>
       <div class="card">
         <h3>Filter rules <span class="pill" x-text="s.filters.length"></span></h3>
-        <p class="hint">Rows are kept when they satisfy the rule (NA values are kept, matching the R engine). Type in the column box to search; for <b>in / notin</b> pick values from the list; <b>between</b> has separate lower / upper cells. Rules always compare the values <b>as recorded in your file</b> (e.g. decimal acuity), even for columns analysed in LogMAR.</p>
+        <p class="hint">Rows are kept when they satisfy the rule (NA values are kept, matching the R engine). Type in the column box to search; for <b>in / notin</b> pick values from the list; <b>between</b> has separate lower / upper cells. Rules always compare the values <b>as recorded in your file</b> (e.g. decimal acuity), even for columns analyzed in logMAR.</p>
         <template x-for="(f,i) in s.filters" :key="f._uid ?? i">
          <div class="filter-block">
           <div class="repeat-row">
@@ -733,7 +735,7 @@
           </div>
         </div>
         <p class="small errline" x-show="subsetColMissing()" style="margin:6px 0 0"
-           x-text="'The subset column “'+s.subset_col_raw+'” is not in this file — re-map it or clear it (choose “— none —”) to analyse all rows.'"></p>
+           x-text="'The subset column “'+s.subset_col_raw+'” is not in this file — re-map it or clear it (choose “— none —”) to analyze all rows.'"></p>
         <template x-for="(g,i) in s.subsets" :key="g._uid ?? i">
           <div class="repeat-row" style="margin-top:10px" :style="g.enabled===false ? 'opacity:.55' : ''">
             <div style="width:190px">
@@ -802,11 +804,12 @@
         </div>
         <div class="grid4" style="margin-top:12px">
           <div><label class="field" for="psm-method">Method</label><select id="psm-method" x-model="s.psm_method" @change="psmMethodNote=fitPsmToDistance()"><template x-for="o in PSM_METHODS" :key="o[0]"><option :value="o[0]" x-text="o[1]"></option></template></select></div>
-          <div><label class="field">Distance</label><select x-model="s.psm_distance" :disabled="!psmUses('distance')" @change="psmMethodNote=fitPsmToDistance()"><template x-for="o in ['logit','glm','mahalanobis','robust_mahalanobis']" :key="o"><option :value="o" x-text="o" :disabled="!psmDistanceOk(o)"></option></template></select></div>
+          <div><label class="field" for="psm-distance">Distance <span class="muted small">(propensity-score scale)</span></label><select id="psm-distance" x-model="s.psm_distance" :disabled="!psmUses('distance')" @change="psmMethodNote=fitPsmToDistance()"><template x-for="o in [['linear.logit','logit of the propensity score (default)'],['logit','propensity score, probability scale'],['glm','propensity score, probability scale (glm)'],['mahalanobis','mahalanobis'],['robust_mahalanobis','robust_mahalanobis']].concat(['linear.logit','logit','glm','mahalanobis','robust_mahalanobis'].includes(s.psm_distance) ? [] : [[s.psm_distance, s.psm_distance+' (from the loaded settings)']])" :key="o[0]"><option :value="o[0]" x-text="o[1]" :disabled="!psmDistanceOk(o[0])"></option></template></select></div>
           <div><label class="field">Ratio</label><input type="number" x-model.number="s.psm_ratio" min="1" max="20" :disabled="!psmUses('ratio')"></div>
           <div><label class="field">Match order</label><select x-model="s.psm_m_order" :disabled="!psmUses('order')"><template x-for="o in ['largest','smallest','random','data','closest','farthest']" :key="o"><option :value="o" x-text="o" :disabled="!psmOrderOk(o)"></option></template></select></div>
         </div>
         <p class="small warnline" role="alert" x-show="psmMethodNote" x-text="psmMethodNote"></p>
+        <p class="opt-hint">Caliper scale: with the <b>logit of the propensity score</b> (default) the caliper is in SDs of the logit of the score (Austin 2011); with <b>probability scale</b> it is in SDs of the score itself (the v1.0.0 default). The PSM sheet, the Manifest and the balance plot name the scale used.</p>
         <p class="hint" x-show="psmMethodHint(s.psm_method)" x-text="psmMethodHint(s.psm_method)"></p>
         <div class="grid3" style="margin-top:12px">
           <label class="switch"><input type="checkbox" x-model="s.psm_replace" :disabled="!psmUses('replace')"> Replacement</label>
@@ -817,7 +820,7 @@
           <div><label class="field" for="psm-seed">Random seed <span class="muted small">(random match order and ties)</span></label>
             <input id="psm-seed" type="number" step="1" x-model.number="s.psm_seed" :disabled="!psmUses('seed')"></div>
         </div>
-        <p class="opt-hint" style="margin-left:0">With <b>Standardized</b> on, the caliper is in SDs of the propensity score; 0.2 is a common choice. A <b>mahalanobis</b> distance is not a propensity score: it takes no caliper and no largest / smallest match order (both are adjusted when you pick it), and subclassification cannot use it. A ratio above 1 or <b>Replacement</b> on give the matched controls unequal weights: the matched tables, figure P values and GEE then use those weights, and the workbook notes it above the matched tables. The <b>random seed</b> is fixed, so the same settings give the same matched cohort every run (and in the preview below). The four methods offered here run with the R packages bundled with the app; the live matched-count preview covers <b>nearest</b> only.</p>
+        <p class="opt-hint" style="margin-left:0">With <b>Standardized</b> on, the caliper is in SDs of the score on the scale of the chosen distance — by default the <b>logit of the propensity score</b>, where 0.2 SD is the usual choice (Austin 2011); with the probability scale (the v1.0.0 default) it is in SDs of the score itself. A <b>mahalanobis</b> distance is not a propensity score: it takes no caliper and no largest / smallest match order (both are adjusted when you pick it), and subclassification cannot use it. A ratio above 1 or <b>Replacement</b> on give the matched controls unequal weights: the matched tables, figure P values and GEE then use those weights, and the workbook notes it above the matched tables. The <b>random seed</b> is fixed, so the same settings give the same matched cohort every run (and in the preview below). The four methods offered here run with the R packages bundled with the app; the live matched-count preview covers <b>nearest</b> only.</p>
       </div>
 
       <div class="card" x-show="s.do_matching">
@@ -997,15 +1000,24 @@
           <div><label class="field">GEE source shown in summary tables</label>
             <select x-model="s.gee_source_for_tables"><template x-for="o in ['main','adjusted']" :key="o"><option :value="o" x-text="o"></option></template></select>
             <p class="opt-hint">Which model's effect &amp; p go into the added columns of the summary tables (unmatched and matched, for each cohort GEE is run on).</p></div>
+          <div><label class="field" for="gee-small-sample">GEE small-sample inference</label>
+            <select id="gee-small-sample" x-model="s.gee_small_sample"><template x-for="o in [['md','Mancl-DeRouen, t / F reference (default)'],['none','uncorrected robust SE, normal reference (v1.0.0)']]" :key="o[0]"><option :value="o[0]" x-text="o[1]"></option></template></select>
+            <p class="opt-hint">Every GEE P value and interval (GEE and regression sheets, clustered table tests, figure P values): <b>md</b> corrects the robust SE for few patients (Mancl &amp; DeRouen 2001) and uses a t reference (df = patients − model coefficients; F for joint tests); <b>none</b> repeats v1.0.0.</p></div>
+          <div><label class="field" for="table-tests">Summary-table tests</label>
+            <select id="table-tests" x-model="s.table_tests"><template x-for="o in [['auto','auto: clustered by patient when fellow eyes are analyzed (default)'],['classical','classical eye-level tests (v1.0.0)']]" :key="o[0]"><option :value="o[0]" x-text="o[1]"></option></template></select>
+            <p class="opt-hint"><b>auto</b>: with a patient-ID column mapped, clustering on and a patient with two analyzed eyes, each per-eye row's P is a patient-clustered GEE test (the same P its figure prints; a permutation test over patients where that GEE cannot be fitted); otherwise, and with <b>classical</b> (v1.0.0), the t-test / Welch, Wilcoxon / Kruskal-Wallis and χ² / Fisher tests run. With <b>classical</b> the figures stay clustered, as in v1.0.0, so a table and its figure can differ (the Publication Table and the legend files say so). Turning off <b>Cluster p-values by patient</b> (Special outputs) also gives classical tables, and classical figures. The test name is printed beside each P.</p></div>
+          <div><label class="field" for="p-style">P value style</label>
+            <select id="p-style" x-model="s.p_style"><template x-for="o in [['ama','journal: .27, .003, <.001, >.99 (default)'],['classic','classic: 0.266, <0.001 (v1.0.0)']]" :key="o[0]"><option :value="o[0]" x-text="o[1]"></option></template></select>
+            <p class="opt-hint">How every P value is printed in the tables, sheets, figures and log: <b>ama</b> gives two decimals (three below .01, and where two decimals would round a value below .05 up to .05), no leading zero; <b>classic</b> repeats v1.0.0 (three decimals in the tables, four on the figures).</p></div>
         </div>
         <label class="switch"><input type="checkbox" x-model="s.run_main_gee"> Main GEE (outcome ~ Group)</label>
         <p class="opt-hint">Group effect only. Use after matching, where covariates are already balanced — this is the primary comparison.</p>
         <label class="switch"><input type="checkbox" x-model="s.run_adjusted_gee"> Adjusted GEE (outcome ~ Group + covariates)</label>
         <p class="opt-hint">Adds the covariates below to the model. Use on unmatched data, or as a sensitivity analysis when residual imbalance remains after matching.</p>
         <label class="switch"><input type="checkbox" x-model="s.use_matching_weights_in_gee"> Use matching weights in matched GEE</label>
-        <p class="opt-hint">Recommended whenever matching uses replacement or ratio &gt; 1, so each control counts according to how often it was matched. A weighted model uses an <b>independence</b> working correlation with robust standard errors clustered on the patient (the estimator MatchIt recommends), so its effect reproduces the weighted means and proportions printed in the same row; unweighted GEE keeps the exchangeable working correlation. Figure P values on a matched cohort always use matching weights that are not all 1, whatever this switch says — with it off, the matched GEE columns and the figures can show different p-values.</p>
+        <p class="opt-hint">Recommended whenever matching uses replacement or ratio &gt; 1, so each control counts according to how often it was matched. A weighted model uses an <b>independence</b> working correlation with robust standard errors clustered on the patient (the estimator MatchIt recommends), so its effect reproduces the weighted means and proportions printed in the same row. Every model of a matched cohort uses the independence working correlation, weighted or not (matched sets are not used as clusters); unmatched models use the exchangeable one (refitted with an independence working correlation when the exchangeable fit is not accepted; per-patient variables are modeled on one row per patient). Figure P values on a matched cohort always use matching weights that are not all 1, whatever this switch says — with it off, the matched GEE columns and the figures can show different p-values.</p>
         <label class="switch"><input type="checkbox" x-model="s.add_gee_columns"> Add GEE effect + p columns into the summary tables (unmatched and matched)</label>
-        <p class="opt-hint">Copies the group effect (β or OR with 95% CI, and p) into the Baseline / Preop / Outcome tables of every cohort GEE is run on (see <b>Run GEE on</b>), so one table holds everything. The other columns of a summary table use eye-level tests (t-test / Welch, Wilcoxon / Kruskal-Wallis, χ² / Fisher). The figures print the same clustered GEE p-value as the GEE columns only when a <b>patient-ID column is mapped</b>, <b>Cluster p-values by patient</b> is on (Special outputs), the GEE source shown in summary tables is <b>main</b>, and — on a matched cohort whose matching weights are not all 1 — <b>Use matching weights in matched GEE</b> is on. Otherwise a table's GEE column and a figure can show different p-values for the same comparison: without a patient ID (or with clustering off) the figures use the eye-level tests, like the other columns of the table (and without a patient ID the GEE treats each eye as its own cluster). Even when all of this holds, the match is exact for two groups; with more than two, a figure's main p-value is one overall GEE test (its “vs reference” lines are Holm-adjusted), while the GEE columns give one unadjusted p-value per group-vs-reference comparison.</p>
+        <p class="opt-hint">Copies the group effect (β or OR with 95% CI, and p) into the Baseline / Preop / Outcome tables of every cohort GEE is run on (see <b>Run GEE on</b>), so one table holds everything. The P column of a summary table is patient-clustered (GEE) when a patient has two analyzed eyes and <b>Summary-table tests</b> is <b>auto</b> (the default), and an eye-level test otherwise (t-test / Welch, Wilcoxon / Kruskal-Wallis, χ² / Fisher). The figures print the same clustered GEE p-value as the GEE columns only when a <b>patient-ID column is mapped</b>, <b>Cluster p-values by patient</b> is on (Special outputs), the GEE source shown in summary tables is <b>main</b>, and — on a matched cohort whose matching weights are not all 1 — <b>Use matching weights in matched GEE</b> is on. Otherwise a table's GEE column and a figure can show different p-values for the same comparison: without a patient ID (or with clustering off) the figures use the eye-level tests, like the other columns of the table (and without a patient ID the GEE treats each eye as its own cluster). When all of this holds, the match is exact for two groups; with more than two, a figure's main p-value is one overall GEE test, and its “vs reference” lines come from the same model as the GEE columns, Holm-adjusted as there (marked [Holm]).</p>
         <label class="field" style="margin-top:10px">Adjusted-GEE covariates</label>
         <div class="ms" x-data="{q:''}">
           <div class="chips"><template x-for="v in s.gee_adjust_covariates_raw" :key="v"><button type="button" class="chip" @click="toggle(s.gee_adjust_covariates_raw,v)" :aria-label="'remove '+v" :title="'remove '+v" x-text="v"></button></template></div>
@@ -1021,7 +1033,7 @@
     <div x-show="tab==='special'" x-cloak>
       <div class="card">
         <h3>Dichotomous "positive" level</h3>
-        <p class="hint">For every variable you marked <b>dichotomous</b> (Variables &amp; Types tab), choose which value is reported and modelled as the event (e.g. Sex = F, a complication Status = 1). Defaults are guessed from the data; a guess that is only alphabetical is flagged for you to check.</p>
+        <p class="hint">For every variable you marked <b>dichotomous</b> (Variables &amp; Types tab), choose which value is reported and modeled as the event (e.g. Sex = F, a complication Status = 1). Defaults are guessed from the data; a guess that is only alphabetical is flagged for you to check.</p>
         <template x-if="dichoVars().length===0"><p class="muted">No dichotomous variables selected yet.</p></template>
         <div class="grid3">
           <template x-for="v in dichoVars()" :key="v">
@@ -1047,18 +1059,34 @@
       <div class="card">
         <h3>StandardEyes figures &amp; astigmatism vector plots</h3>
         <label class="switch"><input type="checkbox" x-model="s.make_graphs"> Produce the StandardEyes figures for every run</label>
-        <p class="opt-hint">Rendered natively from your data (same bins &amp; conventions as your Excel templates — no macros needed): cumulative Snellen VA, change in CDVA lines, UDVA vs CDVA, attempted-vs-achieved SEQ with ±0.50/±1.00 D bands, SEQ accuracy, refractive astigmatism, TIA vs SIA, angle of error, plus JCRS-standard double-angle plots (TIA/SIA/DV with centroid). Every group is superimposed on the same chart in its own colour, before matching and for each matched pairing. The stability-over-time graph is produced when you map your follow-up visits below. Uses the column roles below (Pre/Post SEQ, VA, cylinder &amp; axis).</p>
+        <p class="opt-hint">Rendered natively from your data (same bins &amp; conventions as your Excel templates — no macros needed): cumulative Snellen VA, change in CDVA lines, UDVA vs CDVA, attempted-vs-achieved SEQ with ±0.50/±1.00 D bands, SEQ accuracy, refractive astigmatism, TIA vs SIA, correction index, angle of error, plus JCRS 2025 double-angle plots in plus-cylinder format (preoperative astigmatism, SIA and the prediction error, each with its centroid). Every group is superimposed on the same chart in its own color, before matching and for each matched pairing. The stability-over-time graph is produced when you map your follow-up visits below. Uses the column roles below (Pre/Post SEQ, VA, cylinder &amp; axis).</p>
         <div x-show="s.make_graphs">
           <div class="grid2">
             <div><label class="field">Formats <span class="muted small">(TIFF always included — journal standard)</span></label>
               <div class="inline" style="gap:12px">
                 <label class="switch" style="margin:0"><input type="checkbox" checked disabled> TIFF</label>
-                <template x-for="fm in ['png','jpeg','pdf']" :key="fm">
+                <template x-for="fm in ['png','jpeg','pdf','eps']" :key="fm">
                   <label class="switch" style="margin:0"><input type="checkbox" :checked="s.graph_formats.includes(fm)" @change="toggleFormat(fm)"> <span x-text="fm.toUpperCase()"></span></label>
                 </template>
-              </div></div>
-            <div><label class="field">Resolution (DPI)</label>
-              <input type="number" x-model.number="s.graph_dpi" min="50" max="1200" step="50"></div>
+              </div>
+              <p class="opt-hint">EPS is vector (for journals); semi-transparent points and regions inside it are drawn as images at 1200 dpi or the resolution below, whichever is higher. Colors are RGB: convert to CMYK outside the app if the journal asks.</p></div>
+            <div><label class="field" for="graph-dpi">Resolution (dpi)</label>
+              <input id="graph-dpi" type="number" x-model.number="s.graph_dpi" min="50" max="1200" step="50">
+              <p class="opt-hint">50 to 1200: 300 for photographs, 1200 for line art (journal requirement). PDF and EPS are vector and do not use it, except for the semi-transparent parts of an EPS.</p></div>
+            <div><label class="field" for="figure-style">Figure style</label>
+              <select id="figure-style" x-model="s.figure_style"><template x-for="o in [['journal','journal (default)'],['annotated','annotated (the v1.0.0 look)']]" :key="o[0]"><option :value="o[0]" x-text="o[1]"></option></template></select>
+              <p class="opt-hint"><b>journal</b>: white, no frames, section bands, captions or shaded wedges; each figure's title, method notes and abbreviations go to <code>&lt;figure&gt;_legend.txt</code> beside it. <b>annotated</b> keeps them inside the images.</p></div>
+            <div><label class="field" for="figure-width">Figure width (cm) <span class="muted small">(empty = each figure's own size)</span></label>
+              <div class="inline" style="gap:6px; flex-wrap:wrap">
+                <input id="figure-width" type="number" x-model="s.figure_width_cm" min="0.01" max="60" step="0.01" placeholder="own size" style="max-width:110px">
+                <template x-for="w in [['','own size'],['8.76','8.76 · 1 column'],['12.69','12.69 · 1.5'],['17.77','17.77 · 2 columns']]" :key="w[0]">
+                  <button type="button" class="btn ghost sm" :aria-pressed="String(s.figure_width_cm??'').trim()===w[0]"
+                          :style="String(s.figure_width_cm??'').trim()===w[0] ? 'font-weight:700; text-decoration:underline' : ''"
+                          @click="s.figure_width_cm=w[0]" x-text="w[1]"></button>
+                </template>
+              </div>
+              <p class="small errline" role="alert" x-show="figureWidthProblem()" x-text="figureWidthProblem()" style="margin:3px 0 0"></p>
+              <p class="opt-hint">A width lays every figure out at that width, so its text keeps its point size (never below 6 pt); composites get two panels per row (one at 8.76 cm), and a combined figure taller than a 23-cm page is split into pages (<code>_p1</code>, <code>_p2</code> …), each with its own legend file, the panel letters continuing (at 17.77 cm the six-panel set is one page with up to four cohorts, two with five or more). 8.76, 12.69 and 17.77 cm are the journal column widths.</p></div>
           </div>
           <label class="field" style="margin-top:10px">Applies to every figure below</label>
           <label class="switch desc"><input type="checkbox" x-model="s.stability_figs"> <span><b>Stability over time</b> — mean ± SD spherical equivalent across your follow-up visits, with the number of eyes at each time point and the percentage that changed by more than a chosen amount</span></label>
@@ -1120,7 +1148,7 @@
           </div>
 
           <label class="field" style="margin-top:10px">The StandardEyes figures</label>
-          <p class="opt-hint" style="margin-left:0">The published Reinstein/JRS metrics with <i>every</i> group on one chart in its own colour, for any number of groups, plus JCRS-standard double-angle astigmatism plots. Nothing is split into pairs or drawn per group alone; the stat line is an omnibus test plus each group against the reference. Where a panel header prints <code>d =</code>, it is Cohen's d with the pooled SD, computed per eye and unweighted, whichever test (classical, GEE or weighted) gave the P value. Files are written as <code>StandardEyes_*</code>. (mEYEstro/AstigMATIC-format <b>Excel tabs</b> for external tools are still available under Optional analysis tabs.)</p>
+          <p class="opt-hint" style="margin-left:0">The published Reinstein/JRS metrics with <i>every</i> group on one chart in its own color, for any number of groups, plus JCRS-standard double-angle astigmatism plots. Nothing is split into pairs or drawn per group alone; the stat line is an omnibus test plus each group against the reference. Where a panel header prints <code>d =</code>, it is Cohen's d with the pooled SD, computed per eye and unweighted, whichever test (classical, GEE or weighted) gave the P value. Files are written as <code>StandardEyes_*</code>. (mEYEstro/AstigMATIC-format <b>Excel tabs</b> for external tools are still available under Optional analysis tabs.)</p>
           <div style="max-width:420px; margin-bottom:6px">
             <label class="field">Panel set</label>
             <select x-model="s.graph_set">
@@ -1129,43 +1157,55 @@
               <option value="four">Cataract — also drops safety &amp; attempted-vs-achieved</option>
             </select>
           </div>
-          <label class="switch"><input type="checkbox" x-model="s.astig_panels"> Include astigmatism panels <span class="muted small">(composite only: refractive-astigmatism bar + TIA/SIA, correction index, angle of error — the double-angle and semicircle plots below have their own switches)</span></label>
+          <label class="switch"><input type="checkbox" x-model="s.astig_panels"> Include astigmatism panels <span class="muted small">(composite only: refractive-astigmatism bar + TIA vs SIA and the correction-index and angle-of-error histograms — the double-angle and semicircle plots below have their own switches)</span></label>
           <p class="opt-hint" style="margin-left:0"><b>You will get:</b> <span x-text="panelNote()"></span></p>
           <div class="inline" style="gap:12px; margin-bottom:6px">
-            <label class="switch" style="margin:0"><input type="checkbox" x-model="s.double_angle_figs"> double-angle plots <span class="muted small">(JCRS standard)</span></label>
-            <label class="switch" style="margin:0"><input type="checkbox" x-model="s.semicircle_figs"> semicircle plots <span class="muted small">(grey background, groups in colour)</span></label>
+            <label class="switch" style="margin:0"><input type="checkbox" x-model="s.double_angle_figs"> double-angle plots <span class="muted small">(JCRS 2025: preoperative, SIA, prediction error)</span></label>
+            <label class="switch" style="margin:0"><input type="checkbox" x-model="s.semicircle_figs"> semicircle plots <span class="muted small">(TIA, SIA, DV; groups in color; gray wedges in the annotated style)</span></label>
           </div>
+          <label class="switch"><input type="checkbox" x-model="s.astig_sheet"> Astigmatism (JCRS 2025) sheet</label>
+          <p class="opt-hint">Adds the “Astigmatism (JCRS 2025)” and “Astigmatism vectors” sheets and a CSV copy: centroids, total SD, magnitudes, intervals and the standard's tests for every vector and cohort, and each eye's vectors (magnitude, plus axis, x, y) for external tools. <span x-text="astigSheetNote()"></span></p>
           <div class="grid3">
-            <div><label class="field">Centroid comparison test</label>
-              <select x-model="s.astig_test_method">
-                <option value="robust">Robust trimmed T&sup2; + bootstrap (default)</option>
-                <option value="gee">Clustered GEE Wald (more power)</option>
-                <option value="classic">Hotelling T&sup2; / MANOVA (eyes independent)</option>
-              </select></div>
-            <div><label class="field">95% region around each group</label>
-              <select x-model="s.astig_region">
-                <option value="polygon">Convex polygon — nonparametric ✔ JCRS</option>
+            <div><label class="field" for="astig-test">Astigmatism tests</label>
+              <select id="astig-test" x-model="s.astig_test_method">
+                <option value="robust">Robust: WHWK centroid test, trimmed comparisons, bootstrap of patients (default)</option>
+                <option value="gee">Clustered GEE Wald</option>
+                <option value="classic">Classic: Hotelling T&sup2; / Welch (eyes independent)</option>
+              </select>
+              <p class="opt-hint" style="margin-left:0">Every astigmatism test: the centroid against zero, and between cohorts the centroid, the precision (distances to the cohort centroid) and the mean magnitude. <b>Robust</b>: the centroid against zero by the bootstrap projection-distance test of the WHWK functions (the journal's reference tool; 999 bootstrap centroids, P = .001 is its floor), and between cohorts 20%-trimmed tests (trimming and winsorizing by order statistics) calibrated by a bootstrap that resamples patients within each cohort; where the trimmed statistic is not defined (common with quarter-diopter data) the same bootstrap test runs untrimmed and is labeled so. <b>GEE</b>: clustered Wald tests. <b>Classic</b>: one-sample Hotelling / Hotelling / Welch with eyes independent.</p></div>
+            <div><label class="field" for="astig-region">95% region of the eyes</label>
+              <select id="astig-region" x-model="s.astig_region">
+                <option value="polygon">Depth-based convex polygon — as in the WHWK functions ✔ JCRS (default)</option>
                 <option value="normal">Ellipse — bivariate normal (assumes Gaussian)</option>
                 <option value="both">Both</option>
-              </select></div>
+              </select>
+              <p class="opt-hint" style="margin-left:0"><b>Polygon</b>: the depth-based convex polygon as the WHWK functions build it — the convex hull of the eyes whose projection depth around the centroid reaches the depth of rank floor(0.05&nbsp;n&nbsp;+&nbsp;0.5); depths tie, so it can hold more than 95% of the eyes (the count is reported); below 10 eyes, the hull of all eyes. <b>Normal</b>: bivariate-normal ellipse. <b>Both</b>: both are drawn.</p></div>
+            <div><label class="field" for="astig-centroid-region">Centroid 95% confidence region</label>
+              <select id="astig-centroid-region" x-model="s.astig_centroid_region">
+                <option value="bootstrap">Bootstrap convex polygon — as in the WHWK functions (default)</option>
+                <option value="hotelling">Hotelling T&sup2; ellipse</option>
+              </select>
+              <p class="opt-hint" style="margin-left:0"><b>Bootstrap</b>: as the WHWK functions build it — the convex hull of the 999 bootstrap centroids nearest the centroid by projection distance, keeping 95% of them (up to 98% for 120 or fewer resampling units); patients resampled when clustered; no normality assumption. <b>Hotelling</b>: the T&sup2; ellipse.</p></div>
           </div>
+          <label class="switch" style="margin-top:6px"><input type="checkbox" x-model="s.astig_whwk_files"> Input files for the <b>WHWK functions</b> <span class="muted small">(with the double-angle plots)</span></label>
+          <p class="opt-hint" style="margin-left:0">Writes a <code>WHWK input</code> folder inside the run's figure folder (<code>Graphs_&lt;prefix&gt;_…</code>, beside the figures): for each plotted vector (PRE, SIA, PE, and POST when plotted) a tab-delimited <code>&lt;vector&gt;_vector.txt</code> (columns <code>&lt;Cohort&gt;.x</code>, <code>&lt;Cohort&gt;.y</code>, plus-cylinder double-angle form) and <code>&lt;vector&gt;_magnitude.txt</code>, with a README, ready for the Wilcox-Holladay-Wang-Koch R functions the JCRS 2025 standard recommends (<code>https://osf.io/xhe8u/</code>). That tool treats eyes as independent and refuses values beyond 6 D.</p>
           <label class="switch" style="margin-top:6px"><input type="checkbox" x-model="s.astig_jcrs_standard"> Follow the <b>JCRS 2025 astigmatism standard</b> <span class="muted small">(Koch et al., J Cataract Refract Surg 2025;51:447–455)</span></label>
-          <p class="opt-hint" style="margin-left:0"><b>What this changes.</b> On: each group reports its <b>total SD</b> (&radic;(var x + var y), rotation-invariant), centroids are compared with the <b>bivariate</b> test chosen under <i>Centroid comparison test</i> (by default the robust trimmed T&sup2; with a bootstrap; the classical option is Hotelling T&sup2; for 2 groups, Pillai MANOVA for more), and with two or more group-vs-reference comparisons their p-values are <b>Holm-adjusted</b>. Off: two separate univariate tests on x and y, unadjusted — the app's older behaviour. Every figure prints which of the two was used.</p>
-          <p class="opt-hint" style="margin-left:0"><b>Per JCRS 2025 Part II:</b> double-angle plots (the journal's stated standard), the centroid, total SD, the 95% <i>nonparametric convex polygon</i> (hull peeling — the paper notes astigmatism data are usually not Gaussian), the dioptric intervals &le;0.25/0.50/0.75/1.00 D, and a bivariate centroid comparison.<br>
-          <b>NOT per the standard:</b> the normal-ellipse option, the semicircle plot (kept for familiarity), and the exact form of the default centroid test: the robust test (20%-trimmed mean vectors, pooled winsorized covariance, 999 bootstrap resamples of patients — of eyes when p-values are not clustered) is robust and cluster-aware but is not the exact trimmed-Hotelling variant of Part II (see the Statistical Reference). Everything else follows Part II, including the scalar summaries (median, range, RMS).</p>
+          <p class="opt-hint" style="margin-left:0"><b>What this changes.</b> On: each group reports its <b>total SD</b> (&radic;(var x + var y), population denominator, rotation-invariant), centroids are compared with the <b>bivariate</b> test chosen under <i>Astigmatism tests</i>, and the P values are <b>Holm-adjusted</b> within each vector across centroid, precision, magnitude and intervals, and across the comparisons with the reference. Off: the figures use two separate univariate tests on x and y, unadjusted — the app's older behavior; the astigmatism sheet keeps the standard's tests. Every figure prints which of the two was used.</p>
+          <p class="opt-hint" style="margin-left:0"><b>Per JCRS 2025 Part II:</b> double-angle plots in plus-cylinder format (with-the-rule on the left) of the preoperative astigmatism, the SIA and the prediction error, each cohort's centroid, total SD, magnitude mean ± SD, median, range and RMS, the 95% <i>depth-based convex polygon</i> of the eyes and the bootstrap convex polygon of the centroid, built as in the WHWK functions (the paper notes astigmatism data are usually not Gaussian), the test of each centroid against zero as in the WHWK functions, the cumulative intervals &le;0.25 … &le;2.00 D, and the tests of centroid, precision and magnitude.<br>
+          <b>NOT per the standard:</b> the normal-ellipse and Hotelling options and the semicircle plot (kept for familiarity). The robust between-cohort tests (20%-trimmed, untrimmed where the trimmed statistic is not defined; 999 bootstrap resamples of patients — of eyes when P values are not clustered) are robust and cluster-aware but are not the exact trimmed-Hotelling variant of Part II (see the Statistical Reference).</p>
           <label class="switch" style="margin-top:6px"><input type="checkbox" x-model="s.cluster_by_patient"> Cluster p-values <b>by patient</b> <span class="muted small">(GEE, robust SE — needs the patient/cluster ID column)</span></label>
-          <p class="opt-hint" style="margin-left:0">Two eyes of one person are not independent. With this on, every figure p-value comes from a GEE with robust standard errors clustered on the patient (exchangeable working correlation; independence when matching weights that are not all 1 are applied, as in the weighted GEE sheets), so a patient contributing both eyes counts once. Leaving it off inflates significance: in simulation with no true group difference, unclustered tests fired at <b>15%</b> against a nominal 5%, versus <b>6%</b> clustered. Each figure prints which inference it used.</p>
-          <p class="opt-hint" style="margin-left:0">The <b>double-angle</b> plot doubles every meridian, so with-the-rule and against-the-rule eyes group on opposite sides instead of splitting across the horizontal — this is what <i>JCRS 2025 Standards for analyzing astigmatic outcomes (Part II)</i> requires, and it is what makes the vector arithmetic valid. Each group gets its centroid, a 95% region and a dashed 95% CI of the centroid. The <b>normal ellipse</b> assumes the cloud is bivariate normal; the <b>distribution-free hull</b> assumes nothing and is the safer choice for skewed data.</p>
+          <p class="opt-hint" style="margin-left:0">Two eyes of one person are not independent. With this on, every figure P value — and, with <b>Summary-table tests</b> = auto (GEE tab, the default), every per-eye P value of the summary tables — comes from a GEE with robust standard errors clustered on the patient wherever a patient has two analyzed eyes (exchangeable working correlation, refitted with an independence one when the exchangeable fit is not accepted; independence for the level indicators of a categorical variable and on a matched cohort; small-sample correction as set on the GEE tab), so a patient contributing both eyes counts once; the astigmatism tests resample or cluster patients. Leaving it off treats the eyes as independent (classical tests everywhere) and inflates significance: in simulation with no true group difference, unclustered tests fired at <b>15%</b> against a nominal 5%, versus <b>6%</b> clustered. Each table and figure names the test it used.</p>
+          <p class="opt-hint" style="margin-left:0">The <b>double-angle</b> plot doubles every meridian, so with-the-rule and against-the-rule eyes group on opposite sides instead of splitting across the horizontal — this is what <i>JCRS 2025 Standards for analyzing astigmatic outcomes (Part II)</i> requires, and it is what makes the vector arithmetic valid. Vectors are in <b>plus-cylinder</b> format whatever the cylinder form of each row: with-the-rule astigmatism (plus axis 90) on the <b>left</b>, against-the-rule (180) on the right. The plots show the preoperative astigmatism, the SIA (postoperative − preoperative) and the prediction error (PE = postoperative − target; the postoperative astigmatism when the target is plano), plus the postoperative astigmatism as a fourth plot when a target that is not plano is mapped. Each group gets its centroid, a 95% region of the eyes and a dashed 95% confidence region of the centroid. The <b>normal ellipse</b> assumes the cloud is bivariate normal; the <b>depth-based convex polygon</b> assumes nothing and is the safer choice for skewed data.</p>
           <div>
 
             <label class="field" style="margin-top:10px">Astigmatism vectors <span class="muted small">— optional; leave blank and the app computes them</span></label>
-            <p class="opt-hint" style="margin-left:0">By default TIA / SIA / DV are <b>computed</b> from the four columns you mapped as <b>Pre Cylinder, Pre Axis, Post Cylinder and Post Axis</b> under <i>Column roles</i> (bottom of this tab), assuming the target was zero astigmatism. <b>Nothing is guessed from column names or order</b> — if those four roles are not mapped, no vector figure is produced and the run log says so. Map a magnitude <i>and</i> an axis column below to use your own pre-calculated vector instead — each vector is resolved independently, and the run log reports which were supplied, which were computed, and the largest disagreement between the two.</p>
-            <template x-for="v in [['tia','TIA'],['sia','SIA'],['dv','DV']]" :key="v[0]">
+            <p class="opt-hint" style="margin-left:0">By default the vectors are <b>computed</b> from the four columns you mapped as <b>Pre Cylinder, Pre Axis, Post Cylinder and Post Axis</b> under <i>Column roles</i> (bottom of this tab), against the target refraction below (zero astigmatism when none is mapped). <b>Nothing is guessed from column names or order</b> — if those four roles are not mapped, no vector figure is produced and the run log says so. Map a magnitude <i>and</i> a plus-axis column below to use your own pre-calculated vector instead — each vector is resolved independently, and the run log reports which were supplied, which were computed, and the largest disagreement between the two. <b>PE</b> (prediction error = postoperative − target) and <b>DV</b> are one vector with opposite signs: when only one of them is supplied, the other is derived (DV = −PE).</p>
+            <template x-for="v in [['tia','TIA'],['sia','SIA'],['dv','DV'],['pe','PE']]" :key="v[0]">
               <div class="repeat-row">
                 <div style="flex:0 0 60px"><label class="field" x-text="v[1]"></label></div>
                 <template x-for="part in ['_mag','_axis']" :key="part">
                   <div class="grow">
-                    <label class="field" x-text="(part==='_mag'?'Magnitude (D)':'Axis (deg)')"></label>
+                    <label class="field" x-text="(part==='_mag'?'Magnitude (D)':'Plus axis (deg)')"></label>
                     <div class="combo" x-data="combo(()=>s.astig_vector_cols[v[0]+part], val=>s.astig_vector_cols[v[0]+part]=val, ()=>cols, true)">
                       <input type="text" :value="open?q:val()" :placeholder="val()||'search column…'"
                              @focus="onFocus()" @input="q=$event.target.value;open=true;idx=0" @keydown="key($event)" @click.outside="open=false" role="combobox" aria-autocomplete="list" :aria-expanded="open">
@@ -1195,7 +1235,7 @@
                 </div>
               </template>
             </div>
-            <p class="opt-hint" style="margin-left:0"><b>Only set a target if you did not aim for zero astigmatism.</b> With a target mapped, TIA becomes the intended <i>change</i> rather than the pre-operative astigmatism, so the numbers will not match a target-of-zero run of the same data. The run log says so explicitly whenever a target is in use.</p>
+            <p class="opt-hint" style="margin-left:0"><b>Only set a target if you did not aim for zero astigmatism.</b> With a target mapped (in either cylinder form), TIA becomes the intended <i>change</i> rather than the pre-operative astigmatism and the prediction error is postoperative − target, so the numbers will not match a target-of-zero run of the same data; when any target is not plano, the postoperative astigmatism gets a double-angle plot of its own. The run log says so explicitly whenever a target is in use.</p>
           </div>
         </div>
       </div>
@@ -1228,6 +1268,15 @@
     <!-- ---------- RUN & RESULTS ---------- -->
     <div x-show="tab==='run'" x-cloak>
       <div class="card">
+        <h3>Before you run: how the numbers are computed and shown</h3>
+        <table class="small" style="border-collapse:collapse"><tbody>
+          <template x-for="r in runSummary()" :key="r[0]">
+            <tr><td style="padding:2px 12px 2px 0; vertical-align:top; white-space:nowrap"><b x-text="r[0]"></b></td><td style="padding:2px 0" x-text="r[1]"></td></tr>
+          </template>
+        </tbody></table>
+        <p class="muted small" style="margin:6px 0 0">Each is set on its tab (Matching, GEE, Variables &amp; Types, Special outputs); the workbook's Manifest sheet records them.</p>
+      </div>
+      <div class="card">
         <h3>Run</h3>
         <div class="runbar">
           <div class="progress"><div :style="'width:'+(progress*100)+'%'"></div></div>
@@ -1253,7 +1302,7 @@
           <template x-if="!results.preview_only"><p class="muted">Saved in: <span x-text="results.output_dir"></span></p></template>
           <template x-if="results.preview_only">
             <div style="margin-bottom:8px">
-              <button class="btn sm" @click="exportAll()" :disabled="exporting">💾 Save ALL to output folder (incl. love plots + filtered CSV)</button>
+              <button class="btn sm" @click="exportAll()" :disabled="exporting">💾 Save ALL to output folder (incl. love plots + CSV files)</button>
               <span class="muted small" x-show="exporting"> saving…</span>
             </div>
           </template>

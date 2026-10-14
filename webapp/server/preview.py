@@ -1075,6 +1075,90 @@ def filtered_frame(df: pd.DataFrame, cfg: dict, va: bool = True,
     return work
 
 
+def _export_headers(names: list, suffix: dict | None = None) -> list:
+    """Headers of an exported frame as R/pipeline.R export_headers() writes
+    them: `suffix` (column -> "_logMAR", ...) is added unless the suffixed
+    name is already a header (compared without regard to case, as Excel
+    does); repeated headers are numbered name.1, name.2, ..."""
+    out = [str(n) for n in names]
+    if suffix:
+        low_all = {o.lower() for o in out}
+        for i, n in enumerate(list(out)):
+            if n in suffix and (n + suffix[n]).lower() not in low_all:
+                out[i] = n + suffix[n]
+    low = [o.lower() for o in out]
+    used: list = []
+    for i in range(len(out)):
+        if low[i] in used:
+            k = 1
+            while True:
+                cand = f"{out[i]}.{k}"
+                if cand.lower() not in used + low[:i] + low[i + 1:]:
+                    break
+                k += 1
+            out[i] = cand
+        used.append(out[i].lower())
+    return out
+
+
+def export_frame(df: pd.DataFrame, cfg: dict) -> tuple[pd.DataFrame, bool]:
+    """The live 'Export filtered rows (CSV)' frame, with the rows and headers
+    of the run's Filtered_Dataset CSV (decision D26, R/pipeline.R): the rows
+    the analysis uses - after the filters and the subsets, in a group - with
+    GroupLabel (and Subset, when subsets are defined) leading, the acuity in
+    the scale it is analyzed in, and every column that no longer holds the
+    recorded values suffixed (_logMAR, _decimal, _minus_cyl). Returns
+    (frame, grouped); while no group is defined, grouped is False and the
+    frame is every row passing the filters and subsets, without GroupLabel."""
+    cfg = cfg or {}
+    resolver = build_resolver(list(df.columns))
+    work = filtered_frame(df, cfg)
+    group_col = resolve(cfg.get("group_source_var"), resolver)
+    groups = {k: v for k, v in (cfg.get("groups") or {}).items() if _flat_values(v)}
+    grouped = group_col is not None and group_col in work.columns and bool(groups)
+    lead = {}
+    if grouped:
+        # the first group a row's value is listed under (R: max.col, ties first)
+        label = pd.Series([None] * len(work), index=work.index, dtype="object")
+        for gname, vals in groups.items():
+            label = label.mask(label.isna() & group_mask(work[group_col], vals), gname)
+        keep = label.notna()
+        work, lead["GroupLabel"] = work[keep.values], label[keep.values]
+        subset_col = resolve(cfg.get("subset_col_raw"), resolver)
+        subs = {k: v for k, v in (cfg.get("subsets") or {}).items()
+                if any(not _is_blank_cell(x) and str(x).strip() for x in _flat_values(v))}
+        if subset_col is not None and subset_col in work.columns and subs:
+            hits = {s: match_values(work[subset_col], v).tolist() for s, v in subs.items()}
+            lead["Subset"] = pd.Series(["; ".join(s for s in subs if hits[s][i]) for i in range(len(work))],
+                                       index=work.index, dtype="object")
+    # the columns that no longer hold the recorded values, named as pipeline.R names them
+    fmt = str(cfg.get("va_format") or "decimal").strip().lower()
+    fmt = fmt if fmt in VA_FORMATS else "decimal"
+    cols, converted = va_columns(cfg, resolver)
+    sfx: dict = {}
+    for c in (c for c in cols if c in work.columns):
+        if fmt == "logmar" or c in converted:
+            sfx[str(c)] = "_logMAR"
+        elif fmt in ("snellen", "etdrs"):
+            sfx[str(c)] = "_decimal"
+    if cfg.get("do_standardize_minus_cyl"):
+        triples = cfg.get("std_triples") or [{
+            "sph": cfg.get("std_sph_raw"), "cyl": cfg.get("std_cyl_raw"), "axis": cfg.get("std_axis_raw")}]
+        for tr in triples:
+            for k in ("sph", "cyl", "axis"):
+                c = resolve((tr or {}).get(k), resolver)
+                if c is not None and c in work.columns:
+                    sfx.setdefault(str(c), "_minus_cyl")
+    out = work.copy()
+    out.columns = _export_headers(list(work.columns), sfx)
+    if lead:
+        front = pd.DataFrame(lead, index=work.index)
+        hdr = _export_headers(list(front.columns) + list(out.columns))
+        out = pd.concat([front, out], axis=1)
+        out.columns = hdr
+    return out, grouped
+
+
 # --------------------------------------------------------- matching covariates
 # Excel error spellings. A real error cell is missing in pandas and readxl
 # alike; these strings only reach a frame not typed by readxl_types()
@@ -1277,6 +1361,16 @@ def compute_counts(df: pd.DataFrame, cfg: dict) -> dict:
                 "groups": assign_group_counts(sub, group_col, groups),
             }
 
+    # the rows the engine analyses (decision D26): after the filters and the
+    # subsets, only those that fall in a group - R/pipeline.R `analysed`, the
+    # rows of the filtered-dataset CSV. None until a group is defined.
+    in_analysis = None
+    if group_col is not None and group_col in cohort.columns and groups:
+        hit = pd.Series(False, index=cohort.index)
+        for vals in groups.values():
+            hit = hit | group_mask(cohort[group_col], vals)
+        in_analysis = int(hit.sum())
+
     # patient identifiers: blank ids become one patient per eye in the run
     pid_col = resolve(cfg.get("patient_id_raw"), resolver)
     pid_missing = (int(_is_missing(cohort[pid_col]).sum())
@@ -1289,6 +1383,7 @@ def compute_counts(df: pd.DataFrame, cfg: dict) -> dict:
         "filter_steps": steps,
         "after_filters": after_filters,
         "after_subsets": after_subsets,
+        "in_analysis": in_analysis,
         "groups": overall_groups,
         "subsets": subset_out,
         "subset_col_missing": subset_column_missing(cfg, resolver),

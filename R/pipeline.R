@@ -98,12 +98,14 @@ resolve_config <- function(cfg, raw_names, logger = message) {
       logger("Within-group: patient-level analysis was requested but no patient/cluster ID column is set - falling back to per eye.")
   }
 
-  # Optional Alpins vector columns and target refraction for the figures.
-  # Kept OUT of res$roles for the same reason as stability_visits: the
-  # roles loop below expects one scalar per role.
+  # Optional astigmatism vector columns (magnitude + plus axis; Alpins TIA, SIA,
+  # DV and the prediction error PE) and target refraction for the figures and
+  # the astigmatism sheet. Kept OUT of res$roles for the same reason as
+  # stability_visits: the roles loop below expects one scalar per role.
   res$astig_vector_cols <- local({
     out <- list()
-    for (nm in c("tia_mag", "tia_axis", "sia_mag", "sia_axis", "dv_mag", "dv_axis")) {
+    for (nm in c("tia_mag", "tia_axis", "sia_mag", "sia_axis", "dv_mag", "dv_axis",
+                 "pe_mag", "pe_axis")) {
       v <- (cfg$astig_vector_cols %||% list())[[nm]]
       if (!.pl_blank(v)) out[[nm]] <- O(v, paste0("Astigmatism vector (", nm, ") column"))
     }
@@ -258,7 +260,7 @@ add_group_label <- function(dat, group_source_clean, groups, reference_group,
     n_blank <- sum(is.na(ov) | !nzchar(trimws(as.character(ov))))
     vals <- vals[nzchar(vals)]
     logger(paste0("Grouping", where, ": ", sum(out_rows), " of ", nrow(dat),
-                  " rows belong to no group and are not analysed (",
+                  " rows belong to no group and are not analyzed (",
                   paste(c(if (length(vals)) paste0("'", src_lab, "' = ",
                                                    paste(utils::head(vals, 8), collapse = ", "),
                                                    if (length(vals) > 8) ", ..." else ""),
@@ -407,7 +409,8 @@ write_csv_utf8_bom <- function(d, path) {
   # not be written as 1e+05
   old <- options(scipen = 100)
   on.exit(options(old), add = TRUE)
-  utils::write.csv(d, con, row.names = FALSE)
+  # a missing value is an empty cell, never the text "NA" (T1-07, T1-13)
+  utils::write.csv(d, con, row.names = FALSE, na = "")
   invisible(TRUE)
 }
 
@@ -656,11 +659,16 @@ va_format_of <- function(cfg) {
 }
 
 # The VA columns: the four VA roles plus logmar_cols_raw (clean names).
+# `listed` - the columns the logMAR conversion applies to - is logmar_cols_raw;
+# a settings file without that key converts the mapped VA role columns
+# (decision D16: logMAR by default for the mapped acuity columns). A list
+# that is present, even empty, is used as it is.
 va_columns <- function(res, cfg, raw_names, logger = message) {
   roles <- unlist(res$roles[intersect(c("pre_ucva", "pre_bcva", "post_ucva", "post_bcva"),
                                       names(res$roles))])
   roles <- as.character(roles[!is.na(roles)])
-  listed <- resolve_vec(raw_names, unlist(cfg$logmar_cols_raw), "logmar_cols", logger)
+  listed <- if (is.null(cfg$logmar_cols_raw)) roles
+            else resolve_vec(raw_names, unlist(cfg$logmar_cols_raw), "logmar_cols", logger)
   list(all = unique(c(roles, listed)), listed = listed)
 }
 
@@ -770,7 +778,7 @@ check_va_notation <- function(dat, cols, fmt, label_of, sheet_stats = list(),
            else max(0L, whole$n_lost - p$n_lost)
       ex <- if (oor) whole$oor_examples %||% character(0) else setdiff(whole$examples, p$examples)
       if (k > 0)
-        logger(sprintf("VA column '%s': %d value%s that %s cannot have%s %s only in rows that are not analysed (excluded, filtered out, or in no group or subset) - %s missing and %s not stop the run.",
+        logger(sprintf("VA column '%s': %d value%s that %s cannot have%s %s only in rows that are not analyzed (excluded, filtered out, or in no group or subset) - %s missing and %s not stop the run.",
                        lab, k, if (k == 1) "" else "s", fl, .pl_va_examples(ex),
                        if (k == 1) "is" else "are", if (k == 1) "it stays" else "they stay",
                        if (k == 1) "does" else "do"))
@@ -827,13 +835,13 @@ set_va_analysis_columns <- function(dat, va, fmt, do_logmar, label_of, logger = 
   }
   labs <- function(x) paste(vapply(x, label_of, character(1)), collapse = ", ")
   if (length(as_logmar))
-    logger(paste0(if (isTRUE(do_logmar)) "LogMAR conversion not applied: the VA notation is logMAR, so " else "",
-                  "VA columns analysed in logMAR as recorded: ", labs(as_logmar), "."))
+    logger(paste0(if (isTRUE(do_logmar)) "logMAR conversion not applied: the VA notation is logMAR, so " else "",
+                  "VA columns analyzed in logMAR as recorded: ", labs(as_logmar), "."))
   if (length(converted))
-    logger(paste0("Converted to LogMAR (-log10 of decimal acuity): ", labs(converted), "."))
+    logger(paste0("Converted to logMAR (-log10 of decimal acuity): ", labs(converted), "."))
   if (fmt %in% c("snellen", "etdrs") && length(as_decimal))
     logger(paste0("VA columns recorded as ", .pl_va_label[[fmt]],
-                  " are analysed as decimal acuity (not converted to LogMAR): ", labs(as_decimal), "."))
+                  " are analyzed as decimal acuity (not converted to logMAR): ", labs(as_decimal), "."))
   list(data = dat, converted = converted, as_logmar = as_logmar, as_decimal = as_decimal)
 }
 
@@ -874,6 +882,59 @@ check_dicho_prefs <- function(dat, prefs, logger = message, dicho_vars = names(p
 # ------------------------------------------------------------
 run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
   bump <- function(frac, msg){ logger(msg); if (!is.null(progress)) progress(frac, msg) }
+  run_started <- Sys.time()          # the Manifest's run duration (D25)
+  # visual acuity in logMAR unless the settings say otherwise (D16): a
+  # settings file without the key gets the v1.1.0 default
+  if (is.null(cfg$do_logmar)) cfg$do_logmar <- TRUE
+  # one P value style for the tables, sheets, logs and figures of this run (D15)
+  set_p_style(cfg$p_style, logger)
+  # the astigmatism statistics shared by the sheet and the figures are cached
+  # for one run only (graphs.R astig_vector_stats)
+  if (exists("astig_cache_reset", mode = "function")) astig_cache_reset()
+  # an unknown astigmatism setting is named once, and its default used
+  for (k in c("astig_test_method", "astig_region", "astig_centroid_region")) {
+    v <- tolower(trimws(as.character(unlist(cfg[[k]]))[1]))
+    okv <- switch(k, astig_test_method = c("robust", "gee", "classic"),
+                  astig_region = c("polygon", "depth", "normal", "both"),
+                  astig_centroid_region = c("bootstrap", "hotelling"))
+    if (length(v) && !is.na(v) && nzchar(v) && !(v %in% okv))
+      logger(sprintf("Astigmatism setting %s = '%s' is not known (use %s) - %s is used.", k,
+                     as.character(unlist(cfg[[k]]))[1], paste(okv, collapse = ", "), okv[1]))
+  }
+  # the on/off settings - the WHWK input files (decision R3-3), the astigmatism
+  # sheets (D8) and every other switch (the defaults of webapp/server
+  # config_schema.py): true / false also as text or 1 / 0 (a bare isTRUE() would
+  # read the text "true" as off); blank = the default; anything else is named
+  # and the default used. A switch the settings do not give is left to its
+  # reader, as before
+  switch_defaults <- c(do_matching = TRUE, psm_replace = FALSE, psm_std_caliper = TRUE, run_main_gee = TRUE,
+                       run_adjusted_gee = FALSE, use_matching_weights_in_gee = TRUE, add_gee_columns = TRUE,
+                       do_standardize_minus_cyl = TRUE, do_logmar = TRUE, stability_figs = FALSE,
+                       stability_include_preop = TRUE, make_meyestro = TRUE, make_alpins = TRUE,
+                       make_pub_table = TRUE, make_graphs = TRUE, astig_panels = TRUE, double_angle_figs = TRUE,
+                       semicircle_figs = TRUE, astig_sheet = TRUE, astig_whwk_files = TRUE,
+                       astig_jcrs_standard = TRUE, cluster_by_patient = TRUE, do_regression = TRUE,
+                       export_filtered_csv = TRUE)
+  for (k in names(switch_defaults)) {
+    wf <- cfg[[k]]
+    if (!is.null(wf) && !(is.logical(wf) && length(wf) == 1 && !is.na(wf))) {
+      v <- tolower(trimws(as.character(unlist(wf))[1]))
+      cfg[[k]] <- if (length(v) && !is.na(v) && v %in% c("true", "1", "yes", "on")) TRUE
+        else if (length(v) && !is.na(v) && v %in% c("false", "0", "no", "off")) FALSE
+        else {
+          if (length(v) && !is.na(v) && nzchar(v))
+            logger(sprintf("%s %s = '%s' is not known (use true or false) - %s is used.",
+                           if (startsWith(k, "astig_")) "Astigmatism setting" else "Setting", k,
+                           as.character(unlist(wf))[1], tolower(switch_defaults[[k]])))
+          switch_defaults[[k]]
+        }
+    }
+  }
+  # the figure style, width, resolution and formats, read once here so an
+  # unknown value is named at the start of every run - with or without
+  # figures - and its default used (decision R2-7; graphs.R gr_figure_settings,
+  # whose messages are logged once per run)
+  if (exists("gr_figure_settings", mode = "function")) invisible(gr_figure_settings(cfg, logger))
 
   bump(0.02, "Reading Excel file ...")
   rd <- read_input_sheet(cfg, logger)
@@ -892,6 +953,25 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
   log_header_collisions(raw_names, logger)
   res <- resolve_config(cfg, raw_names, logger)
   res$display_names <- disp_map
+  res$run_started <- run_started
+  # the matched-analysis note says "clustered by patient" only with a mapped
+  # patient ID (decision R2-7)
+  set_matched_note_pid(length(res$patient_id_clean) && !is.na(res$patient_id_clean[1]))
+  logger(paste0("P values: ", p_style_text(), "."))
+
+  # GEE small-sample inference of every model, table test and figure P value
+  # of this run (decision D11; helpers.R set_gee_small_sample - a settings
+  # file without the key gets the default "md"), and the table tests (D12)
+  set_gee_small_sample(cfg$gee_small_sample, logger)
+  logger(paste0("GEE inference: ",
+                gee_inference_text(unit = if (length(res$patient_id_clean) && !is.na(res$patient_id_clean[1]))
+                                            "patient" else "eye"), "."))
+  tt_req <- tolower(trimws(as.character(unlist(cfg$table_tests %||% "auto"))[1]))
+  # (a blank value is the default, said nowhere; an unknown one is named)
+  if (length(tt_req) && !is.na(tt_req) && nzchar(tt_req) && !(tt_req %in% c("auto", "classical")))
+    logger(sprintf("Table tests setting '%s' is not known (use auto or classical) - auto is used.",
+                   as.character(unlist(cfg$table_tests))[1]))
+  logger(paste0("Table tests: ", table_tests_text(cfg, has_pid = !is.na(res$patient_id_clean)), "."))
 
   # matching on, but none of its covariates is in the file: said once, here
   # (the Manifest records the skip); export.R builds no matched cohort then
@@ -917,10 +997,10 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
     if (is.na(res_subset_col)) {
       if (length(subs) > length(empty))
         stop(unresolved_name_message(raw_names, sraw, "Subset column"),
-             " No subset can be selected without it - re-select the subset column, or clear it to analyse all rows.",
+             " No subset can be selected without it - re-select the subset column, or clear it to analyze all rows.",
              call. = FALSE)
       logger(paste0(unresolved_name_message(raw_names, sraw, "Subset column"),
-                    " No subsets are defined, so all rows are analysed."))
+                    " No subsets are defined, so all rows are analyzed."))
     }
   }
 
@@ -955,6 +1035,9 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
                            paste(nm[nzchar(trimws(nm))], collapse = " / "), "'."))
       dat <- standardize_minus_cyl(dat, cl[["sphere"]], cl[["cylinder"]], cl[["axis"]], logger,
                                    display_names = disp_map)
+      # the columns now holding minus-cylinder values, for the exported data's
+      # headers (suffix "_minus_cyl", T1-07)
+      res$std_minus_cols <- unique(c(res$std_minus_cols, unname(cl[!is.na(cl)])))
     }
     # the switch alone converts nothing: said, so plus-cylinder data are never
     # analysed unconverted without a word (a warning when cylinder roles are
@@ -1029,7 +1112,7 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
       v[miss] <- paste0("(no ID) row ", dat[[ROWPOS]][miss])
       dat[[pid]] <- v
       if (any(miss & analysed))
-        logger(sprintf("Patient ID: %d of the %d rows analysed have no patient ID in '%s'. Each such eye is counted as its own patient (its own cluster) in the tables, models, figure P values and bootstrap - if two of them belong to one patient they are counted twice; fill in the IDs to avoid this.",
+        logger(sprintf("Patient ID: %d of the %d rows analyzed have no patient ID in '%s'. Each such eye is counted as its own patient (its own cluster) in the tables, models, figure P values and bootstrap - if two of them belong to one patient they are counted twice; fill in the IDs to avoid this.",
                        sum(miss & analysed), sum(analysed), label_of(pid)))
     }
   }
@@ -1044,7 +1127,7 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
                       postop = as.character(postop[!is.na(postop)]), logger = logger)
   }
 
-  # (A2b) Visual acuity: analysis columns (LogMAR conversion), after filtering
+  # (A2b) Visual acuity: analysis columns (logMAR conversion), after filtering
   res$va_format <- va_fmt
   res$logmar_cols_clean <- character(0)
   if (length(va$all)) {
@@ -1081,13 +1164,39 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
   # the scale each exported VA column holds, added to its header in the
   # filtered-dataset CSV and in Matched_Data alike (contract R4-3)
   sfx <- c(stats::setNames(rep("_logMAR", length(res$logmar_cols_clean)), res$logmar_cols_clean),
-           stats::setNames(rep("_decimal", length(res$va_decimal_from_text)), res$va_decimal_from_text))
+           stats::setNames(rep("_decimal", length(res$va_decimal_from_text)), res$va_decimal_from_text),
+           # the refraction columns transposed to minus cylinder (T1-07): their
+           # values are no longer the recorded ones, and the header says so
+           stats::setNames(rep("_minus_cyl", length(res$std_minus_cols)), res$std_minus_cols))
 
   if (isTRUE(cfg$export_filtered_csv)) {
     fp <- .pl_os_path(file.path(output_dir, paste0("Filtered_Dataset_", stamp, ".csv")))
-    # the headers as typed in the file, and the scale each VA column holds
-    out <- drop_stash_cols(dat)
+    # the rows that are analysed (D26): in a group and, when subsets are
+    # defined, in one of them - with the group each row is in (GroupLabel) and
+    # its subset (Subset) leading. The headers are as typed in the file, with
+    # the scale each VA column holds.
+    out <- drop_stash_cols(dat[analysed, , drop = FALSE])
     names(out) <- export_headers(names(out), res$display_names, sfx)
+    lead <- list()
+    if (length(names(cfg$groups))) {
+      gh <- group_hits(dat[[res$group_source_clean]][analysed], cfg$groups)
+      lead$GroupLabel <- if (nrow(out)) names(cfg$groups)[max.col(gh, ties.method = "first")] else character(0)
+    }
+    if (!is.na(res_subset_col) && res_subset_col %in% names(dat) && length(names(cfg$subsets))) {
+      sv <- dat[[res_subset_col]][analysed]
+      subs <- cfg$subsets[vapply(cfg$subsets, function(v) !.pl_blank(v), logical(1))]
+      sh <- vapply(names(subs), function(s) match_values(sv, subs[[s]]), logical(length(sv)))
+      sh <- matrix(sh, nrow = length(sv))
+      lead$Subset <- if (nrow(out)) apply(sh, 1, function(r) paste(names(subs)[r], collapse = "; ")) else character(0)
+    }
+    if (length(lead)) {
+      lead <- as.data.frame(lead, check.names = FALSE, stringsAsFactors = FALSE)
+      # unique headers: a file column of the same name is listed as "GroupLabel.1"
+      hdr <- export_headers(c(names(lead), names(out)))
+      out <- data.frame(lead, as.data.frame(out, check.names = FALSE), check.names = FALSE,
+                        stringsAsFactors = FALSE)
+      names(out) <- hdr
+    }
     err <- ""; warn <- ""
     tryCatch(withCallingHandlers(write_csv_utf8_bom(out, fp),
                                  warning = function(w) { warn <<- conditionMessage(w); invokeRestart("muffleWarning") }),
@@ -1097,7 +1206,8 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
       logger(paste0("WARNING: filtered dataset NOT exported (",
                     if (length(why)) paste(why, collapse = "; ") else "the file was not created",
                     ") - check that the output folder is writable and the file is not open in Excel: ", fp))
-    } else logger(paste0("Filtered dataset exported: ", fp, if (nzchar(warn)) paste0(" (warning: ", warn, ")") else ""))
+    } else logger(paste0("Filtered dataset exported (", nrow(out), " analyzed rows): ", fp,
+                         if (nzchar(warn)) paste0(" (warning: ", warn, ")") else ""))
   }
 
   runs <- build_runs(cfg)
@@ -1148,7 +1258,19 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
     }
 
     # the run (label + subset values) is recorded in the workbook's Manifest
+    invisible(gee_refit_take()); invisible(.gee_fallback_take())
     built <- build_workbook_for_data(dat_run, cfg, res, logger, loveplot_dir = output_dir, run = run)
+    # the clustered table tests whose exchangeable GEE was not accepted (R3-4)
+    n_refit <- length(gee_refit_take())
+    if (n_refit > 0) logger(gee_refit_log_text(n_refit, paste0("Workbook of run '", run$label, "'")))
+    # the table rows whose clustered GEE could not be fitted (findings S2, T1-02)
+    n_fb <- .gee_fallback_take()
+    if (n_fb > 0)
+      logger(sprintf(paste0("Workbook of run '%s': in %d table test(s) the patient-clustered GEE could not be fitted ",
+                            "(a group with no events or only events, no convergence, or a singular covariance) - ",
+                            "those P values come from a permutation test over patients (%d permutations; %s); ",
+                            "the Test column says \"GEE not fitted\" and the ",
+                            "Interpretation column gives the cause."), run$label, n_fb, CLUSTER_PERM_B, CLUSTER_PERM_UNITS))
 
     out_xlsx <- .pl_os_path(file.path(output_dir, paste0(prefix, "_", stem, "_", stamp, ".xlsx")))
     save_workbook_checked(built$wb, out_xlsx, paste0("workbook of run '", run$label, "'"))
@@ -1168,12 +1290,16 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
       if (!dir.exists(gdir)) {
         logger(paste0("Graphs skipped: the folder could not be created: ", gdir))
       } else {
-        gf <- tryCatch(generate_standard_graphs(dat_run, cfg, res, gdir, tag = "", logger = logger),
+        # a subset run names its subset in the figures' legend titles
+        sub_lab <- if (length(run$values)) as.character(run$label)[1] else ""
+        gf <- tryCatch(generate_standard_graphs(dat_run, cfg, res, gdir, tag = "", logger = logger,
+                                                subset_label = sub_lab),
                        error = function(e) { logger(paste0("Graphs failed: ", conditionMessage(e))); character(0) })
         if (!is.null(built$matched_only)) {
           for (plab in unique(built$matched_only$Pairing)) {
             mdp <- built$matched_only[built$matched_only$Pairing == plab, , drop = FALSE]
-            tryCatch(generate_standard_graphs(mdp, cfg, res, gdir, tag = paste0("_Matched_", plab), logger = logger),
+            tryCatch(generate_standard_graphs(mdp, cfg, res, gdir, tag = paste0("_Matched_", plab), logger = logger,
+                                              subset_label = sub_lab),
                      error = function(e) logger(paste0("Matched graphs failed: ", conditionMessage(e))))
           }
         }
@@ -1195,9 +1321,16 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
       # the headers as typed in the file (unique, as an Excel table needs),
       # with the same scale suffix on the VA columns as the filtered CSV
       names(mo) <- export_headers(names(mo), res$display_names, sfx)
-      wbm <- openxlsx::createWorkbook()
+      wbm <- openxlsx::createWorkbook(creator = WORKBOOK_CREATOR)   # never the user name (D25)
       md_sheet <- add_or_replace_worksheet(wbm, "Matched_Data")
       openxlsx::writeDataTable(wbm, md_sheet, mo)
+      # three decimals for the propensity score, the matching weight and the
+      # acuity converted to logMAR (finding T2-07); the cells keep full precision
+      n3 <- which((names(mo) %in% c("distance", "weights") | endsWith(names(mo), "_logMAR")) &
+                    vapply(mo, is.numeric, logical(1)))
+      if (length(n3) && nrow(mo))
+        openxlsx::addStyle(wbm, md_sheet, openxlsx::createStyle(numFmt = "0.000"), rows = 1 + seq_len(nrow(mo)),
+                           cols = n3, gridExpand = TRUE, stack = TRUE)
       # built$matched_only stacks the pairings (a reference eye matched twice
       # is in it twice): the Manifest counts it per pairing and as distinct eyes
       add_contents_and_manifest(wbm, built$matched_only, cfg, res, logger, run = run,
@@ -1221,6 +1354,16 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
   if (length(skipped))
     logger(paste0("WARNING: ", length(skipped), " of ", n_runs, " run(s) produced no workbook - ",
                   paste(skipped, collapse = "; "), "."))
+
+  # The run duration (D25) covers the whole run - tables, workbooks AND the
+  # figures drawn after them: the Manifest row written with each workbook (the
+  # time up to that workbook) is replaced by the total now; where that cannot
+  # be done the row keeps its own, labelled, time and the log says so.
+  dur <- as.numeric(difftime(Sys.time(), run_started, units = "secs"))
+  logger(sprintf("Run duration: %.1f s (tables, workbooks and figures).", dur))
+  for (f in c(files, matched_files))
+    xlsx_replace_text(f, MANIFEST_DURATION_RE,
+                      sprintf("%.1f (seconds, the whole run: tables, workbooks and figures)", dur), logger)
 
   bump(1.0, "Done.")
   list(files = files, matched_files = matched_files, output_dir = output_dir,

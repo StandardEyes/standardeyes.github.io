@@ -114,6 +114,9 @@ cfg <- tryCatch(
                      simplifyDataFrame = FALSE, simplifyMatrix = FALSE),
   error = function(e) { emit("ERROR Could not parse config JSON: ", conditionMessage(e)); NULL })
 if (is.null(cfg)) quit(status = 1)
+# the settings file as given, for the Manifest's "Settings (JSON)" row (its
+# arrays kept as arrays; export.R settings_json_text)
+options(standardeyes.cfg_path = cfg_path)
 
 # Relative paths in a settings file are relative to the app folder (the
 # shipped presets name "Example Data/..." and "Example Output"; the GUI server

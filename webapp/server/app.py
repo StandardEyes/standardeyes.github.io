@@ -219,8 +219,12 @@ def shutdown_cleanup() -> None:
             pass
         _OWNER_FH = None
 
-APP_VERSION = "2026-10-02-se.9"   # build id; bump together with static/app.js UI_VERSION
-PUBLIC_VERSION = "1.0.0"          # the release number the website and citation use
+# The ONE version source (decision D25): the engine reads these two lines from
+# this file (R/export.R standardeyes_version) for every workbook's Manifest,
+# also in a run from the command line; the release tools read them too. Keep
+# each a plain string assignment on its own line.
+APP_VERSION = "2026-10-04-se.10"  # build id; bump together with static/app.js UI_VERSION
+PUBLIC_VERSION = "1.1.0"          # the release number the website and citation use
 
 app = FastAPI(title="StandardEyes")
 
@@ -632,8 +636,10 @@ def histogram(req: HistReq):
         actual = preview.resolve(req.col, resolver)
         if actual is None or actual not in mdf.columns:
             # Matched_Data names the scale of a VA column in its header
-            # (<header>_logMAR / <header>_decimal), as the filtered CSV does
-            for sfx in ("_logMAR", "_decimal"):
+            # (<header>_logMAR / <header>_decimal), and a refraction column
+            # transposed to minus cylinder <header>_minus_cyl, as the filtered
+            # CSV does
+            for sfx in ("_logMAR", "_decimal", "_minus_cyl"):
                 actual = preview.resolve(str(req.col) + sfx, resolver)
                 if actual is not None and actual in mdf.columns:
                     break
@@ -1081,11 +1087,15 @@ def _run_stamps(data: dict) -> set[str]:
     return out
 
 
+_LOVEPLOT_EXTS = (".png", ".tiff", ".jpeg", ".pdf", ".eps", "_legend.txt")
+
+
 def _run_sidecar_names(data: dict, folder: str) -> tuple[list[str], list[str]]:
-    """(love plots, filtered-dataset CSVs) in `folder` that the run of `data`
-    wrote: LovePlot_<prefix>_..._<stamp>.png and Filtered_Dataset_<stamp>.csv
-    with this run's stamp (and output prefix, when known) - never the files
-    of an earlier run into the same folder."""
+    """(love plots, CSVs) in `folder` that the run of `data` wrote:
+    LovePlot_<prefix>_..._<stamp>.png, Filtered_Dataset_<stamp>.csv and the
+    astigmatism tables' copy <prefix>_<run stem>_Astigmatism_<stamp>.csv
+    (decision D8) with this run's stamp (and output prefix, when known) -
+    never the files of an earlier run into the same folder."""
     stamps = _run_stamps(data)
     prefix = str(data.get("output_prefix") or "")
     # the workbooks' names without the stamp: '<prefix>_<run stem>'
@@ -1103,12 +1113,15 @@ def _run_sidecar_names(data: dict, folder: str) -> tuple[list[str], list[str]]:
         if not os.path.isfile(os.path.join(folder, fn)):
             continue
         low = fn.lower()
-        if fn.startswith("LovePlot_") and low.endswith(".png") and any(
-                low.endswith(f"_{s}.png") for s in stamps) and (
+        # the love plot in every chosen figure format, and its legend file
+        # (journal figure style): LovePlot_..._<stamp>.<ext> / _<stamp>_legend.txt
+        if fn.startswith("LovePlot_") and any(
+                low.endswith(f"_{s}{e}") for s in stamps for e in _LOVEPLOT_EXTS) and (
                 not prefix or fn.startswith(f"LovePlot_{prefix}_")
                 or any(fn.startswith(f"LovePlot_{h}_") for h in heads)):
             loves.append(fn)
-        elif any(fn == f"Filtered_Dataset_{s}.csv" for s in stamps):
+        elif any(fn == f"Filtered_Dataset_{s}.csv" for s in stamps) or any(
+                fn == f"{h}_Astigmatism_{s}.csv" for h in heads for s in stamps):
             csvs.append(fn)
     return loves, csvs
 
@@ -1122,7 +1135,8 @@ def _run_loveplots(data: dict) -> list[str]:
         if d and d not in dirs:
             dirs.append(d)
     for d in dirs:
-        out += [os.path.join(d, fn) for fn in _run_sidecar_names(data, d)[0]]
+        out += [os.path.join(d, fn) for fn in _run_sidecar_names(data, d)[0]
+                if not fn.lower().endswith("_legend.txt")]       # the figures, not their legends
     return out
 
 
@@ -1223,7 +1237,7 @@ def run(req: RunReq, request: Request):
         resolver = preview.build_resolver(columns)
         if preview.subset_column_missing(cfg, resolver):
             errs.append(f"Subset column '{cfg.get('subset_col_raw')}' not found in this file. "
-                        "Re-map it or clear the subset column to analyse all rows.")
+                        "Re-map it or clear the subset column to analyze all rows.")
         grouped = _grouped_rows(analysed, cfg)
         if not errs:
             # R stops on a VA notation the values contradict, judged on the
@@ -1318,7 +1332,7 @@ def run(req: RunReq, request: Request):
                     continue
                 if ev["type"] == "done" and handle.cancelled:
                     STATE["result"] = None
-                    yield _sse({"type": "error", "message": "Analysis cancelled. Nothing from this run is shown."})
+                    yield _sse({"type": "error", "message": "Analysis canceled. Nothing from this run is shown."})
                 yield _sse(ev)
         finally:
             handle.finished = time.time()
@@ -1425,11 +1439,14 @@ def export_files(req: ExportReq):
 
 @app.post("/api/export-filtered")
 def export_filtered(req: ExportFilteredReq):
-    """Write the live-filtered dataset (standardize -> exclude -> filters ->
-    subsets) as CSV, independent of running the analysis."""
+    """Write the rows the analysis will use (standardize -> exclude ->
+    filters -> subsets -> in a group) as CSV, independent of running the
+    analysis: the rows and headers of the run's Filtered_Dataset CSV (D26),
+    GroupLabel (and Subset) first. Before a group is defined, every row
+    passing the filters and subsets (grouped = false in the answer)."""
     df = _require_df()
     try:
-        work = preview.filtered_frame(df, req.cfg or {})
+        work, grouped = preview.export_frame(df, req.cfg or {})
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"Filtering failed: {e}")
     dest = (req.dest or "").strip() or (req.cfg or {}).get("output_dir") or \
@@ -1444,7 +1461,7 @@ def export_filtered(req: ExportFilteredReq):
     except OSError as e:
         raise HTTPException(400, f"Could not write {path} ({e.strerror or e}). "
                                  "Choose a folder you can write to.")
-    return {"path": path, "rows": int(len(work)), "cols": int(work.shape[1])}
+    return {"path": path, "rows": int(len(work)), "cols": int(work.shape[1]), "grouped": bool(grouped)}
 
 
 @app.get("/api/results")
@@ -1459,8 +1476,10 @@ def results():
                          for p in _run_loveplots(r) if os.path.isfile(p)]}
     for gd in r.get("graph_dirs", []):
         try:
-            # figure files only: the _preview folder holds low-res copies
-            n_files = (len([f for f in os.listdir(gd) if os.path.isfile(os.path.join(gd, f))])
+            # figure files only: the _preview folder holds low-res copies, and
+            # the <figure>_legend.txt files of the journal style are not figures
+            n_files = (len([f for f in os.listdir(gd) if os.path.isfile(os.path.join(gd, f))
+                            and not f.lower().endswith("_legend.txt")])
                        if os.path.isdir(gd) else 0)
         except OSError:
             n_files = 0

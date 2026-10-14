@@ -2,8 +2,10 @@
 # helpers.R
 # Name cleaning, IO, formatting, variable typing, and the shared
 # helpers the other engine files call: visual-acuity parsing,
-# value / level matching, sheet and file names, and the single
-# between-group test selector used by tables AND figures.
+# value / level matching, sheet and file names, the single
+# between-group test selector used by tables AND figures, and the
+# small-sample GEE inference (covariance, t / F reference, the
+# clustered group tests) every model, table and figure shares.
 # Ported from the user's original two-group script and
 # generalized where needed. No two-group assumptions here.
 # Base R only at source time (match_preview.R may source this
@@ -313,9 +315,11 @@ quiet_error_text <- function(q) {
 # statistic explodes into a spurious "P < 0.001". The one rule for the figures'
 # GEE (graphs.R gr_wald_p) and the weighted table test (analysis.R
 # .weighted_wald), so a figure and its matched table never disagree on it.
+# V: the robust covariance the test uses (gee_vcov(): bias-corrected in the
+# default "md" mode); NULL = geepack's own (uncorrected) one.
 WALD_RCOND_MIN <- 1e-8
-gee_vcov_singular <- function(fit, idx) {
-  V <- tryCatch(fit$geese$vbeta, error = function(e) NULL)
+gee_vcov_singular <- function(fit, idx, V = NULL) {
+  if (is.null(V)) V <- tryCatch(fit$geese$vbeta, error = function(e) NULL)
   if (is.null(V) || !length(idx) || any(dim(V) < max(idx))) return(TRUE)
   Vg <- V[idx, idx, drop = FALSE]
   if (any(!is.finite(Vg))) return(TRUE)
@@ -324,6 +328,680 @@ gee_vcov_singular <- function(fit, idx) {
   dn <- if (is.null(Vn) || any(dim(Vn) < max(idx))) NULL else diag(Vn)[idx]
   !is.finite(rc) || rc < WALD_RCOND_MIN ||
     (!is.null(dn) && any(is.finite(dn) & dn > 0 & diag(Vg) < WALD_RCOND_MIN * dn))
+}
+
+# ------------------------------------------------------------
+# Small-sample GEE inference (decision D11). Every GEE-based test and interval
+# - the table tests, the GEE and regression sheets, the weighted tests of the
+# matched tables, the clustered P values of the figures and the clustered
+# astigmatism tests that use a GEE - takes its covariance and its reference
+# distribution from here:
+#   "md"   (default): the Mancl-DeRouen (2001) bias-corrected sandwich
+#          covariance; a single contrast or interval has a t reference and a
+#          joint test an F reference, df = clusters (patients) - model
+#          coefficients;
+#   "none": geepack's own uncorrected sandwich with a normal (chi-square)
+#          reference - the v1.0.0 behaviour.
+# The pipeline sets the mode of a run from cfg$gee_small_sample
+# (set_gee_small_sample); the models read it through gee_vcov(), gee_wald(),
+# gee_ci_mult() and gee_se_label().
+# ------------------------------------------------------------
+GEE_SMALL_SAMPLE_MODES <- c("md", "none")
+.gee_inf <- new.env(parent = emptyenv())
+.gee_inf$mode <- "md"
+.gee_inf$err <- ""
+
+# The mode of the models that follow: a blank value is the default ("md"), an
+# unknown one is logged and the default used. Returns the mode.
+set_gee_small_sample <- function(mode = "md", logger = NULL) {
+  m <- if (is.null(mode) || !length(mode) || is.na(mode[[1]])) "" else tolower(trimws(as.character(mode[[1]])))
+  if (!nzchar(m)) m <- "md"
+  if (!(m %in% GEE_SMALL_SAMPLE_MODES)) {
+    if (!is.null(logger))
+      logger(sprintf("GEE small-sample setting '%s' is not known (use md or none) - md is used.",
+                     as.character(mode[[1]])))
+    m <- "md"
+  }
+  .gee_inf$mode <- m
+  invisible(m)
+}
+gee_small_sample <- function() .gee_inf$mode %||% "md"
+
+# Bias-corrected sandwich covariance of a geepack::geeglm fit (Gaussian with
+# the identity link or binomial with the logit link; independence or
+# exchangeable working correlation; optional prior weights):
+#   B^-1 [sum_i D_i' V_i^-1 A_i r_i r_i' A_i' V_i^-1 D_i] B^-1,
+#   B = sum_i D_i' V_i^-1 D_i, H_i = D_i B^-1 D_i' V_i^-1,
+# with r_i the residuals of cluster i and A_i = I for "CR0" (geepack's own
+# robust covariance, reproduced exactly - kept as a self-check),
+# (I - H_i)^-1 for "MD" (Mancl & DeRouen 2001) or (I - H_i)^-1/2 for "KC"
+# (Kauermann & Carroll 2001). Prior weights enter as W^1/2 V^-1 W^1/2, as in
+# geepack. The scale parameter cancels. A cluster the model fits exactly in
+# some direction (leverage 1: the only patient of a group or of a covariate
+# level) has a singular I - H_i and no residual in that direction; the
+# generalized (Moore-Penrose) inverse of I - H_i then leaves that direction
+# out - it contributes nothing there, as in the uncorrected sandwich, whose
+# residual there is zero - and corrects the others (the generalized inverse of
+# Pustejovsky & Tipton 2018 for the same case). attr "leverage1": the number
+# of such clusters. The term that only such a cluster informs (its group's or
+# its covariate level's) has a degenerate variance: the callers never report
+# it (one_patient_groups; gee_lone_terms).
+gee_vcov_bc <- function(fit, type = c("MD", "KC", "CR0")) {
+  type <- match.arg(type)
+  X <- stats::model.matrix(fit)
+  y <- as.numeric(fit$y)
+  mu <- as.numeric(stats::fitted(fit))
+  id <- fit$id
+  w <- fit$prior.weights
+  if (is.null(w)) w <- rep(1, length(y))
+  fam <- fit$family$family; lnk <- fit$family$link
+  if (!((fam == "gaussian" && lnk == "identity") || (fam == "binomial" && lnk == "logit")))
+    stop("only Gaussian (identity link) and binomial (logit link) models are supported")
+  v <- if (fam == "binomial") mu * (1 - mu) else rep(1, length(mu))
+  dmu <- v                         # canonical links: d mu / d eta = the variance function
+  cs <- fit$corstr %||% fit$geese$model$corstr %||% "independence"
+  if (!(cs %in% c("exchangeable", "independence")))
+    stop("working correlation '", cs, "' is not supported")
+  alpha <- if (identical(cs, "exchangeable")) as.numeric(fit$geese$alpha[1]) else 0
+  idx <- split(seq_along(y), factor(id, levels = unique(id)))
+  p <- ncol(X)
+  Bm <- matrix(0, p, p)
+  parts <- vector("list", length(idx))
+  for (k in seq_along(idx)) {
+    i <- idx[[k]]; ni <- length(i)
+    Di <- X[i, , drop = FALSE] * dmu[i]
+    R <- matrix(alpha, ni, ni); diag(R) <- 1
+    sA <- sqrt(v[i])
+    Wh <- sqrt(w[i])
+    Vinv <- (Wh %o% Wh) * solve((sA %o% sA) * R)
+    parts[[k]] <- list(D = Di, Vinv = Vinv, r = y[i] - mu[i])
+    Bm <- Bm + t(Di) %*% Vinv %*% Di
+  }
+  Binv <- solve(Bm)
+  M <- matrix(0, p, p)
+  n_lev1 <- 0L
+  for (pt in parts) {
+    r <- pt$r
+    if (type != "CR0") {
+      IH <- diag(length(r)) - pt$D %*% Binv %*% t(pt$D) %*% pt$Vinv
+      if (any(!is.finite(IH))) stop("the leverage of a patient could not be computed")
+      if (type == "MD") {
+        s <- svd(IH)
+        ok <- s$d > 1e-8 * max(s$d, 1)
+        if (!all(ok)) n_lev1 <- n_lev1 + 1L
+        r <- s$v[, ok, drop = FALSE] %*% ((t(s$u[, ok, drop = FALSE]) %*% r) / s$d[ok])
+      } else {
+        e <- eigen(IH)
+        ev <- Re(e$values)
+        ok <- ev > 1e-8
+        if (!all(ok)) n_lev1 <- n_lev1 + 1L
+        r <- Re(e$vectors %*% diag(ifelse(ok, 1 / sqrt(pmax(ev, 1e-8)), 0), length(r)) %*%
+                  solve(e$vectors) %*% r)
+      }
+    }
+    u <- t(pt$D) %*% pt$Vinv %*% r
+    M <- M + u %*% t(u)
+  }
+  V <- Binv %*% M %*% Binv
+  dimnames(V) <- list(colnames(X), colnames(X))
+  attr(V, "leverage1") <- n_lev1
+  V
+}
+
+# The terms of a fitted geeglm (intercept excepted) whose design column is
+# non-zero in ONE cluster only - the dummy of a group or of a covariate level
+# held by a single patient (eye, without patient ids). That cluster has
+# leverage 1 and its own term has no between-patient variance to estimate: its
+# robust SE is degenerate. A group's term is never reported (contract R4-9,
+# one_patient_groups); a covariate level's SE, P and CI are not reported in the
+# "md" mode (extract_gee_tidy; "none" keeps the v1.0.0 output). character(0)
+# when there is none.
+gee_lone_terms <- function(fit) {
+  X <- tryCatch(stats::model.matrix(fit), error = function(e) NULL)
+  id <- fit$id
+  if (is.null(X) || length(id) != nrow(X)) return(character(0))
+  n_cl <- vapply(seq_len(ncol(X)), function(j) length(unique(id[X[, j] != 0])), integer(1))
+  setdiff(colnames(X)[n_cl == 1L], "(Intercept)")
+}
+
+# The robust covariance of a fit in the current mode: bias-corrected ("md") or
+# geepack's own ("none"). NULL when it cannot be computed; the reason is left
+# in .gee_inf$err ("" otherwise).
+gee_vcov <- function(fit, mode = gee_small_sample()) {
+  .gee_inf$err <- ""
+  if (identical(mode, "none")) return(tryCatch(fit$geese$vbeta, error = function(e) NULL))
+  tryCatch(gee_vcov_bc(fit, "MD"), error = function(e) {
+    .gee_inf$err <- paste0("the bias-corrected (Mancl-DeRouen) covariance could not be computed: ",
+                           conditionMessage(e))
+    NULL
+  })
+}
+
+# Degrees of freedom of the t / F reference: clusters (patients; eyes when each
+# eye is its own cluster) minus the model's coefficients, intercept included.
+gee_ref_df <- function(fit) length(unique(fit$id)) - length(stats::coef(fit))
+
+# Why a model has no t / F reference in the "md" mode - no more clusters than
+# coefficients: "too few patients for this model (4 patients, 4 coefficients)";
+# NULL when it has one (and always in the "none" mode).
+gee_df_note <- function(n_clusters, n_coef, unit = "patient", mode = gee_small_sample()) {
+  if (!identical(mode, "md")) return(NULL)
+  k <- suppressWarnings(as.integer(n_clusters[1])); p <- suppressWarnings(as.integer(n_coef[1]))
+  if (!length(k) || !length(p) || is.na(k) || is.na(p) || k - p >= 1) return(NULL)
+  sprintf("too few %s for this model (%d %s, %d coefficients)", cluster_unit_word(unit), k,
+          cluster_unit_word(unit, k), p)
+}
+
+# Multiplier of a 95% interval: the t quantile with the model's df ("md"), or
+# the 1.96 of v1.0.0 ("none").
+gee_ci_mult <- function(df, mode = gee_small_sample()) {
+  if (identical(mode, "none")) return(1.96)
+  if (!is.finite(df) || df < 1) return(NA_real_)
+  stats::qt(0.975, df)
+}
+
+# Joint Wald test of the coefficients `idx` of a fitted geeglm in the current
+# mode. Returns list(p, stat, df1, df2, singular, why):
+#  - "md": F = W / q on (q, clusters - coefficients) df, W = b' V^-1 b with the
+#    bias-corrected V (a single coefficient: the two-sided t test);
+#  - "none": W on q df of the chi-square, geepack's own V (v1.0.0).
+# p is NA - never a P value - when the coefficients or V are not finite, when V
+# could not be computed (why), when its tested block is numerically singular
+# (singular = TRUE; contract R4-6, gee_vcov_singular), or when there are no
+# more clusters than coefficients (why, gee_df_note). unit: what a cluster is.
+gee_wald <- function(fit, idx, unit = "patient", mode = gee_small_sample()) {
+  out <- list(p = NA_real_, stat = NA_real_, df1 = length(idx), df2 = NA_real_,
+              singular = FALSE, why = "")
+  b <- stats::coef(fit)
+  if (!length(idx) || any(!is.finite(b[idx]))) return(out)
+  V <- gee_vcov(fit, mode)
+  if (is.null(V)) { out$why <- .gee_inf$err; return(out) }
+  Vg <- V[idx, idx, drop = FALSE]
+  if (any(!is.finite(Vg))) return(out)
+  if (gee_vcov_singular(fit, idx, V)) { out$singular <- TRUE; return(out) }
+  W <- tryCatch(as.numeric(t(b[idx]) %*% solve(Vg) %*% b[idx]), error = function(e) NA_real_)
+  if (!is.finite(W)) return(out)
+  q <- length(idx)
+  if (identical(mode, "none")) {
+    out$stat <- W
+    out$p <- stats::pchisq(W, df = q, lower.tail = FALSE)
+    return(out)
+  }
+  why <- gee_df_note(length(unique(fit$id)), length(b), unit, mode)
+  if (!is.null(why)) { out$why <- why; return(out) }
+  out$df2 <- gee_ref_df(fit)
+  out$stat <- W / q
+  out$p <- stats::pf(W / q, q, out$df2, lower.tail = FALSE)
+  out
+}
+
+# The inference named beside every GEE P value and interval; q = the number of
+# coefficients tested together (1: a single comparison or interval).
+#   "robust SE (Mancl-DeRouen), t reference" / "..., F reference"   ("md")
+#   "robust SE"                                                      ("none", the v1.0.0 label)
+gee_se_label <- function(q = 1, mode = gee_small_sample()) {
+  if (identical(mode, "none")) return("robust SE")
+  paste0("robust SE (Mancl-DeRouen), ", if (isTRUE(q > 1)) "F" else "t", " reference")
+}
+
+# One sentence for the run log, the sheets' notes and the Manifest. unit: what
+# a cluster is - "eye" when no patient ID is in scope (each eye its own
+# cluster: df = eyes - model coefficients).
+gee_inference_text <- function(mode = gee_small_sample(), unit = "patient") {
+  if (identical(mode, "none"))
+    "uncorrected robust (sandwich) standard errors with a normal reference (chi-square for joint tests), as in v1.0.0"
+  else paste0("Mancl-DeRouen bias-corrected robust standard errors with a t reference for single ",
+              "comparisons and intervals and an F reference for joint tests ",
+              "(df = ", if (identical(unit, "eye")) "eyes" else "patients", " - model coefficients)")
+}
+
+# ------------------------------------------------------------
+# Exchangeable GEE fits whose outcome hardly varies within a patient (decision
+# R3-4). An exchangeable working correlation estimated near or above 1 (age or
+# sex as an outcome, the optical zone) makes the estimating equations
+# ill-conditioned, and geepack can stop far from a solution. An exchangeable
+# fit is accepted only if it converged, its working correlation is below
+# GEE_EXCH_ALPHA_MAX and one further Fisher-scoring step moves no coefficient
+# by more than GEE_EXCH_STEP_MAX of its robust SE; otherwise the model is
+# refitted with an independence working correlation (the patient-clustered
+# robust SE stay valid) and labeled GEE_INDEP_REFIT; if that fails too, the
+# model is not estimable, with the reason. Nothing is replaced silently: the
+# callers name the working correlation used on every sheet, table, figure and
+# in the run log. (A variable flagged as a per-patient parameter is never the
+# outcome of an eye-level GEE: analysis.R fits it on one row per patient,
+# GEE_PER_PATIENT.)
+# ------------------------------------------------------------
+GEE_EXCH_ALPHA_MAX <- 0.95
+GEE_EXCH_STEP_MAX <- 0.01
+GEE_INDEP_REFIT <- "independence working correlation (the outcome is almost constant within patients)"
+GEE_PER_PATIENT <- "per patient (one row per patient)"
+.gee_inf$refits <- character(0)
+
+# The move of each coefficient of a fitted geeglm (Gaussian identity or
+# binomial logit; exchangeable or independence; prior weights as geepack) that
+# one further Fisher-scoring step at its estimates would make, with the
+# working correlation held at its estimate, in units of geepack's robust SE:
+# |B^-1 sum_i D_i' V_i^-1 (y_i - mu_i)| / SE, B = sum_i D_i' V_i^-1 D_i (the
+# scale cancels).
+gee_scoring_step <- function(fit) {
+  X <- stats::model.matrix(fit)
+  y <- as.numeric(fit$y)
+  mu <- as.numeric(stats::fitted(fit))
+  w <- fit$prior.weights
+  if (is.null(w)) w <- rep(1, length(y))
+  fam <- fit$family$family
+  v <- if (identical(fam, "binomial")) mu * (1 - mu) else rep(1, length(mu))
+  cs <- fit$corstr %||% fit$geese$model$corstr %||% "independence"
+  alpha <- if (identical(cs, "exchangeable")) as.numeric(fit$geese$alpha[1]) else 0
+  idx <- split(seq_along(y), factor(fit$id, levels = unique(fit$id)))
+  p <- ncol(X)
+  Bm <- matrix(0, p, p); U <- numeric(p)
+  for (i in idx) {
+    ni <- length(i)
+    Di <- X[i, , drop = FALSE] * v[i]
+    R <- matrix(alpha, ni, ni); diag(R) <- 1
+    sA <- sqrt(v[i]); Wh <- sqrt(w[i])
+    Vinv <- (Wh %o% Wh) * solve((sA %o% sA) * R)
+    Bm <- Bm + t(Di) %*% Vinv %*% Di
+    U <- U + as.numeric(t(Di) %*% Vinv %*% (y[i] - mu[i]))
+  }
+  se <- sqrt(diag(fit$geese$vbeta))
+  st <- abs(as.numeric(solve(Bm, U)))
+  out <- st / se
+  # a coefficient with a robust SE of 0 (e.g. the intercept when the reference
+  # group's outcome is the same value in every eye) has no SE to scale by: it
+  # passes when the step is nothing next to the coefficient itself
+  z <- !is.finite(se) | se <= 0
+  if (any(z)) out[z] <- ifelse(st[z] <= 1e-8 * pmax(1, abs(as.numeric(stats::coef(fit))[z])), 0, Inf)
+  out
+}
+
+# "" when an exchangeable fit is accepted, else why not (in the words of the
+# sheets and the log)
+gee_exch_reject <- function(fit) {
+  if (is.null(fit)) return("the exchangeable fit failed")
+  err <- suppressWarnings(as.numeric(fit$geese$error))
+  if (length(err) && !isTRUE(err[1] == 0)) return("the exchangeable fit did not converge")
+  a <- suppressWarnings(as.numeric(fit$geese$alpha[1]))
+  if (!length(a) || !is.finite(a)) return("the exchangeable working correlation could not be estimated")
+  if (a >= GEE_EXCH_ALPHA_MAX)
+    return(sprintf("estimated working correlation %.3f (%.2f or more)", a, GEE_EXCH_ALPHA_MAX))
+  st <- tryCatch(max(gee_scoring_step(fit)), error = function(e) NA_real_)
+  if (!is.finite(st)) return("its scoring check could not be computed")
+  if (st > GEE_EXCH_STEP_MAX)
+    return(sprintf("not at its solution (one further scoring step moves a coefficient by %.2g SE)", st))
+  ""
+}
+
+# TRUE when geepack reports a fitted geeglm as converged (its error code 0).
+# A fit is only ever accepted when it converged (decision R3-4), whatever its
+# working correlation: the exchangeable fits (gee_exch_reject), their
+# independence refits, and the independence fits of matched or weighted
+# cohorts, the stacked categorical test and the weighted table test (finding
+# S5).
+gee_converged <- function(fit) {
+  if (is.null(fit)) return(FALSE)
+  err <- suppressWarnings(as.numeric(fit$geese$error))
+  length(err) > 0 && isTRUE(err[1] == 0)
+}
+
+# Fit a GEE with the working correlation `corstr`, and an exchangeable one
+# only when gee_exch_reject() accepts it: fit_fun(corstr) returns the geeglm
+# (or NULL). Returns list(fit, corstr = the working correlation of `fit`,
+# refit = why the exchangeable fit was rejected ("" when it was not), why = why
+# no fit is returned ("" when one is)). A fit with another working correlation
+# (independence: matched or weighted cohorts) is accepted only when it
+# converged, as the refit is.
+gee_fit_checked <- function(fit_fun, corstr = "exchangeable") {
+  if (!identical(corstr, "exchangeable")) {
+    f <- fit_fun(corstr)
+    if (!gee_converged(f))
+      return(list(fit = NULL, corstr = corstr, refit = "",
+                  why = if (is.null(f)) "the model could not be fitted" else "the model did not converge"))
+    return(list(fit = f, corstr = corstr, refit = "", why = ""))
+  }
+  f1 <- fit_fun("exchangeable")
+  why <- gee_exch_reject(f1)
+  if (!nzchar(why)) return(list(fit = f1, corstr = "exchangeable", refit = "", why = ""))
+  f2 <- fit_fun("independence")
+  if (!gee_converged(f2))
+    return(list(fit = NULL, corstr = "independence", refit = why,
+                why = paste0("the exchangeable fit was not accepted (", why, ") and the independence refit ",
+                             if (is.null(f2)) "failed" else "did not converge")))
+  list(fit = f2, corstr = "independence", refit = why, why = "")
+}
+
+# The clustered tests of the tables and figures (gee_group_p) record each
+# refit here; the pipeline and the figure pass log how many (and reset).
+gee_refit_note <- function(what) .gee_inf$refits <- c(.gee_inf$refits, what)
+gee_refit_take <- function() { r <- .gee_inf$refits %||% character(0); .gee_inf$refits <- character(0); r }
+gee_refit_log_text <- function(n, where)
+  sprintf(paste0("%s: in %d clustered test(s) the exchangeable GEE was not accepted (working correlation %.2f or more, ",
+                 "no convergence, or not at its solution) - refitted with an %s; the test name says so."),
+          where, n, GEE_EXCH_ALPHA_MAX, GEE_INDEP_REFIT)
+
+# TRUE when at least one patient contributes more than one of these eyes (the
+# usable eyes of one variable). Only then is a patient-clustered test run in
+# the tables and figures (decision D12); with one eye per patient the
+# classical tests are. Blank ids are each their own patient.
+fellow_eyes_present <- function(id) {
+  if (!length(id)) return(FALSE)
+  anyDuplicated(fill_missing_ids(id)) > 0
+}
+
+# Patient-clustered P value of the group term(s): a GEE of the outcome on the
+# group, every group term tested jointly (gee_wald; more than two groups: the
+# omnibus test). THE one implementation behind the clustered and weighted
+# figure P values (graphs.R p_omnibus) and the clustered table tests
+# (analysis.R .clustered_test), so a table and a figure of one outcome give one
+# P value. kind "proportion" -> binomial, else Gaussian; ranks = TRUE: the
+# Gaussian GEE on the ranks of the usable values (ordinal outcomes).
+# w: optional matching weights (one per element of x); eyes with a missing or
+# non-positive weight are left out, as in analysis.R's weighted tables. With
+# weights that are not all 1 the model is analysis.R's weighted model: an
+# INDEPENDENCE working correlation with the robust SE clustered by `id`, whose
+# estimate is the difference of the weighted means / proportions (contract
+# R4-1); otherwise exchangeable. corstr: forces the working correlation
+# ("independence" on every matched cohort, decision D18). unit: "eye" when `id`
+# is the row (no patient ids: each eye its own cluster), so the reasons count
+# eyes.
+# Returns the P value, or NA:
+#  - with attr "why" when the data cannot support the model - nothing is fitted
+#    and the reason is the tables' one, checked in .weighted_wald's order:
+#    fewer than two groups / "B has n = 1" (p_value_guard, small_group_note),
+#    "B has 1 patient" (cluster_guard_note), "too few eyes for this model (n =
+#    5)" (model_data_guard: the one minimum-data rule of every clustered model,
+#    contract R4-10), too few patients for the t reference (gee_df_note) and,
+#    on a weighted 0/1 outcome, "no weighted test possible: no events in B";
+#    also when the fitted model has no corrected covariance or no t / F
+#    reference (gee_wald's why, the GEE sheets' reason);
+#  - without "why" when a model was fitted but failed (no convergence, a
+#    numerically singular covariance - attr "singular") or, unweighted, a group
+#    of a 0/1 outcome has no events or only events (no finite estimate): the
+#    caller falls back (unweighted) or says the weighted test could not be
+#    computed.
+# each = TRUE: the same model, but each group's coefficient against the
+# reference (the first group of `g`) is tested on its own (decision D14: the
+# figures' "vs reference" lines then come from the model the tables' GEE
+# column reports, one number per comparison). Returns the nominal P values
+# named by group (NA for a group whose coefficient could not be tested), or
+# the NA of the rules above when nothing could be fitted.
+gee_group_p <- function(x, g, id, kind = "continuous", event = NULL, w = NULL,
+                        unit = "patient", ranks = FALSE, corstr = NULL, each = FALSE) {
+  na_why <- function(why) structure(NA_real_, why = why)
+  if (!requireNamespace("geepack", quietly = TRUE)) return(NA_real_)
+  # the groups in their given order, for the reasons; the model's factor stays
+  # alphabetical (the joint Wald test does not depend on the reference level),
+  # except for each = TRUE, whose coefficients are against the first group
+  glv <- if (is.factor(g)) levels(g) else unique(as.character(g[!is.na(g)]))
+  g <- if (isTRUE(each)) factor(as.character(g), levels = glv) else factor(as.character(g))
+  y <- if (identical(kind, "proportion")) {
+    as.numeric(if (is.null(event)) as.logical(x) else as.character(x) == as.character(event))
+  } else as_numeric_safe(x)
+  id <- fill_missing_ids(id)
+  weighted <- !is.null(w)                       # a matched cohort's weighted test
+  cs <- if (!is.null(corstr)) corstr
+        else if (weighted && weights_nonunit(w)) "independence" else "exchangeable"
+  wt <- if (is.null(w)) rep(1, length(y)) else suppressWarnings(as.numeric(w))
+  ok <- is.finite(y) & !is.na(g) & is.finite(wt) & wt > 0
+  if (isTRUE(ranks) && !identical(kind, "proportion")) y[ok] <- rank(y[ok])
+  d <- data.frame(y = y[ok], g = droplevels(g[ok]), .w = wt[ok],
+                  cid = as.integer(factor(as.character(id[ok]))))
+  gtx <- droplevels(factor(as.character(d$g), levels = glv))   # for the texts
+  # never a model for data that cannot support a P value (p_omnibus says why
+  # before it gets here; these are the same guards, in the same order)
+  if (nlevels(d$g) < 2) return(na_why("fewer than two groups have data for this variable"))
+  if (length(unique(d$y)) < 2) return(na_why("variable is constant in this cohort"))
+  # a group of one eye or one patient leaves the sandwich SE nothing to estimate
+  # its variance from, so its mean counts as known exactly (a proportion needs
+  # one eye per group in p_value_guard; its one-eye group is "B has 1 patient")
+  if (!identical(kind, "proportion")) {
+    why <- small_group_note(gtx)
+    if (nzchar(why)) return(na_why(why))
+  }
+  why <- cluster_guard_note(id[ok], gtx, unit)
+  if (nzchar(why)) return(na_why(why))
+  # the minimum data for any clustered model (y ~ group: one coefficient per group)
+  why <- model_data_guard(nrow(d), length(unique(d$cid)), nlevels(d$g), unit)
+  if (!is.null(why)) return(na_why(why))
+  why <- gee_df_note(length(unique(d$cid)), nlevels(d$g), unit)
+  if (!is.null(why)) return(na_why(why))
+  # a 0/1 outcome constant within a group has no finite estimate: a weighted
+  # comparison says which group, as the matched table does; an unweighted one
+  # falls back to the permutation test over patients (cluster_perm_test)
+  if (identical(kind, "proportion")) {
+    s0 <- tapply(d$y, gtx, function(z) all(z == 0))
+    s1 <- tapply(d$y, gtx, function(z) all(z == 1))
+    sep <- names(s0)[s0 | s1]
+    if (length(sep)) {
+      if (!weighted) return(NA_real_)
+      return(na_why(paste0("no weighted test possible: ",
+                           paste(paste0(ifelse(s0[sep], "no events in ", "only events in "), sep),
+                                 collapse = "; "))))
+    }
+  }
+  d <- d[order(d$cid), , drop = FALSE]          # geepack needs rows sorted by cluster
+  fam <- if (identical(kind, "proportion")) stats::binomial() else stats::gaussian()
+  # anything geepack prints stays off the console (stdout is the engine's LOG
+  # protocol): quiet_eval. An exchangeable fit is kept only when it is
+  # accepted; otherwise the independence refit, recorded and labeled through
+  # attr "refit" (decision R3-4; gee_fit_checked)
+  fc <- gee_fit_checked(function(cs_) quiet_eval(suppressWarnings(
+           if (is.null(w)) geepack::geeglm(y ~ g, id = cid, data = d, family = fam, corstr = cs_)
+           else geepack::geeglm(y ~ g, id = cid, data = d, weights = .w, family = fam,
+                                corstr = cs_)))$value, cs)
+  fit <- fc$fit
+  if (is.null(fit)) {
+    if (nzchar(fc$refit)) return(na_why(fc$why))
+    # a weighted model that did not converge has no P value, and says so (the
+    # weighted table test's reason); unweighted, the caller falls back
+    if (weighted && identical(fc$why, "the model did not converge"))
+      return(na_why("the weighted model did not converge"))
+    return(NA_real_)
+  }
+  if (nzchar(fc$refit)) gee_refit_note(fc$refit)
+  tag <- function(p) if (nzchar(fc$refit)) structure(p, refit = fc$refit, corstr = fc$corstr) else p
+  if (isTRUE(each)) {
+    if (!identical(levels(d$g)[1], glv[1])) return(na_why(paste0(glv[1], " has no data for this variable")))
+    cn <- names(stats::coef(fit))
+    out <- stats::setNames(rep(NA_real_, length(glv) - 1L), glv[-1])
+    for (l in intersect(glv[-1], levels(d$g))) {
+      j <- match(paste0("g", l), cn)
+      if (!is.na(j)) out[[l]] <- gee_wald(fit, j, unit)$p
+    }
+    return(tag(out))
+  }
+  wt <- gee_wald(fit, grep("^g", names(stats::coef(fit))), unit)
+  if (isTRUE(wt$singular)) return(structure(NA_real_, singular = TRUE))
+  # no corrected covariance or no t / F reference: the GEE sheets' reason,
+  # never a silent classical fallback
+  if (!is.finite(wt$p) && nzchar(wt$why)) return(na_why(wt$why))
+  tag(wt$p)
+}
+
+# Patient-clustered test of a categorical variable with more than two levels
+# (decision D12): every eye contributes one record per level after the first
+# (1 = the eye has that level), the records are stacked, and a Gaussian GEE
+# of the indicator on level * group - INDEPENDENCE working correlation, robust
+# SE clustered by `id` - tests every group and level:group term jointly, i.e.
+# the same distribution over the levels in every group (the clustered
+# analogue of the chi-squared test; the stacked design is the one
+# astig_bivariate_p uses for the two vector components). q = (levels - 1) x
+# (groups - 1) coefficients. v: the level of each eye (NA = missing); g: its
+# group; id: its patient. Returns the P value, or NA with attr "why" (the
+# guards of gee_group_p, the model counting (levels - 1) x groups
+# coefficients; gee_wald's why) or without it when the fit failed, did not
+# converge or its covariance is singular (attr "singular"; unweighted, the
+# caller falls back to the permutation test over patients, cluster_perm_test,
+# labelled). w: optional matching weights, one per eye (a matched cohort with
+# unequal weights, finding S2-4): eyes with a missing or non-positive weight
+# are left out, as in the weighted tables, and each eye's stacked records carry
+# its weight - the weighted independence GEE of the matched tables' other rows
+# (analysis.R .weighted_wald), with the same convergence and singularity checks.
+gee_categorical_p <- function(v, g, id, unit = "patient", w = NULL) {
+  na_why <- function(why) structure(NA_real_, why = why)
+  if (!requireNamespace("geepack", quietly = TRUE)) return(NA_real_)
+  glv <- if (is.factor(g)) levels(g) else unique(as.character(g[!is.na(g)]))
+  vv <- as.character(v)
+  ok <- !is.na(vv) & !is.na(g)
+  wt <- if (is.null(w)) rep(1, length(vv)) else suppressWarnings(as.numeric(w))
+  if (!is.null(w)) ok <- ok & is.finite(wt) & wt > 0
+  wt <- wt[ok]
+  vv <- vv[ok]
+  gg <- droplevels(factor(as.character(g[ok]), levels = glv))
+  idk <- fill_missing_ids(id)[ok]
+  levs <- sort(unique(vv))
+  if (nlevels(gg) < 2) return(na_why("fewer than two groups have data for this variable"))
+  if (length(levs) < 2) return(na_why("variable is constant in this cohort"))
+  why <- cluster_guard_note(idk, gg, unit)
+  if (nzchar(why)) return(na_why(why))
+  n_coef <- (length(levs) - 1L) * nlevels(gg)
+  why <- model_data_guard(length(vv), length(unique(idk)), n_coef, unit)
+  if (!is.null(why)) return(na_why(why))
+  why <- gee_df_note(length(unique(idk)), n_coef, unit)
+  if (!is.null(why)) return(na_why(why))
+  cid <- as.integer(factor(idk))
+  d <- do.call(rbind, lapply(levs[-1], function(l)
+    data.frame(ind = as.numeric(vv == l), lev = l, g = gg, cid = cid, .w = wt, stringsAsFactors = FALSE)))
+  d$lev <- factor(d$lev, levels = levs[-1])
+  d <- d[order(d$cid), , drop = FALSE]
+  f <- if (length(levs) > 2) ind ~ lev * g else ind ~ g
+  fit <- quiet_eval(suppressWarnings(
+           if (is.null(w)) geepack::geeglm(f, id = cid, data = d, family = stats::gaussian(),
+                                           corstr = "independence")
+           else geepack::geeglm(f, id = cid, data = d, weights = .w, family = stats::gaussian(),
+                                corstr = "independence")))$value
+  # (a fit is accepted only when it converged: gee_converged)
+  if (!gee_converged(fit)) return(NA_real_)
+  # the group and level:group terms, found through the model's term
+  # assignment (a level name can never be mistaken for a group term)
+  asg <- attr(stats::model.matrix(fit), "assign")
+  tl <- attr(stats::terms(fit), "term.labels")
+  wt <- gee_wald(fit, which(asg > 0 & tl[pmax(asg, 1L)] %in% c("g", "lev:g")), unit)
+  if (isTRUE(wt$singular)) return(structure(NA_real_, singular = TRUE))
+  if (!is.finite(wt$p) && nzchar(wt$why)) return(na_why(wt$why))
+  wt$p
+}
+
+# ------------------------------------------------------------
+# Permutation test over patients: THE test of a patient-clustered comparison
+# whose GEE was fitted but failed - a group whose eyes all have the event or
+# none has it (separation: no finite estimate), a level missing from a group
+# (a singular covariance), no convergence (findings S2, T1-02, A5). It keeps
+# the two eyes of a patient together, so it never counts fellow eyes as
+# independent evidence; the summary tables (analysis.R .clustered_test), the
+# figures (graphs.R p_omnibus) and the astigmatism interval tests (graphs.R
+# astig_perm_p) share it, so a table and its figure still give one P value.
+# A patient whose eyes all lie in one group is one cluster, and the group
+# labels are permuted across those clusters. A patient with eyes in two or more
+# groups (a contralateral design: PRK in one eye, LASIK in the other) keeps
+# that pairing (finding S2-6): the labels of its eyes are exchanged within the
+# patient, so each such patient still has its eyes in the same groups, in
+# random order. Under the null hypothesis both moves leave the distribution of
+# the data unchanged, so the test stays exact; with no such patient it is the
+# plain permutation of the clusters. B = CLUSTER_PERM_B permutations (9999,
+# finding S2-5: the Monte Carlo SE of a P near .005 is then about .0007), with
+# the fixed seed CLUSTER_PERM_SEED (a repeated run gives the same P). The
+# statistic is computed from cluster sums (rowsum), so 9999 permutations take
+# well under a second. Statistic, over the eyes:
+#   stat = "mean"  (a number, the ranks of an ordinal variable, a 0/1 outcome):
+#          the between-group sum of squares of the eye means,
+#          sum_g n_g (m_g - m)^2 - for a 0/1 outcome the Pearson chi-square
+#          statistic of the eye counts up to the constant p(1 - p);
+#   stat = "table" (a categorical variable): the Pearson chi-square statistic
+#          of the level x group table of eye counts.
+# P = (number of permuted statistics >= the observed one + 1) / (B + 1), so the
+# smallest P is 1 / (B + 1). y: one value per eye; g: its group; id: its
+# patient (blank ids are each their own patient). Rows with a missing value or
+# group are left out. Returns the P value, NA when there is nothing to test
+# (fewer than two groups, or no variation).
+# ------------------------------------------------------------
+CLUSTER_PERM_B <- 9999L
+CLUSTER_PERM_SEED <- 20250601L
+CLUSTER_PERM_TEST <- sprintf("Permutation test over patients, %d permutations", CLUSTER_PERM_B)
+# what is permuted, in the words of the notes, legend files and run log
+CLUSTER_PERM_UNITS <- paste0("each patient's eyes kept together; the eyes of a patient with eyes in two groups ",
+                             "exchanged within the patient")
+cluster_perm_p <- function(y, g, id, stat = c("mean", "table"), B = CLUSTER_PERM_B, seed = CLUSTER_PERM_SEED) {
+  stat <- match.arg(stat)
+  ok <- !is.na(y) & !is.na(g)
+  if (stat == "mean") ok <- ok & is.finite(suppressWarnings(as.numeric(y)))
+  g <- droplevels(factor(g[ok]))
+  if (nlevels(g) < 2) return(NA_real_)
+  id <- fill_missing_ids(id[ok])
+  # the patients with eyes in more than one group: each of their eyes is a
+  # unit of its own (its label is exchanged within the patient); every other
+  # patient's eyes are one unit
+  n_grp <- tapply(as.integer(g), id, function(z) length(unique(z)))
+  mixed <- unname(n_grp[id] > 1)
+  key <- ifelse(mixed, paste0("eye\r", seq_along(id)), paste(as.integer(g), id, sep = "\r"))
+  cl <- match(key, unique(key))
+  first <- !duplicated(cl)
+  cg <- g[first]                                  # the group of each unit
+  # one permutation of the labels: across the whole-patient units; within the
+  # patient for the eyes of a patient in two groups (their units in patient
+  # order, shuffled within each patient by order(patient, runif))
+  mx <- which(mixed[first])
+  perm <- if (!length(mx)) function() sample(cg) else {
+    mp <- id[first][mx]
+    o <- order(mp); mx <- mx[o]; mp <- mp[o]
+    whole <- which(!mixed[first])
+    function() {
+      lab <- cg
+      if (length(whole) > 1) lab[whole] <- cg[whole][sample.int(length(whole))]
+      lab[mx] <- cg[mx][order(mp, stats::runif(length(mx)))]
+      lab
+    }
+  }
+  sn <- rowsum(rep(1, length(cl)), cl, reorder = FALSE)[, 1]
+  if (stat == "mean") {
+    if (length(unique(as.numeric(y[ok]))) < 2) return(NA_real_)
+    sy <- rowsum(as.numeric(y[ok]), cl, reorder = FALSE)[, 1]
+    mu <- sum(sy) / sum(sn)
+    st <- function(lab) {
+      ty <- rowsum(sy, lab)[, 1]; tn <- rowsum(sn, lab)[, 1]
+      sum(tn * (ty / tn - mu)^2)
+    }
+  } else {
+    yv <- as.character(y[ok])
+    lv <- sort(unique(yv))
+    if (length(lv) < 2) return(NA_real_)
+    cm <- rowsum(vapply(lv, function(l) as.numeric(yv == l), numeric(length(yv))), cl, reorder = FALSE)
+    nl <- colSums(cm)
+    st <- function(lab) {
+      tt <- rowsum(cm, lab)
+      ex <- outer(rowSums(tt), nl) / sum(nl)
+      sum((tt - ex)^2 / ex)
+    }
+  }
+  obs <- st(cg)
+  if (!is.finite(obs)) return(NA_real_)
+  tol <- 1e-10 * max(1, abs(obs))
+  cnt <- with_local_seed(seed, sum(vapply(seq_len(B), function(b) st(perm()) >= obs - tol, logical(1))))
+  (cnt + 1) / (B + 1)
+}
+
+# The permutation test over patients of one table or figure comparison, by the
+# variable's kind: "continuous" (the values), "ordinal" (their ranks over the
+# usable eyes, as the GEE on ranks), "dichotomous" / "proportion" (a 0/1 or
+# TRUE / FALSE outcome), "categorical" (two levels: the second level's 0/1
+# indicator, as the binomial GEE; more: the chi-square statistic of the level x
+# group table). Returns the P value or NA (cluster_perm_p).
+cluster_perm_test <- function(v, g, id, kind = "continuous") {
+  id <- fill_missing_ids(id)
+  if (kind %in% c("continuous", "ordinal")) {
+    y <- as_numeric_safe(v)
+    ok <- is.finite(y) & !is.na(g)
+    y <- y[ok]
+    if (identical(kind, "ordinal")) y <- rank(y)
+    return(cluster_perm_p(y, g[ok], id[ok], "mean"))
+  }
+  if (kind %in% c("dichotomous", "proportion"))
+    return(cluster_perm_p(as.numeric(if (is.logical(v)) v else as_numeric_safe(v)), g, id, "mean"))
+  vv <- as.character(v)
+  levs <- sort(unique(stats::na.omit(vv[!is.na(g)])))
+  if (length(levs) == 2) return(cluster_perm_p(ifelse(is.na(vv), NA, as.numeric(vv == levs[2])), g, id, "mean"))
+  cluster_perm_p(vv, g, id, "table")
 }
 
 # Log a message once per R session (the same notice is otherwise repeated by
@@ -535,7 +1213,111 @@ safe_colname <- function(x, max_chars = 60) {
   substr(x, 1, max_chars)
 }
 
-fmt_p <- function(p){
+# ------------------------------------------------------------
+# P values (decision D15): ONE formatter for the tables, sheets, logs and
+# figures. The style of a run is set once by the pipeline (set_p_style, from
+# cfg$p_style):
+#   "ama" (default, the JCRS / AMA style): two decimals; three when P < .01;
+#         more when fewer would round a value below .05 up to ".05" (so the
+#         printed value never sits on the wrong side of .05); no leading zero;
+#         "<.001" and ">.99" - never 0 or 1; an exact half is rounded up
+#         (.065 -> .07, .0025 -> .003). Test vector (reporting.md C01):
+#         4e-5 .0049 .0123 .0498 .051 .5118 .996 1 ->
+#         <.001 .005 .01 .0498 .05 .51 >.99 >.99
+#   "classic": the v1.0.0 formats - three decimals with a leading zero in the
+#         tables ("<0.001", "0.266"), four on the figure panels ("P = 0.5118",
+#         "P < 0.0001").
+# A missing or non-finite P is NA (the tables print the reason instead).
+# ------------------------------------------------------------
+P_STYLES <- c("ama", "classic")
+.p_fmt <- new.env(parent = emptyenv())
+.p_fmt$style <- "ama"
+
+# The P style of what follows: blank = the default ("ama"); an unknown value is
+# logged and the default used. Returns the style.
+set_p_style <- function(style = "ama", logger = NULL) {
+  s <- if (is.null(style) || !length(style) || is.na(style[[1]])) "" else tolower(trimws(as.character(style[[1]])))
+  if (!nzchar(s)) s <- "ama"
+  if (s == "jcrs") s <- "ama"
+  if (!(s %in% P_STYLES)) {
+    if (!is.null(logger))
+      logger(sprintf("P value style '%s' is not known (use ama or classic) - ama is used.",
+                     as.character(style[[1]])))
+    s <- "ama"
+  }
+  .p_fmt$style <- s
+  invisible(s)
+}
+p_style <- function() .p_fmt$style %||% "ama"
+
+# The P style in words, for the run log and the Manifest.
+p_style_text <- function(style = p_style()) {
+  if (identical(style, "classic"))
+    "classic - three decimals with a leading zero in the tables, four on the figures (as v1.0.0)"
+  else paste0("ama - two decimals, three below .01 (more only where needed to stay below .05), ",
+              "an exact half rounded up, no leading zero, <.001 and >.99")
+}
+
+# p with d decimals, an exact decimal half rounded UP (.065 -> "0.07"). A
+# bootstrap or permutation P is a multiple of 1/1000, so one in ten printed
+# with two decimals sits on a half: R's sprintf on Windows rounds most of
+# those down (.065 -> "0.06", .645 -> "0.64") and round() follows the binary
+# value, so the printed P depended on the C library (finding astig2-4). The
+# 1e-9 takes a half stored a hair below its decimal value as the half.
+.p_round_txt <- function(p, d) sprintf(paste0("%.", d, "f"), floor(p * 10^d + 0.5 + 1e-9) / 10^d)
+
+# one P in the "ama" style (p finite)
+.fmt_p_ama1 <- function(p) {
+  if (p < 0.001) return("<.001")
+  if (p > 0.99) return(">.99")
+  d <- if (p < 0.01) 3L else 2L
+  s <- .p_round_txt(p, d)
+  # a value below .05 is never printed as ".05" (or ".050"): add a decimal
+  while (p < 0.05 && as.numeric(s) >= 0.05 && d < 10L) {
+    d <- d + 1L
+    s <- .p_round_txt(p, d)
+  }
+  sub("^0", "", s)
+}
+
+# The P column of a table: "<.001", ".27", ">.99" ("ama"); NA when p is missing.
+fmt_p <- function(p, style = p_style()) {
+  if (identical(style, "classic")) return(.fmt_p_classic(p))
+  pn <- suppressWarnings(as.numeric(p))
+  out <- rep(NA_character_, length(pn))
+  for (i in which(is.finite(pn))) out[i] <- .fmt_p_ama1(pn[i])
+  out
+}
+
+# A P value with its relation, as printed beside a test: "P = .27", "P < .001",
+# "P > .99" ("ama"). classic: the v1.0.0 text of the figure panels ("P =
+# 0.5118", "P < 0.0001"; where = "figure") or of the double-angle plots and
+# tables ("P = 0.261", "P < 0.001"; where = "table"). "" when p is missing.
+p_eq <- function(p, style = p_style(), where = c("figure", "table")) {
+  where <- match.arg(where)
+  p <- suppressWarnings(as.numeric(p)[1])
+  if (!length(p) || !is.finite(p)) return("")
+  if (identical(style, "classic")) {
+    if (where == "figure") return(if (p < 0.0001) "P < 0.0001" else sprintf("P = %.4f", p))
+    return(if (p < 0.001) "P < 0.001" else paste0("P = ", .fmt_p_classic(p)))
+  }
+  s <- .fmt_p_ama1(p)
+  if (startsWith(s, "<")) paste0("P < ", substring(s, 2))
+  else if (startsWith(s, ">")) paste0("P > ", substring(s, 2))
+  else paste0("P = ", s)
+}
+
+# The interpretation of a P value (decision D15): "Statistically significant
+# (between groups)." / "Not statistically significant (between groups)."
+# (word: "between groups" / "among groups").
+p_interpretation <- function(p, word = "between groups") {
+  paste0(if (isTRUE(p < 0.05)) "Statistically significant" else "Not statistically significant",
+         " (", word, ").")
+}
+
+# The v1.0.0 table format ("classic").
+.fmt_p_classic <- function(p){
+  p <- suppressWarnings(as.numeric(p))
   out <- rep(NA_character_, length(p))
   out[!is.na(p) & p < 0.001]  <- "<0.001"
   k <- !is.na(p) & p >= 0.001
@@ -568,6 +1350,143 @@ fmt_ci <- function(lo, hi, digits = 3){
 }
 
 # ------------------------------------------------------------
+# Table cells (decision D24): fixed decimals - means, SDs, medians and effects
+# with two, percentages with one - and a rounded negative zero printed as 0
+# ("0.00", never "-0.00"). "n/a" where the value is missing.
+# ------------------------------------------------------------
+fmt_fix <- function(x, digits = 2) {
+  x <- suppressWarnings(as.numeric(x))
+  out <- rep("n/a", length(x))
+  ok <- is.finite(x)
+  out[ok] <- sprintf(paste0("%.", digits, "f"), round(x[ok], digits) + 0)
+  out
+}
+fmt_pct <- function(num, den) {
+  ifelse(is.finite(den) & den > 0, paste0(fmt_fix(100 * num / den, 1), "%"), "n/a")
+}
+# A median [IQR] cell: whole numbers when all three are whole (an ordinal
+# score of 1-5), otherwise two decimals for all three. d: the decimals chosen
+# once for a whole table row (quartile_digits; finding T2-08), so the cells of
+# one row never mix "4 [4–5]" and "4.50 [4.00–5.00]"; NULL decides per cell.
+fmt_quartiles <- function(q, d = NULL) {
+  q <- suppressWarnings(as.numeric(q))
+  if (is.null(d)) d <- quartile_digits(q)
+  paste0(fmt_fix(q[1], d), " [", fmt_fix(q[2], d), "–", fmt_fix(q[3], d), "]")
+}
+# 0 when every value given (the medians and quartiles of all the groups of a
+# row) is a whole number, otherwise 2
+quartile_digits <- function(q) {
+  q <- suppressWarnings(as.numeric(q))
+  if (all(is.finite(q)) && all(abs(q - round(q)) < 1e-9)) 0 else 2
+}
+
+# One effect style for every table (decision D24):
+#   "β = -9.98 (95% CI, -29.04 to 9.08)"   kind "beta" (linear models)
+#   "OR = 3.02 (95% CI, 1.21 to 7.57)"     kind "OR"   (logistic models)
+# and, for the intercept of a model of the group alone (finding T2-01), the
+# reference group's "Mean = 181.60 (95% CI, ...)" (kind "mean") or
+# "Odds = 0.14 (95% CI, ...)" (kind "odds");
+# without an interval (lo / hi missing) only the estimate is given. digits: one
+# number, or one per row (effect_digits).
+fmt_effect <- function(kind, est, lo = NA_real_, hi = NA_real_, digits = 2) {
+  if (length(digits) > 1) {
+    n <- length(digits)
+    kind <- rep_len(kind, n); est <- rep_len(est, n); lo <- rep_len(lo, n); hi <- rep_len(hi, n)
+    return(vapply(seq_len(n), function(i) fmt_effect(kind[i], est[i], lo[i], hi[i], digits[i]), character(1)))
+  }
+  sym <- ifelse(toupper(kind) == "OR", "OR",
+                ifelse(tolower(kind) == "odds", "Odds", ifelse(tolower(kind) == "mean", "Mean", "β")))
+  ci <- ifelse(is.finite(lo) & is.finite(hi),
+               paste0(" (95% CI, ", fmt_fix(lo, digits), " to ", fmt_fix(hi, digits), ")"), "")
+  paste0(sym, " = ", fmt_fix(est, digits), ci)
+}
+
+# The decimals of each model term's effect text (finding T1-05): two for the
+# group comparisons and the intercept (D24); for a covariate - an effect per
+# unit, often small - as many as keep two significant digits of the larger of
+# the estimate and the half-width of its interval, between two and four (an
+# odds ratio judged on the log scale), so a significant per-unit effect never
+# prints as "β = 0.00 (95% CI, 0.00 to 0.00)".
+effect_digits <- function(term, kind, est, lo = NA_real_, hi = NA_real_) {
+  n <- length(est)
+  term <- rep_len(as.character(term), n); kind <- rep_len(kind, n)
+  lo <- rep_len(lo, n); hi <- rep_len(hi, n)
+  vapply(seq_len(n), function(i) {
+    if (is.na(term[i]) || grepl("^GroupLabel", term[i]) || term[i] == "(Intercept)") return(2L)
+    or <- toupper(kind[i]) == "OR"
+    f <- function(v) if (or) suppressWarnings(log(v)) else v
+    s <- c(abs(f(est[i])), (f(hi[i]) - f(lo[i])) / 2)
+    s <- s[is.finite(s)]
+    ref <- if (length(s)) max(s) else NA_real_
+    if (!is.finite(ref) || ref <= 0 || ref >= 0.1) 2L
+    else as.integer(min(4, max(2, 1 - floor(log10(ref)))))
+  }, integer(1))
+}
+
+# ------------------------------------------------------------
+# Visual acuity analysed in logMAR (decision D16): a cell reads
+#   "20/20 (0.00 ± 0.05 logMAR); range 20/16 to 20/32"
+# - the Snellen value is the geometric mean, 20/(20 x 10^mean logMAR); the
+# range runs from the best to the worst eye. "logMAR" is always written with a
+# lower-case l.
+# ------------------------------------------------------------
+# The standard label of each 0.1-logMAR chart line from -0.3 (20/10) to 1.7
+# (20/1000), the preferred-number series of logMAR charts
+VA_SNELLEN_LINES <- c("10", "12.5", "16", "20", "25", "32", "40", "50", "63", "80", "100",
+                      "125", "160", "200", "250", "320", "400", "500", "630", "800", "1000")
+VA_LINE_TOL <- 0.005     # logMAR: a value this close to a chart line reads as that line
+# "20/x" of each logMAR value v, NA when missing (decision R2-1; never a chart
+# letter suffix such as "20/16-3" or "20/20+"): when v is within VA_LINE_TOL of
+# a chart line - a multiple of 0.1 logMAR that the decimal-to-Snellen chart
+# (export.R decimal_to_snellen) carries - that line's standard label (20/16,
+# 20/20, 20/25 ... 20/63 ... 20/200); otherwise "20/" and the denominator 20 x
+# 10^v rounded to a whole number (one decimal below 10: 20/8.9). The geometric
+# mean and the range ends of the tables and figures read this way; the per-eye
+# mEYEstro tabs keep the chart's lettered notation (decimal_to_snellen).
+va_snellen <- function(lm) {
+  lm <- suppressWarnings(as.numeric(lm))
+  out <- rep(NA_character_, length(lm))
+  ok <- is.finite(lm)
+  if (!any(ok)) return(out)
+  v <- lm[ok]
+  k <- round(v * 10)                                   # the nearest 0.1-logMAR line
+  line <- abs(v - k / 10) <= VA_LINE_TOL + 1e-9 & k >= -3 & k <= 17
+  # only the lines the chart carries (any reading at that key, lettered or not)
+  tbl <- if (exists("get_snellen_table", mode = "function")) get_snellen_table() else NULL
+  if (!is.null(tbl)) line <- line & (as.integer(k) * 10L) %in% tbl$key100[!tbl$offchart]
+  den <- 20 * 10^v
+  # whole number, halves up; one decimal below 10
+  calc <- ifelse(floor(den * 10 + 0.5) / 10 < 9.95, sprintf("%.1f", floor(den * 10 + 0.5) / 10),
+                 format(floor(den + 0.5), scientific = FALSE, trim = TRUE))
+  out[ok] <- paste0("20/", ifelse(line, VA_SNELLEN_LINES[pmin(pmax(k, -3), 17) + 4], calc))
+  out
+}
+# m, s: mean and SD in logMAR; lo, hi: the best and worst eye (NA = no range)
+fmt_va <- function(m, s, lo = NA_real_, hi = NA_real_, range = TRUE) {
+  if (!is.finite(m)) return("no data")
+  paste0(va_snellen(m), " (", fmt_fix(m, 2), " ± ", fmt_fix(s, 2), " logMAR)",
+         if (isTRUE(range) && is.finite(lo) && is.finite(hi))
+           paste0("; range ", va_snellen(lo), " to ", va_snellen(hi)) else "")
+}
+
+# ------------------------------------------------------------
+# Column headers of the written tables (decision D24: the header "P"
+# everywhere). The tables keep their internal names (the models and merges
+# look them up); the writers rename them on the sheet.
+# ------------------------------------------------------------
+# "Adjusted P" is the P of the covariate-adjusted model, not a multiplicity
+# adjustment: it is named so beside "P (Holm)".
+TABLE_HEADER_NAMES <- c("p_value" = "P", "p value" = "P", "P value" = "P", "p.value" = "P",
+                        "GEE p value" = "GEE P", "P value (Holm)" = "P (Holm)",
+                        "Adjusted P" = "P (adjusted model)", "CI" = "Effect (95% CI)")
+table_headers <- function(nms) {
+  nms <- as.character(nms)
+  hit <- nms %in% names(TABLE_HEADER_NAMES)
+  nms[hit] <- unname(TABLE_HEADER_NAMES[nms[hit]])
+  nms
+}
+
+# ------------------------------------------------------------
 # Variable type map: clean_name -> one of
 # continuous | ordinal | dichotomous | categorical
 # A variable listed under more than one type keeps the most specific
@@ -596,7 +1515,7 @@ build_type_map <- function(df_raw_names,
   hdr <- function(v) { i <- match(v, clean_names(raw)); if (is.na(i)) v else raw[i] }
   for (v in dup)
     logger(sprintf(
-      "Warning: variable '%s' is listed under more than one statistical type (%s); it is analysed as %s. Keep it in one type list only.",
+      "Warning: variable '%s' is listed under more than one statistical type (%s); it is analyzed as %s. Keep it in one type list only.",
       hdr(v), paste(unique(claimed[[v]]), collapse = ", "), out[[v]]))
   out
 }
@@ -662,6 +1581,35 @@ standardize_minus_cyl <- function(df, sph_clean, cyl_clean, axis_clean, logger =
   df[[cyl_clean]]  <- cyl
   df[[axis_clean]] <- ax
   df
+}
+
+# ------------------------------------------------------------
+# Refractive astigmatism in PLUS-cylinder format (JCRS 2025 astigmatism
+# standard, decision D1): magnitude M >= 0 at the PLUS axis (the steep
+# meridian), whatever form the refraction was typed in. A minus cylinder is
+# transposed (axis + 90), a plus cylinder keeps its axis, so -2.00 x 180 and
+# +2.00 x 90 are the same astigmatism (2.00 @ 90), row by row - also in a row
+# that mixes the two forms - and with the minus-cylinder switch on or off. The
+# vector code (graphs.R alpins_vectors_target) builds every double-angle
+# vector from this, x = M cos 2θ, y = M sin 2θ, so with-the-rule astigmatism
+# (plus axis 90) lies on the LEFT of a double-angle plot.
+# Returns list(mag, axis, noaxis): the plus axis in [0, 180); NA where the
+# cylinder is missing, or where a non-zero cylinder has no axis (no meridian:
+# no vector; `noaxis` marks those eyes, for the log). A ZERO cylinder is the
+# null vector whatever its axis cell holds - plano refractions are often
+# exported with a blank axis - so it is kept, at axis 0 when the axis is blank.
+# ------------------------------------------------------------
+astig_plus <- function(cyl, axis) {
+  num <- function(v) if (is.numeric(v)) as.numeric(v) else as_numeric_safe(v)
+  c0 <- num(cyl); a0 <- num(axis)
+  n <- max(length(c0), length(a0))
+  c0 <- rep_len(c0, n); a0 <- rep_len(a0, n)
+  zero <- is.finite(c0) & c0 == 0
+  a0[zero & !is.finite(a0)] <- 0
+  ok <- is.finite(c0) & is.finite(a0)
+  mag <- ifelse(ok, abs(c0), NA_real_)
+  ax <- ifelse(ok, ifelse(c0 < 0, a0 + 90, a0) %% 180, NA_real_)
+  list(mag = mag, axis = ax, noaxis = is.finite(c0) & !zero & !is.finite(a0))
 }
 
 # ------------------------------------------------------------
@@ -900,7 +1848,7 @@ cluster_guard_note <- function(id, g, unit = "patient") {
 # ------------------------------------------------------------
 # One minimum-data rule for every clustered model (contract R4-10): the GEE
 # sheets, the adjusted regression, the weighted table test (.weighted_wald)
-# and the figure GEE (graphs.R gee_group_p). A model needs at least
+# and the clustered table and figure GEE (gee_group_p). A model needs at least
 # MODEL_MIN_EYES usable eyes, at least MODEL_MIN_CLUSTERS clusters overall,
 # and more usable eyes than its parameters + 2.
 #   n_rows    : the usable eyes (rows) the model would be fitted on
@@ -916,7 +1864,9 @@ cluster_guard_note <- function(id, g, unit = "patient") {
 #     (cluster_guard_note), checked first, normally catches this case.
 # The per-group rules - 2 usable eyes (p_value_guard / small_group_note) and
 # 2 patients (cluster_guard_note) per compared group - are separate and keep
-# their own wording; so does the few-patients caution (2-9 patients).
+# their own wording; so does the few-patients caution (2-9 patients). With the
+# small-sample correction on (gee_small_sample "md") a model also needs more
+# patients than coefficients for its t / F reference (gee_df_note).
 # ------------------------------------------------------------
 MODEL_MIN_EYES <- 6L
 MODEL_MIN_CLUSTERS <- 3L
@@ -953,7 +1903,9 @@ few_patient_groups <- function(id, g, unit = "patient") {
 # standard errors can be too small with few eyes".
 # Every caution handed out is recorded for the run log (few_patients_flush),
 # with the output that carries it (`source`): "tables" (the Note column of the
-# GEE / regression sheets), "figures" (a figure's clustered or weighted GEE P)
+# GEE / regression sheets), "summary" (a clustered or weighted GEE P of the
+# summary tables, in their Interpretation column and a Publication Table
+# footnote; finding S2-3), "figures" (a figure's clustered or weighted GEE P)
 # or "bootstrap" (the robust centroid test). By default: "bootstrap" when
 # bootstrap = TRUE, "figures" for the short form, "tables" otherwise.
 few_patients_caution <- function(id, g, short = FALSE, unit = "patient", source = NULL) {
@@ -1008,19 +1960,25 @@ few_patients_flush <- function(logger = NULL, where = "") {
   per <- if (identical(units, "eye")) "eyes per group (each eye is its own cluster when no patient ID is in scope)"
          else if (identical(units, "patient")) "patients per group"
          else "patients (or eyes, where each eye is its own cluster) per group"
-  se <- if (all(c("tables", "figures") %in% src)) "GEE, adjusted-regression and clustered figure P values"
-        else if ("tables" %in% src) "GEE and adjusted-regression P values"
-        else if ("figures" %in% src) "clustered figure P values"
+  # "a, b and c"
+  and_list <- function(x) if (length(x) > 1) paste0(paste(x[-length(x)], collapse = ", "), " and ", x[length(x)]) else x
+  # the outputs whose P values carry the caution: the GEE / regression sheets,
+  # the summary tables' clustered or weighted GEE tests (finding S2-3) and the
+  # figures
+  kinds <- c(if ("tables" %in% src) c("GEE", "adjusted-regression"), if ("summary" %in% src) "summary-table",
+             if ("figures" %in% src) "clustered figure")
+  se <- if (length(kinds)) paste0(and_list(kinds), " P values")
   outs <- c(if (length(se)) paste0(se, " (robust standard errors)"),
             if ("bootstrap" %in% src) "the bootstrap P value of the robust centroid test")
   if (!length(outs)) outs <- "P values with robust standard errors"
   places <- c(if ("tables" %in% src) "in the Note column of the GEE / regression sheets",
+              if ("summary" %in% src) "in the Interpretation column of the summary tables (a Publication Table footnote)",
               if (any(c("figures", "bootstrap") %in% src)) "under the figure's P values")
   if (!length(places)) places <- "next to those P values"
   logger(sprintf(paste0("WARNING%s: %s in a clustered comparison - %s can be too small with fewer ",
                         "than %d %s. Those results carry a caution %s."),
                  where, paste(what, collapse = ", "), paste(outs, collapse = " and "),
-                 GEE_FEW_PATIENTS, per, paste(places, collapse = " and ")))
+                 GEE_FEW_PATIENTS, per, and_list(places)))
   invisible(TRUE)
 }
 
@@ -1231,6 +2189,18 @@ sanitize_xlsx <- function(path, logger = NULL) {
       if (changed) { writeLines(txt, f, useBytes = TRUE); n_fixed <- n_fixed + 1L }
     }
 
+    # docProps/app.xml: openxlsx names "Microsoft Excel" as the application
+    # that wrote the file; it is StandardEyes (D25, finding T1-16)
+    n_app <- 0L
+    apf <- file.path(td, "docProps", "app.xml")
+    if (file.exists(apf)) {
+      ax <- paste(readLines(apf, warn = FALSE, encoding = "UTF-8"), collapse = "\n")
+      ver <- tryCatch(as.character(standardeyes_version()$public)[1], error = function(e) NA_character_)
+      app_name <- paste0("StandardEyes", if (length(ver) && !is.na(ver)) paste0(" ", ver) else "")
+      ax2 <- sub("<Application>[^<]*</Application>", paste0("<Application>", app_name, "</Application>"), ax)
+      if (!identical(ax2, ax)) { writeLines(ax2, apf, useBytes = TRUE); n_app <- 1L }
+    }
+
     ctf <- file.path(td, "[Content_Types].xml")
     if (n_fixed > 0 && file.exists(ctf)) {
       ct <- paste(readLines(ctf, warn = FALSE, encoding = "UTF-8"), collapse = "\n")
@@ -1244,7 +2214,7 @@ sanitize_xlsx <- function(path, logger = NULL) {
       if (changed) writeLines(ct, ctf, useBytes = TRUE)
     }
 
-    if (n_fixed > 0) {
+    if (n_fixed > 0 || n_app > 0) {
       tmp <- file.path(dirname(path), paste0(".~sanitize_", basename(path), ".tmp"))
       on.exit(if (file.exists(tmp)) unlink(tmp), add = TRUE)
       zip::zip(zipfile = tmp,
@@ -1256,7 +2226,7 @@ sanitize_xlsx <- function(path, logger = NULL) {
       if (!suppressWarnings(file.rename(tmp, path)) &&
           !suppressWarnings(file.copy(tmp, path, overwrite = TRUE)))
         stop("could not replace the workbook (is it open in another program?)")
-      if (!is.null(logger))
+      if (!is.null(logger) && n_fixed > 0)
         logger(paste0("Workbook sanitized for interoperability (",
                       n_fixed, " sheet rels cleaned)."))
     }
@@ -1266,4 +2236,53 @@ sanitize_xlsx <- function(path, logger = NULL) {
     FALSE
   })
   invisible(ok)
+}
+
+# ------------------------------------------------------------
+# Replace a text cell of a written workbook in place: the first match of the
+# regular expression `pattern` in its shared strings (and inline strings) becomes
+# `replacement`. Nothing else in the archive is touched - no reload through
+# openxlsx, which could change styles or the author - and the new archive is
+# swapped in only once complete, as in sanitize_xlsx. Used for the Manifest's
+# run duration, known only after the figures are drawn (decision D25). Returns
+# TRUE when a cell was replaced; never stops a run (a failure is logged).
+# ------------------------------------------------------------
+xlsx_replace_text <- function(path, pattern, replacement, logger = NULL) {
+  ok <- tryCatch({
+    path <- normalizePath(path, winslash = "/", mustWork = TRUE)
+    td <- tempfile("xlsx_txt_")
+    dir.create(td)
+    on.exit(unlink(td, recursive = TRUE), add = TRUE)
+    utils::unzip(path, exdir = td)
+    members <- gsub("\\\\", "/", list.files(td, recursive = TRUE, all.files = TRUE))
+    parts <- members[members == "xl/sharedStrings.xml" | grepl("^xl/worksheets/[^/]+[.]xml$", members)]
+    hit <- FALSE
+    for (m in parts) {
+      f <- file.path(td, m)
+      txt <- paste(readLines(f, warn = FALSE, encoding = "UTF-8"), collapse = "\n")
+      if (!grepl(pattern, txt, perl = TRUE)) next
+      new <- sub(pattern, replacement, txt, perl = TRUE)
+      con <- file(f, open = "wb")
+      writeBin(charToRaw(enc2utf8(new)), con)
+      close(con)
+      hit <- TRUE
+      break
+    }
+    if (hit) {
+      tmp <- file.path(dirname(path), paste0(".~text_", basename(path), ".tmp"))
+      on.exit(if (file.exists(tmp)) unlink(tmp), add = TRUE)
+      zip::zip(zipfile = tmp, files = members, recurse = FALSE, include_directories = FALSE, root = td)
+      n_in <- nrow(utils::unzip(tmp, list = TRUE))
+      if (n_in != length(members))
+        stop("rebuilt archive has ", n_in, " of ", length(members), " parts")
+      if (!suppressWarnings(file.rename(tmp, path)) &&
+          !suppressWarnings(file.copy(tmp, path, overwrite = TRUE)))
+        stop("could not replace the workbook (is it open in another program?)")
+    }
+    hit
+  }, error = function(e) {
+    if (!is.null(logger)) logger(paste0("Workbook text not updated (", basename(path), "): ", conditionMessage(e)))
+    FALSE
+  })
+  invisible(isTRUE(ok))
 }

@@ -37,8 +37,9 @@ ok <- tryCatch({
 }, error = function(e) { emit("ERROR packages: ", conditionMessage(e)); FALSE })
 if (!isTRUE(ok)) quit(status = 1)
 
-# the engine's own helpers: with_local_seed() and .psm_settings() (both files
-# only define functions, so no other package is needed to source them)
+# the engine's own helpers: with_local_seed(), .psm_settings() and
+# .psm_distance_args() (both files only define functions, so no other package
+# is needed to source them)
 for (f in c("helpers.R", "analysis.R")) {
   fp <- file.path(app_root, "R", f)
   if (!file.exists(fp)) { emit("ERROR Missing engine module: ", fp); quit(status = 1) }
@@ -96,10 +97,14 @@ for (run in cfg$runs) {
       subcc <- sub[cc, , drop = FALSE]
       for (cv in covs) if (is.character(subcc[[cv]])) subcc[[cv]] <- factor(subcc[[cv]])
       f <- stats::as.formula(paste(".treat ~", paste(sprintf("`%s`", covs), collapse = " + ")))
-      # cem on categorical covariates only runs as exact matching, as in the run
+      # cem on categorical covariates only runs as exact matching, as in the
+      # run; the score's scale is passed exactly as the run passes it
+      # (.psm_distance_args: "linear.logit" -> distance "glm", link
+      # "linear.logit", the default caliper scale - decision D13)
+      da <- .psm_distance_args(psm$distance)
       m <- with_local_seed(psm$seed, tryCatch(
         MatchIt::matchit(f, data = subcc, method = .psm_method_for(psm$method, subcc, covs),
-                         distance = psm$distance,
+                         distance = da$distance, link = da$link,
                          ratio = psm$ratio, replace = psm$replace, caliper = psm$caliper,
                          std.caliper = psm$std_caliper, m.order = psm$m_order),
         error = function(e) e))

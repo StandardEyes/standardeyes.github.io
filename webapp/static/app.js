@@ -49,14 +49,14 @@ function resolveLevel(pref, values){
   return null;
 }
 // visual-acuity notations understood by the engine (config key va_format)
-const VA_FORMATS = [["decimal","Decimal (1.0 = 20/20)"],["logmar","LogMAR (0.0 = 20/20)"],
+const VA_FORMATS = [["decimal","Decimal (1.0 = 20/20)"],["logmar","logMAR (0.0 = 20/20)"],
                     ["snellen","Snellen fraction (20/40, 6/12)"],["etdrs","ETDRS letter score (85 = 20/20)"]];
 const VA_ROLES = ["pre_ucva","pre_bcva","post_ucva","post_bcva"];
 // the plus-to-minus cylinder sets are pre-filled from these roles (pre set, post set)
 const STD_ROLE_SETS = [["pre_sph","pre_cyl","pre_axis"],["post_sph","post_cyl","post_axis"]];
 // MatchIt methods that run with the bundled R library; a preset asking for
 // any other method loads with a warning and falls back to nearest
-const PSM_METHODS = [["nearest","nearest neighbour"],["exact","exact"],
+const PSM_METHODS = [["nearest","nearest neighbor"],["exact","exact"],
                      ["cem","coarsened exact (cem)"],["subclass","subclassification"]];
 // matching distances that are not propensity scores (config_schema
 // _NON_PS_DISTANCES): MatchIt takes no caliper in score SDs and no
@@ -64,7 +64,7 @@ const PSM_METHODS = [["nearest","nearest neighbour"],["exact","exact"],
 const NON_PS_DISTANCES = ["mahalanobis","robust_mahalanobis","euclidean","scaled_euclidean"];
 // must equal APP_VERSION in server/app.py — mismatch means the running server
 // process is older than the page and needs a restart
-const UI_VERSION = "2026-10-02-se.9";
+const UI_VERSION = "2026-10-04-se.10";
 // manuscript group colors (mEYEstro-like); index = group order
 const DEFAULT_GROUP_COLORS = ["#5B2C86","#F26522","#1B9E4B","#2166AC","#00838F","#C2185B"];
 
@@ -223,26 +223,44 @@ function defaultState(){
       within_levels: {},             // column -> "eye" | "patient" (unit of analysis)
       filters: [],
       do_matching:true, psm_covariates_raw:[],
-      // 1:1 without replacement, caliper 0.2 SD of the propensity score (logit model):
-      // the conventional design, and the one that keeps matching weights at 1
-      psm_method:"nearest", psm_distance:"logit", psm_ratio:1,
+      // 1:1 without replacement, caliper 0.2 SD of the LOGIT of the propensity
+      // score (decision D13, Austin 2011): the conventional design, and the one
+      // that keeps matching weights at 1; "logit" / "glm" match on the
+      // probability scale (v1.0.0's default, still selectable)
+      psm_method:"nearest", psm_distance:"linear.logit", psm_ratio:1,
       psm_replace:false, psm_caliper:0.2, psm_std_caliper:true, psm_m_order:"largest",
       psm_seed:20250601,       // fixed seed: random match order / ties give the same cohort every run
       run_gee_stage:"matched", run_main_gee:true, run_adjusted_gee:false,
       gee_adjust_covariates_raw:[], use_matching_weights_in_gee:true,
       add_gee_columns:true, gee_source_for_tables:"main",
+      // small-sample GEE inference (D11: "md" = Mancl-DeRouen + t / F, "none" =
+      // v1.0.0) and the summary tables' tests (D12: "auto" = patient-clustered
+      // when a patient has two analysed eyes, "classical" = v1.0.0)
+      gee_small_sample:"md", table_tests:"auto",
       // subset_mode: "separate" (one workbook per subset) | "both" (+ pooled) | "pooled" (pooled only)
       subset_col_raw:"", subsets:[], subset_mode:"separate",
       do_standardize_minus_cyl:true, std_triples:[],
       va_format:"decimal",     // notation of every VA-role / logmar column, see VA_FORMATS
-      do_logmar:false, logmar_cols_raw:[],
+      // acuity analysed in logMAR by default (D16); the column list follows the
+      // mapped VA roles until the user edits it (seedLogmarCols)
+      do_logmar:true, logmar_cols_raw:[],
       make_meyestro:true, make_alpins:true, make_pub_table:true,
       make_graphs:true, graph_set:"nine", graph_formats:["tiff"], graph_dpi:300,
+      // figure style (D20: "journal" | "annotated" = v1.0.0), figure width in cm
+      // (D21: "" = each figure's own size; 8.76 / 12.69 / 17.77 = journal
+      // columns) and the P value style of tables, sheets and figures (D15)
+      figure_style:"journal", figure_width_cm:"", p_style:"ama",
       stability_figs:false,
       stability_visits:[], stability_include_preop:true,
       stability_change_from:"", stability_change_to:"", stability_change_threshold:0.50,
       astig_panels:true, double_angle_figs:true, semicircle_figs:true,
-      astig_region:"polygon",
+      // the "Astigmatism (JCRS 2025)" + "Astigmatism vectors" sheets (D8); the
+      // 95% region of the eyes ("polygon" = the depth-based convex polygon as
+      // in the WHWK functions, R3-1) and of each centroid ("bootstrap" = the
+      // bootstrap convex polygon as in the WHWK functions | "hotelling", R3-2);
+      // the WHWK input files beside the double-angle figures (R3-3)
+      astig_sheet:true, astig_region:"polygon", astig_centroid_region:"bootstrap",
+      astig_whwk_files:true,
       astig_jcrs_standard:true, cluster_by_patient:true, astig_test_method:"robust",
       astig_vector_cols:{}, astig_target:{},
       do_regression:true, regression_stage:"unmatched", regression_covariates_raw:[],
@@ -308,6 +326,7 @@ function builder(){
     VA_FORMATS, PSM_METHODS,
     psmMethodNote:"",     // shown under the Method select when a config's method was replaced by nearest
     _stdNoSeed:false,     // true: the cylinder sets came from a config or the user removed one
+    _logmarUser:false,    // true: the logMAR column list was chosen (edited, or kept from a config)
     // Request sequencing: each fetcher bumps its counter before sending and
     // drops any reply whose number is no longer the latest, so a slow older
     // response can never overwrite a fresher one. The *Gen counters count
@@ -343,7 +362,7 @@ function builder(){
     removeStdTriple(i){ this.s.std_triples.splice(i,1); this._stdNoSeed=true; },
     // which of the settings next to the Method select the chosen method uses
     psmMethodHint(m){
-      const tail=" Ratio, match order, replacement, caliper and seed are not used (greyed out). The live matched-count preview below covers nearest only; the run itself uses this method.";
+      const tail=" Ratio, match order, replacement, caliper and seed are not used (grayed out). The live matched-count preview below covers nearest only; the run itself uses this method.";
       return {
         exact: "Exact matching keeps the eyes whose covariate values exactly equal those of an eye in the other group, so it needs discrete covariates (sex, eye, a category): with a continuous covariate such as age or refraction almost no eye has an exact twin and no eye is matched — use coarsened exact (cem) for those. The distance is not used either, and the matched eyes carry weights that are generally not 1."+tail,
         cem: "Coarsened exact matching bins each covariate and keeps the eyes that share a bin with the other group. The distance is not used, and the matched eyes carry weights that are generally not 1."+tail,
@@ -383,6 +402,22 @@ function builder(){
       const sets=STD_ROLE_SETS.map(([sp,cy,ax])=>({sph:r[sp]||"", cyl:r[cy]||"", axis:r[ax]||""}));
       if(!sets.every(t=>t.sph && t.cyl && t.axis)) return;
       this.s.std_triples=sets.map(t=>withUid(t));
+    },
+    // logMAR columns (decision D16): with the switch on, the list is the mapped
+    // VA role columns - kept in step with the roles - until the user edits it
+    // (_logmarUser), the rule the engine applies to a settings file without a
+    // list. Only an actual change is written: a watcher tracks these arrays.
+    seedLogmarCols(){
+      if(!this.s.do_logmar || this._logmarUser) return;
+      const r=this.s.roles||{}, want=[];
+      for(const k of VA_ROLES){ const c=r[k]; if(c && !want.includes(c)) want.push(c); }
+      if(JSON.stringify(want)!==JSON.stringify(this.s.logmar_cols_raw)) this.s.logmar_cols_raw=want;
+    },
+    toggleLogmar(c){ this._logmarUser=true; this.toggle(this.s.logmar_cols_raw, c); },
+    // the VA role columns the logMAR list does not hold (shown under the list)
+    logmarRolesLeftOut(){
+      const r=this.s.roles||{};
+      return VA_ROLES.map(k=>r[k]).filter((c,i,a)=>c && a.indexOf(c)===i && !this.s.logmar_cols_raw.includes(c));
     },
 
     // ---- stability-over-time visit mapping ----
@@ -477,7 +512,7 @@ function builder(){
       });
       if(!use.length){
         // shown next to the button; runError is reserved for a failed analysis
-        this.stabilityMsg="No follow-up column families were recognised — add the visits manually.";
+        this.stabilityMsg="No follow-up column families were recognized — add the visits manually.";
         return;
       }
       // R pairs the change-from / change-to visits by label: never propose two equal labels
@@ -510,6 +545,9 @@ function builder(){
       // re-check the declared VA notation whenever the set of VA columns or the notation changes
       this.$watch(() => JSON.stringify([VA_ROLES.map(k=>this.s.roles[k]||""), this.s.logmar_cols_raw, this.s.va_format]),
                   () => this.debouncedVaDetect());
+      // the logMAR column list follows the mapped VA roles until the user edits it
+      this.$watch(() => JSON.stringify([this.s.do_logmar, VA_ROLES.map(k=>this.s.roles[k]||"")]),
+                  () => this.seedLogmarCols());
       // pre-fill the cylinder sets once the pre and post sph/cyl/axis roles are mapped
       this.$watch(() => JSON.stringify(STD_ROLE_SETS.flat().map(k=>this.s.roles[k]||"")),
                   () => this.seedStdTriples());
@@ -531,6 +569,7 @@ function builder(){
         if (t === "filters" && this.fprev.stale) this.debouncedFilteredPreview();
       });
       this.syncOrders();
+      this.seedLogmarCols();
     },
 
     // ---- R setup: first-run "where is R?" screen ----
@@ -918,7 +957,9 @@ function builder(){
       add(stab,'Stability');
       add(astig&&pcyl&&ocyl,'Refractive astigmatism');
       add(astig&&!six&&!four&&av,'TIA vs SIA');
-      add(astig&&!six&&!four&&av,'Correction index');
+      // the correction index is drawn only as this histogram: a ratio has no
+      // meridian, so it has no double-angle or semicircle plot (D3)
+      add(astig&&!six&&!four&&av,'Correction index histogram');
       add(astig&&!six&&!four&&av,'Angle of error');
       return out;
     },
@@ -943,17 +984,46 @@ function builder(){
     },
     // the standalone double-angle / semicircle figures have their own switches
     // and do not depend on "Include astigmatism panels" (composite only)
+    // Their panels (graphs.R astig_jcrs_vectors, D3): the double-angle set is
+    // PRE, SIA and PE, plus POST when a mapped target is not plano (decided per
+    // eye by the engine; without a target PE = POST); the semicircle set is the
+    // Alpins TIA, SIA and DV, all at plus axes
     vectorFigNote(){
       const s=this.s, R=k=>this.roleMapped(k), C=c=>!!c && this.colResolves(c);
-      const want=[]; if(s.double_angle_figs) want.push('double-angle'); if(s.semicircle_figs) want.push('semicircle');
+      const tgt=C(s.astig_target.cyl) && C(s.astig_target.axis);
+      const want=[], names=[];
+      if(s.double_angle_figs){
+        names.push('double-angle');
+        want.push('double-angle plots of preoperative astigmatism, SIA and the prediction error (PE)'+
+          (tgt ? ', plus postoperative astigmatism if any target is not plano'
+               : ' - with no target mapped, PE is the postoperative astigmatism'));
+      }
+      if(s.semicircle_figs){ names.push('semicircle'); want.push('semicircle plots of TIA, SIA and DV'); }
       if(!want.length) return '';
       // the engine builds the vectors from pre/post cylinder + axis; supplied
       // vector columns replace the computed ones but never stand in for them
       const av=R('pre_cyl')&&R('pre_axis')&&R('post_cyl')&&R('post_axis');
-      const supplied=['tia','sia','dv'].some(k=>C(s.astig_vector_cols[k+'_mag']) && C(s.astig_vector_cols[k+'_axis']));
+      const supplied=['tia','sia','dv','pe'].some(k=>C(s.astig_vector_cols[k+'_mag']) && C(s.astig_vector_cols[k+'_axis']));
       return av
-        ? ' Separate figures: '+want.join(' and ')+' plots'+(supplied ? ' (supplied vector columns used where mapped).' : '.')
-        : ' No '+want.join(' / ')+' plots: map Pre/Post Cylinder and Axis'+(supplied ? ' (supplied vector columns alone are not enough).' : '.');
+        ? ' Separate figures (plus-cylinder format, with-the-rule on the left): '+want.join('; ')+
+          (supplied ? ' (supplied vector columns used where mapped).' : '.')
+        : ' No '+names.join(' / ')+' plots: map Pre/Post Cylinder and Axis'+(supplied ? ' (supplied vector columns alone are not enough).' : '.');
+    },
+    // the astigmatism sheets need the same four roles as the vector figures
+    astigSheetNote(){
+      const R=k=>this.roleMapped(k);
+      if(!this.s.astig_sheet) return '';
+      return (R('pre_cyl')&&R('pre_axis')&&R('post_cyl')&&R('post_axis'))
+        ? 'Each run’s workbook gets the “Astigmatism (JCRS 2025)” and “Astigmatism vectors” sheets (and an Astig_M_ sheet per matched pairing), with a CSV copy beside it.'
+        : 'No astigmatism sheets yet: map Pre/Post Cylinder and Axis under Column roles (bottom of this tab).';
+    },
+    // the figure width box: blank, or a width in cm above 0 and at most 60
+    // (config_schema FIGURE_WIDTH_MAX_CM, graphs.R GR_WIDTH_CM_MAX)
+    figureWidthProblem(){
+      const v=String(this.s.figure_width_cm??"").trim();
+      if(!v) return "";
+      const n=Number(v);
+      return (isFinite(n) && n>0 && n<=60) ? "" : "Enter a width above 0 and at most 60 cm, or leave the box empty for each figure's own size.";
     },
 
     // ---- within-group unit of analysis (per variable, any type) ----
@@ -1523,6 +1593,7 @@ function builder(){
         run_gee_stage:s.run_gee_stage, run_main_gee:s.run_main_gee, run_adjusted_gee:s.run_adjusted_gee,
         gee_adjust_covariates_raw:s.gee_adjust_covariates_raw, use_matching_weights_in_gee:s.use_matching_weights_in_gee,
         add_gee_columns:s.add_gee_columns, gee_source_for_tables:s.gee_source_for_tables,
+        gee_small_sample:s.gee_small_sample, table_tests:s.table_tests,
         subset_col_raw:s.subset_col_raw, subsets, subset_rows, subset_mode,
         subset_pooled: subset_mode!=="separate",   // legacy flag, kept for older readers
         within_group: wg,
@@ -1535,9 +1606,16 @@ function builder(){
         std_triples_user: !!(this._stdNoSeed || s.std_triples.length),
         va_format:s.va_format,
         do_logmar:s.do_logmar, logmar_cols_raw:s.logmar_cols_raw,
+        // GUI-only: true once the logMAR list was chosen; without it the list
+        // keeps following the mapped VA roles after a preset is reloaded
+        logmar_cols_user: !!this._logmarUser,
         make_meyestro:s.make_meyestro, make_alpins:s.make_alpins, make_pub_table:s.make_pub_table,
         make_graphs:s.make_graphs, graph_set:s.graph_set, graph_formats:s.graph_formats.slice(),
         graph_dpi:s.graph_dpi,
+        figure_style:s.figure_style, p_style:s.p_style,
+        // blank = each figure's own size (the engine and the server read null so)
+        figure_width_cm:(()=>{ const w=String(s.figure_width_cm??"").trim();
+          return !w ? null : (isFinite(Number(w)) ? Number(w) : w); })(),
         stability_figs:s.stability_figs,
         // a visit needs a time column plus either a ready SEQ or a full sph+cyl pair
         stability_visits: s.stability_visits
@@ -1550,7 +1628,10 @@ function builder(){
         astig_panels:s.astig_panels,
         double_angle_figs:s.double_angle_figs,
         semicircle_figs:s.semicircle_figs,
+        astig_sheet:s.astig_sheet,
         astig_region:s.astig_region,
+        astig_centroid_region:s.astig_centroid_region,
+        astig_whwk_files:s.astig_whwk_files,
         astig_jcrs_standard:s.astig_jcrs_standard,
         cluster_by_patient:s.cluster_by_patient,
         astig_test_method:s.astig_test_method,
@@ -1578,19 +1659,60 @@ function builder(){
        "age_var","fu_var","sex_var","do_matching","psm_covariates_raw","psm_method","psm_distance",
        "psm_ratio","psm_replace","psm_caliper","psm_std_caliper","psm_m_order","run_gee_stage",
        "run_main_gee","run_adjusted_gee","gee_adjust_covariates_raw","use_matching_weights_in_gee",
-       "add_gee_columns","gee_source_for_tables","subset_col_raw",
+       "add_gee_columns","gee_source_for_tables","gee_small_sample","table_tests","subset_col_raw",
        "do_standardize_minus_cyl",
        "va_format","do_logmar","logmar_cols_raw",
        "make_meyestro","make_alpins","make_pub_table","output_dir","output_prefix","export_filtered_csv",
        "make_graphs","graph_set","graph_formats","graph_dpi",
+       "figure_style","p_style",
        "stability_figs",
-       "astig_panels","double_angle_figs","semicircle_figs",
-       "astig_region","astig_jcrs_standard",
+       "astig_panels","double_angle_figs","semicircle_figs","astig_sheet",
+       "astig_region","astig_centroid_region","astig_whwk_files","astig_jcrs_standard",
        "cluster_by_patient","astig_test_method",
        "stability_include_preop","stability_change_threshold",
        "do_regression","regression_stage","regression_covariates_raw",
        "patient_level_params_raw","exclude_params_raw"].forEach(set);
       if(!VA_FORMATS.some(f=>f[0]===s.va_format)) s.va_format="decimal";
+      // read as the engine reads them (trimmed, lower case; blank = default); an
+      // unknown value is kept, so the run's check names it instead of hiding it.
+      // A settings file without one of these keys (v1.0.0) gets the v1.1.0 default.
+      for(const [k,d] of [["gee_small_sample","md"],["table_tests","auto"],
+                          ["figure_style","journal"],["p_style","ama"],
+                          ["psm_distance","linear.logit"],["astig_region","polygon"],
+                          ["astig_centroid_region","bootstrap"],["astig_test_method","robust"]]){
+        const v=String(s[k]??"").trim().toLowerCase(); s[k]= v || d; }
+      // aliases the engine reads as the same setting
+      if(s.astig_region==="depth") s.astig_region="polygon";
+      if(s.p_style==="jcrs") s.p_style="ama";
+      // the on/off settings are read as the server reads them (config_schema
+      // SWITCHES): blank = the default, "true" / "false" (yes / no, on / off)
+      // text and 1 / 0 the switch; any other value is kept, so the run's check
+      // names it - never a "false" that a checkbox and the summary show as on
+      { const d0=defaultState();
+        for(const k of ["do_matching","psm_replace","psm_std_caliper","run_main_gee","run_adjusted_gee",
+                        "use_matching_weights_in_gee","add_gee_columns","do_standardize_minus_cyl","do_logmar",
+                        "make_meyestro","make_alpins","make_pub_table","export_filtered_csv","make_graphs",
+                        "stability_figs","stability_include_preop","astig_panels","double_angle_figs",
+                        "semicircle_figs","astig_sheet","astig_whwk_files","astig_jcrs_standard",
+                        "cluster_by_patient","do_regression"]){
+          const sw=s[k];
+          if(typeof sw==="string"){
+            const v=sw.trim().toLowerCase();
+            if(!v) s[k]=d0[k];
+            else if(["true","false","1","0","yes","no","on","off"].includes(v)) s[k]=["true","1","yes","on"].includes(v);
+          } else if(sw===0||sw===1) s[k]=sw===1;
+        } }
+      // logMAR list (D16): a list the config chose is kept as it is - also an
+      // empty one saved with the switch on by v1.0.0, which converted nothing;
+      // a config without a list, or one that was following the roles
+      // (logmar_cols_user false), follows the mapped VA roles again
+      const lmc=c.logmar_cols_raw;
+      s.logmar_cols_raw = Array.isArray(lmc) ? lmc.map(String) : [];
+      this._logmarUser = Array.isArray(lmc) && (c.logmar_cols_user===true ||
+        (c.logmar_cols_user===undefined && (lmc.length>0 || s.do_logmar!==false)));
+      // figure width: blank (null / missing) = each figure's own size; a value is
+      // kept as given so the server's check names one that is not a width
+      s.figure_width_cm = (c.figure_width_cm===undefined||c.figure_width_cm===null) ? "" : String(c.figure_width_cm).trim();
       // a matching method the bundled R library cannot run (optimal, full,
       // genetic, ...) is replaced by nearest, said in an alert and under the
       // select; a blank method means nearest (as in the server and R), silently
@@ -1600,7 +1722,7 @@ function builder(){
       else if(PSM_METHODS.some(m=>m[0]===pm)) s.psm_method=pm;
       else {
         this.psmMethodNote="This config asked for the matching method “"+String(s.psm_method)+
-          "”, which this installation cannot run. Nearest-neighbour matching is used instead — check the settings below.";
+          "”, which this installation cannot run. Nearest-neighbor matching is used instead — check the settings below.";
         s.psm_method="nearest";
         alert(this.psmMethodNote);
       }
@@ -1613,13 +1735,13 @@ function builder(){
       }
       // only the formats the engine writes; a hand-edited "jpg" / "PNG" is
       // normalised, anything else is dropped (and named, so nothing vanishes unseen)
-      const GF=["tiff","png","jpeg","pdf"];
+      const GF=["tiff","png","jpeg","pdf","eps"];
       const rawFmt=Array.isArray(s.graph_formats) ? s.graph_formats : [];
-      const fmts=rawFmt.map(f=>{ const x=String(f).trim().toLowerCase(); return x==="jpg" ? "jpeg" : (x==="tif" ? "tiff" : x); });
+      const fmts=rawFmt.map(f=>{ const x=String(f).trim().toLowerCase(); return x==="jpg" ? "jpeg" : (x==="tif" ? "tiff" : (x==="ps" ? "eps" : x)); });
       const badFmt=fmts.filter(f=>!GF.includes(f));
       s.graph_formats=[...new Set(fmts.filter(f=>GF.includes(f)))];
       if(!s.graph_formats.includes("tiff")) s.graph_formats.unshift("tiff");
-      if(badFmt.length) alert("Unsupported figure format(s) in this config ignored: "+badFmt.join(", ")+". Available: TIFF, PNG, JPEG, PDF.");
+      if(badFmt.length) alert("Unsupported figure format(s) in this config ignored: "+badFmt.join(", ")+". Available: TIFF, PNG, JPEG, PDF, EPS.");
       for(const sec of SECTIONS){
         s[sec]=Object.assign(emptyTyping(), c[sec]||{});
         for(const ty of TYPES) if(!Array.isArray(s[sec][ty])) s[sec][ty]=[];
@@ -1705,6 +1827,7 @@ function builder(){
       }
       if(c.roles){ s.roles = Object.assign(Object.fromEntries(Object.keys(ROLE_LABELS).map(k=>[k,""])), c.roles); }
       this.seedStdTriples();
+      this.seedLogmarCols();
       if(c.psm_seed!==undefined && c.psm_seed!==null && c.psm_seed!=="" && isFinite(Number(c.psm_seed)))
         s.psm_seed=Math.trunc(Number(c.psm_seed));
       if(c.dichotomous_preferred_level){
@@ -1841,6 +1964,9 @@ function builder(){
       if(this.subsetColMissing()){
         alert("The subset column '"+this.s.subset_col_raw+"' is not in this file. Re-map it or clear it (Filters & Subsets tab).");
         this.tab="filters"; return; }
+      if(this.figureWidthProblem()){
+        alert("Figure width: "+this.figureWidthProblem()+" (Special outputs tab).");
+        this.tab="special"; return; }
       // the reference decides matching direction and every "vs reference"
       // effect: never let it fall back to another group unseen
       const refProblem=this.referenceProblem();
@@ -1894,11 +2020,11 @@ function builder(){
       }catch(e){
         // an aborted stream after Cancel is the expected end, not a crash
         if(!this.runError) this.runError = (e && e.name==="AbortError") || this.cancelling
-          ? "Analysis cancelled. Nothing from this run is shown." : String(e);
+          ? "Analysis canceled. Nothing from this run is shown." : String(e);
       }
       this.running=false; this._runCtl=null;
       clearTimeout(this._cancelT);
-      if(this.cancelling && !this.runError) this.runError="Analysis cancelled. Nothing from this run is shown.";
+      if(this.cancelling && !this.runError) this.runError="Analysis canceled. Nothing from this run is shown.";
       this.cancelling=false;
       // success requires a zero exit code, an actual result payload AND at
       // least one workbook - an R crash that skips the protocol's ERROR line, or
@@ -1952,6 +2078,50 @@ function builder(){
       }
       else if(ev.type==="done"){ this._exitCode=ev.returncode; }
       this.$nextTick(()=>{ const el=document.getElementById("logbox"); if(el) el.scrollTop=el.scrollHeight; });
+    },
+    // ---- pre-run summary (Run & Results tab): the settings that decide how
+    // the numbers are computed and printed, in words. Mirrors the engine's
+    // reading of them (blank / unknown = the default the server then names).
+    runSummary(){
+      const s=this.s, out=[];
+      const pid=!!s.patient_id_raw && this.colResolves(s.patient_id_raw);
+      const dist=rTrim(s.psm_distance??"").toLowerCase() || "linear.logit";
+      const scale = NON_PS_DISTANCES.includes(dist) ? dist+" distance (not a propensity score)"
+        : dist.startsWith("linear.") ? (dist==="linear.logit" ? "logit of the propensity score" : "linear predictor ("+dist.slice(7)+" link) of the propensity score")
+        : "propensity score on the probability scale";
+      const cal = s.psm_caliper===null || s.psm_caliper===undefined || s.psm_caliper==="";
+      out.push(["Matching", !s.do_matching ? "off"
+        : !this.psmUses('distance') ? s.psm_method+" (no distance or caliper)"
+        : s.psm_method+" on the "+scale+(this.psmUses('caliper') && !cal
+            ? "; caliper "+s.psm_caliper+(s.psm_std_caliper ? " SD of the "+(NON_PS_DISTANCES.includes(dist) ? "distance" : scale) : " (raw units)")
+            : (this.psmUses('caliper') ? "; no caliper" : ""))]);
+      out.push(["GEE inference", s.gee_small_sample==="none"
+        ? "uncorrected robust SE, normal reference (v1.0.0)"
+        : "Mancl-DeRouen robust SE, t reference (F for joint tests)"]);
+      out.push(["Table tests", s.table_tests==="classical" ? "classical (v1.0.0)"
+        : !s.cluster_by_patient ? "classical - patient clustering is switched off (Special outputs)"
+        : !pid ? "classical - no patient ID column is mapped"
+        : "clustered by patient (GEE) where a patient has two analyzed eyes; classical otherwise"]);
+      out.push(["P values", s.p_style==="classic" ? "classic: 0.266, <0.001 (v1.0.0)" : "journal: .27, .003, <.001, >.99"]);
+      out.push(["Visual acuity", !s.do_logmar ? "analyzed as recorded ("+this.vaFormatLabel(s.va_format)+")"
+        : s.va_format==="logmar" ? "recorded in logMAR, analyzed as recorded"
+        : "logMAR for "+s.logmar_cols_raw.length+" column(s), shown as Snellen with the logMAR mean ± SD"]);
+      if(s.make_graphs){
+        const w=String(s.figure_width_cm??"").trim();
+        out.push(["Figures", (s.figure_style==="annotated" ? "annotated (v1.0.0 look)" : "journal style, legend text in <figure>_legend.txt")+
+          "; "+(w ? w+" cm wide" : "each figure's own size")+"; "+s.graph_formats.map(f=>f.toUpperCase()).join(", ")+
+          " at "+s.graph_dpi+" dpi"]);
+      } else out.push(["Figures", "off"]);
+      const reg={polygon:"95% depth-based convex polygon (as in the WHWK functions)", normal:"95% normal ellipse",
+                 both:"depth-based convex polygon and normal ellipse"}[s.astig_region] || s.astig_region;
+      const cr={bootstrap:"bootstrap convex polygon (as in the WHWK functions)", hotelling:"Hotelling T² ellipse"}[s.astig_centroid_region] || s.astig_centroid_region;
+      const unit=(s.cluster_by_patient && pid) ? "patients" : "eyes";
+      const tm={robust:"robust (centroid vs 0 as in the WHWK functions; between cohorts trimmed (untrimmed where not defined); bootstrap of "+unit+")",
+                gee:"clustered GEE Wald", classic:"classic (eyes independent)"}[s.astig_test_method] || s.astig_test_method;
+      out.push(["Astigmatism", "region of the eyes: "+reg+"; centroid CI: "+cr+"; tests: "+tm+
+        "; JCRS 2025 sheet "+(s.astig_sheet ? "on" : "off")+
+        "; WHWK input files "+((s.make_graphs && s.double_angle_figs && s.astig_whwk_files) ? "on" : "off")]);
+      return out;
     },
     // the run's notes (server checks before R starts) and the engine's
     // WARNING lines, shown above the log so they are not missed in it
@@ -2040,7 +2210,8 @@ function builder(){
         const r=await fetch("/api/export-filtered",{method:"POST",headers:{'Content-Type':'application/json'},
           body:JSON.stringify({cfg:this.buildCfg(), dest:this.s.output_dir})});
         const j=await r.json();
-        if(r.ok) this.filteredExport={busy:false, path:j.path, rows:j.rows, error:null};
+        // grouped false: no group is defined yet, so every row passing the filters and subsets was written
+        if(r.ok) this.filteredExport={busy:false, path:j.path, rows:j.rows, error:null, grouped:j.grouped!==false};
         else this.filteredExport={busy:false, path:null, rows:null, error:j.detail||"export failed"};
       }catch(e){ this.filteredExport={busy:false, path:null, rows:null, error:String(e)}; }
     },

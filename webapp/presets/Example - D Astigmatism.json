@@ -171,7 +171,7 @@
   },
   "output_dir": "Example Output",
   "export_filtered_csv": true,
-  "output_prefix": "DS_D_Astigmatism",
+  "output_prefix": "DS_D",
   "astig_target": {
     "cyl": "Target_Cylinder_D",
     "axis": "Target_Axis_Deg"

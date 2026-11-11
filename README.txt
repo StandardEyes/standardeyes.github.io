@@ -228,6 +228,11 @@ also gives the crude estimate on the same eyes.
    you can write to (e.g. C:\StandardEyes or Documents -
    NOT C:\Program Files). Keep all subfolders.
    Do not run it from inside a ZIP file.
+   Keep the folder near the drive root (C:\StandardEyes
+   is ideal): Windows cannot write a file whose full path
+   is longer than 260 characters, and the figure files of
+   a matched run carry long names - in a deeply nested
+   folder they are not written (the run log says so).
 
    Tip: before extracting a downloaded ZIP, right-click
    it, choose Properties, tick "Unblock", then extract.
@@ -324,8 +329,10 @@ The five datasets and their examples:
       suffixes. The app reads one acuity notation per
       settings file, so the same eyes come with two: one
       reads the logMAR columns, one the Snellen columns
-      (the run log counts the acuity values read and those
-      set to missing).
+      (the run log counts, for each refraction, the plus
+      cylinders transposed and the minus, zero and blank
+      ones, and the acuity values read and those set to
+      missing).
       Presets: Example - B Notation (logMAR),
                Example - B Notation (Snellen)
 
@@ -354,7 +361,11 @@ The five datasets and their examples:
       and the matched tables - matching eyes in one
       example, patients (both eyes together) in the other.
       The README sheet gives the true effects, to compare
-      the crude, adjusted and matched estimates with.
+      the crude, adjusted and matched estimates with, and
+      the app's matched results: 1:1 matching with a 0.2 SD
+      caliper leaves one covariate slightly unbalanced in
+      each example, which the covariate-adjusted matched
+      GEE takes into account.
       Presets: Example - E Confounded cohorts
                (eye matching), and Example - E Confounded
                cohorts (patient matching)
@@ -501,8 +512,8 @@ crash, the next time the app starts). You get:
     for example (a run without subsets is named "All";
     with subsets the pooled run is named "Pooled" and each
     subset run by its subset name):
-      LovePlot_DS_E_eye_matching_All_Condition_vs_Control_20261111_111221.tiff
-      LovePlot_DS_E_eye_matching_All_Condition_vs_Control_20261111_111221_legend.txt
+      LovePlot_DS_E_eye_All_Condition_vs_Control_20261111_111221.tiff
+      LovePlot_DS_E_eye_All_Condition_vs_Control_20261111_111221_legend.txt
   * Figure folders: each panel as its own TIFF plus the
     combined multi-panel figure, the double-angle plots
     and the semicircle vector plots (PNG, JPEG, PDF and
@@ -639,6 +650,13 @@ results".
     the whole folder somewhere you can write to (Documents
     or C:\StandardEyes) and start it from there. Copying it
     again to the same place will not help.
+
+"Figure NOT written ... the full path is ... characters"
+    Windows refuses a file path longer than 260 characters
+    (unless long paths are enabled), and the figures of a
+    matched run have long names. Move the app folder near
+    the drive root (C:\StandardEyes), or choose a shorter
+    output folder or output prefix, and run again.
 
 "Windows security blocked a component of StandardEyes"
     Smart App Control, AppLocker or an antivirus program

@@ -177,7 +177,7 @@
   },
   "output_dir": "Example Output",
   "export_filtered_csv": true,
-  "output_prefix": "DS_C_Four_platforms",
+  "output_prefix": "DS_C",
   "num_groups": 4,
   "num_filters": 1,
   "num_subsets": 0,

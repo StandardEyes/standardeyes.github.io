@@ -66,6 +66,37 @@ P_OUT_OF_WINDOW, P_MISSED_6M = 0.03, 0.06
 MISSING = {"Preop_Pachymetry_um": 0.01, "Preop_Mean_K_D": 0.015, "Postop_UDVA": 0.01, "Postop_CDVA": 0.015,
            "DryEye_Symptoms": 0.02}
 
+# The matched results StandardEyes 1.2.0 writes for this file with the two settings files (copied from its
+# workbooks: PSM_Condition_vs_Control, GEE_M_ and GEE_Adj_M_Condition_vs_Control; not computed here). The
+# gate demo_datasets of the tools folder reruns both settings and checks every value below against the run.
+APP_MATCHED = {
+    "patient": dict(settings="Settings_E_confounded_patient_matching.json", units="patients",
+                    matched="74 Condition and 74 Control patients (137 and 140 eyes)",
+                    seq="β = -0.17 (95% CI, -0.28 to -0.06)", seq_adj="β = -0.18 (95% CI, -0.28 to -0.08)",
+                    dry="OR = 2.01 (95% CI, 1.02 to 3.98)", dry_adj="OR = 2.17 (95% CI, 1.06 to 4.44)",
+                    smd=(("Age_Years", 0.09), ("Preop_SEQ_D", 0.17), ("Preop_Pachymetry_um", 0.00)),
+                    left=("Preop_SEQ_D", "preop SEQ")),
+    "eye": dict(settings="Settings_E_confounded_eye_matching.json", units="eyes",
+                matched="144 Condition and 144 Control eyes (88 and 90 patients)",
+                seq="β = -0.21 (95% CI, -0.32 to -0.09)", seq_adj="β = -0.21 (95% CI, -0.31 to -0.12)",
+                dry="OR = 2.28 (95% CI, 1.15 to 4.49)", dry_adj="OR = 2.32 (95% CI, 1.15 to 4.69)",
+                smd=(("Age_Years", 0.11), ("Preop_SEQ_D", 0.07), ("Preop_Pachymetry_um", -0.03)),
+                left=("Age_Years", "age")),
+}
+
+
+def matched_note(unit):
+    """The sentence on the residual imbalance of one settings file (README and _demonstrates)."""
+    m = APP_MATCHED[unit]
+    col, word = m["left"]
+    smd = dict(m["smd"])[col]
+    adj = m["seq_adj"].split(" (")[0].replace("β = ", "")
+    return (f"On this file, 1:1 matching of {m['units']} with a caliper of 0.2 SD of the logit leaves {word} at a "
+            f"standardized difference of {smd:.2f} ({'patient units' if unit == 'patient' else 'eyes'}; beyond the "
+            "love plot's 0.1 line, and the PSM sheet marks it 'no'); the covariate-adjusted matched GEE "
+            f"({adj} D for postop SEQ, true -0.20 D) removes that residual imbalance. The caliper is the default and "
+            "was not tuned to balance this sample.")
+
 
 def simulate(rng, n):
     P = sc.patients(rng, n, *AGE, P_FEMALE, P_BILATERAL)
@@ -101,7 +132,7 @@ def simulate(rng, n):
     dl = sc.ordinal_change(rng, n, rho=CDVA_RHO, shift=CDVA_SEQ_SHIFT * (-seq - 4))
     cd_pre_line = np.clip(sc.line_of(cd_pre), -2, 3)
     cd_post_line = np.maximum(cd_pre_line - dl, -2)
-    ud_pre_line = np.clip(np.maximum(sc.line_of(ud_pre), cd_pre_line), -2, 17)
+    ud_pre_line = np.maximum(np.maximum(sc.line_of(ud_pre), cd_pre_line), -2)      # beyond line 13: recorded as CF
     ud_post = sc.udva_post_latent(rng, cd_post_line / 10, pseq, pmag, n)
     ud_post_line = np.clip(np.maximum(sc.line_of(ud_post), cd_post_line), -2, 17)
     p_dry = sc.expit(DRY["intercept"] + DRY["Condition"] * C + DRY["age"] * agec + DRY["seq"] * seqc + DRY["pachy10"] * pac10)
@@ -131,10 +162,10 @@ def build_dataset(seed=SEED):
     df["Eye"] = e.Eye.to_numpy()
     for c in ("Cohort", "Age_Years", "Sex"):
         df[c] = e[c].to_numpy()
-    df["Preop_Sphere_D"], df["Preop_Cylinder_D"], df["Preop_Axis_Deg"] = sc.minus_triple(
+    df["Preop_Sphere_D"], df["Preop_Cylinder_D"], df["Preop_Axis_Deg"] = sc.minus_recorded(
         e.pre_sph.to_numpy(), e.pre_mag.to_numpy(), e.pre_pax.to_numpy())
     df["Preop_SEQ_D"] = e.Preop_SEQ_D.to_numpy()
-    df["Preop_UDVA"], df["Preop_CDVA"] = sc.dec_of(e.pre_ud), sc.dec_of(e.pre_cd)
+    df["Preop_UDVA"], df["Preop_CDVA"] = sc.dec_or_off(e.pre_ud), sc.dec_of(e.pre_cd)
     for c in ("Preop_Pachymetry_um", "Preop_Mean_K_D", "Ablation_Depth_um"):
         df[c] = e[c].to_numpy()
     df["Target_SEQ_D"] = 0.0
@@ -142,7 +173,7 @@ def build_dataset(seed=SEED):
     oow = rng.random(n) < P_OUT_OF_WINDOW
     day6 = np.where(oow & (rng.random(n) < 0.5), rng.integers(125, 150, n), np.where(oow, rng.integers(211, 245, n), day6))
     df["FollowUp_Days"] = day6.astype(float)
-    df["Postop_Sphere_D"], df["Postop_Cylinder_D"], df["Postop_Axis_Deg"] = sc.minus_triple(
+    df["Postop_Sphere_D"], df["Postop_Cylinder_D"], df["Postop_Axis_Deg"] = sc.minus_recorded(
         e.post_sph.to_numpy(), e.post_mag.to_numpy(), e.post_pax.to_numpy())
     df["Postop_SEQ_D"] = e.Postop_SEQ_D.to_numpy()
     df["Postop_UDVA"], df["Postop_CDVA"] = sc.dec_of(e.post_ud), sc.dec_of(e.post_cd)
@@ -152,7 +183,8 @@ def build_dataset(seed=SEED):
         df[c] = df[c].astype(object).where(~gone, None)
     sc.blank_out(rng, df, MISSING)
     ints = ["Age_Years", "Preop_Axis_Deg", "Postop_Axis_Deg", "Preop_Pachymetry_um", "Ablation_Depth_um", "FollowUp_Days"]
-    floats = [c for c in df.columns if c.endswith(("_D", "_um", "VA")) and c not in ints]
+    # Preop_UDVA keeps its "CF" cells (off the chart) beside the decimal numbers
+    floats = [c for c in df.columns if c.endswith(("_D", "_um", "VA")) and c not in ints and c != "Preop_UDVA"]
     df = sc.typed(df, ints, floats)
     return df, e
 
@@ -203,15 +235,18 @@ COLUMNS = [
     ("Cohort", "-", "Condition (patients with a simulated systemic condition) or Control (patient level)."),
     ("Age_Years", "years", "Age at surgery (patient level) - a confounder."),
     ("Sex", "-", "F or M (patient level; no effect)."),
-    ("Preop_Sphere_D / _Cylinder_D / _Axis_Deg", "D / D / degrees", "Preoperative manifest refraction, minus-cylinder notation."),
+    ("Preop_Sphere_D / _Cylinder_D / _Axis_Deg", "D / D / degrees", "Preoperative manifest refraction, minus-cylinder notation; "
+     "blank axis when the cylinder is 0."),
     ("Preop_SEQ_D", "D", "Preoperative SEQ = sphere + cylinder/2 exactly - a confounder."),
-    ("Preop_UDVA / Preop_CDVA", "decimal", "Preoperative uncorrected / corrected distance acuity (decimal chart lines)."),
+    ("Preop_UDVA / Preop_CDVA", "decimal", "Preoperative uncorrected / corrected distance acuity (decimal chart lines); an "
+     "uncorrected acuity poorer than the chart's last line (0.05 = 20/400) is recorded as CF (counting fingers)."),
     ("Preop_Pachymetry_um", "µm", "Central corneal thickness - a confounder."),
     ("Preop_Mean_K_D", "D", "Mean keratometry (no effect)."),
     ("Ablation_Depth_um", "µm", "Maximum ablation depth (LASIK, 6.5 mm optical zone)."),
     ("Target_SEQ_D", "D", "Intended postoperative SEQ: plano (0) for every eye."),
     ("FollowUp_Days", "days", "Days from surgery to the 6-month (primary endpoint) visit; blank when that visit was missed."),
-    ("Postop_Sphere_D / _Cylinder_D / _Axis_Deg", "D / D / degrees", "Refraction at 6 months, minus notation."),
+    ("Postop_Sphere_D / _Cylinder_D / _Axis_Deg", "D / D / degrees", "Refraction at 6 months, minus notation; blank axis "
+     "when the cylinder is 0."),
     ("Postop_SEQ_D", "D", "SEQ at 6 months = sphere + cylinder/2 exactly."),
     ("Postop_UDVA / Postop_CDVA", "decimal", "Acuity at 6 months (chart lines)."),
     ("DryEye_Symptoms", "-", "Dry-eye symptoms at 6 months: Yes or No."),
@@ -264,11 +299,21 @@ def readme(df, truth, sha):
     R.add(f"THIS FILE (the {n_rows} eyes the settings analyze: 6-month visit at 150-210 days or none)", "unit",
           "crude / adjusted (95% CI)", "linear or logistic model of the eyes, robust SE clustered by patient, 95% CI = estimate "
           "+/- 1.96 SE, adjusted for age, preop SEQ and pachymetry (the settings' covariates); the app's GEE with its small-sample "
-          "correction gives slightly different intervals; the matched estimate is the app's own output")
+          "correction gives slightly different intervals; the matched estimates are the app's own output (next block)")
     for lab, unit, t, c, a, ne, npt in est:
         odds = unit == "odds ratio"
         f = (lambda v: f"{v:.2f}") if odds else (lambda v: f"{v:+.3f}")
         R.add(lab, unit, " / ".join(f"{f(e)} ({f(lo)} to {f(hi)})" for e, lo, hi in (c, a)), f"true {f(t)}; {ne} eyes of {npt} patients")
+    R.blank()
+    R.add("MATCHED ESTIMATES (StandardEyes 1.2.0 output with the two settings files; copied from its workbooks)",
+          "matched GEE / covariate-adjusted matched GEE", "standardized differences after matching", "note")
+    for unit in ("eye", "patient"):
+        m = APP_MATCHED[unit]
+        smd = ", ".join(f"{c} {v:.2f}" for c, v in m["smd"])
+        R.add(f"{m['settings']} ({m['units']} matched)",
+              f"Postop SEQ: {m['seq']} / {m['seq_adj']} D (true -0.20 D); dry-eye symptoms: {m['dry']} / {m['dry_adj']} "
+              "(true 2.0)", f"{smd} ({'on the patient units' if unit == 'patient' else 'on the eyes'})",
+              f"{m['matched']} matched. " + matched_note(unit))
     R.blank()
     R.add("GENERATING MODEL", "parameter", "value", "meaning")
     b0, ba, bs, bp = COHORT_LOGIT
@@ -290,9 +335,10 @@ def readme(df, truth, sha):
         ("Astigmatism", "correction", f"SIA = -CI R(2 AoE) PRE; CI = {CI['mean']} {CI['age']:+}(age-37) + N(0, {CI['sd_patient']}) + "
          f"N(0, {CI['sd_eye']}); AoE = N(0, {AOE_P_SD}) + N(0, {AOE_E_SD}) deg; POST = PRE + SIA + N(0, {NOISE_P_SD}) + N(0, {NOISE_E_SD})",
          "no cohort term"),
-        ("CDVA", "lines gained (+) / lost (-)", ", ".join(f"{k:+d}: {v:.1%}" for k, v in sc.CDVA_CHANGE_P.items()),
+        ("CDVA", "lines gained (+) / lost (-)", sc.cdva_change_text(),
          f"at preop SEQ -4 D; latent shift {CDVA_SEQ_SHIFT}(-preop SEQ-4); fellow-eye correlation {CDVA_RHO}; no cohort term"),
-        ("UDVA", "postop", "CDVA + blur of the residual SEQ and cylinder (dataset A model)", "no direct cohort term"),
+        ("UDVA", "preop / postop", "dataset A model: preop from CDVA and the refraction; postop CDVA + blur of the residual "
+         "SEQ and cylinder", f"no direct cohort term; preop UDVA {sc.UDVA_OFF_NOTE}"),
         ("Visits", "6-month visit", f"180 +/- 25 days; outside 150-210 days in {P_OUT_OF_WINDOW:.0%}; missed by {P_MISSED_6M:.0%} of patients", ""),
         ("Missing values", "share of rows", ", ".join(f"{k} {v:.1%}" for k, v in MISSING.items()),
          "completely at random; an eye without pachymetry drops out of the matching and the adjusted models"),
@@ -303,7 +349,7 @@ def readme(df, truth, sha):
     R.add("COLUMN DICTIONARY", "unit", "description")
     for c in COLUMNS:
         R.add(*c)
-    R.add("Acuity", "decimal notation of whole 0.1-logMAR lines: " + ", ".join(f"{v:g}" for v in sc.DEC_LINE.values()))
+    R.add("Acuity", sc.decimal_lines_text(), f"Preop_UDVA: {int((df.Preop_UDVA == sc.OFF_CHART).sum())} eyes CF")
     return R
 
 
@@ -327,7 +373,7 @@ def write_settings():
             use_matching_weights_in_gee=True, do_regression=True, regression_stage="both",
             regression_covariates_raw=list(conf),
             dichotomous_preferred_level={"Sex": "F", "DryEye_Symptoms": "Yes"},
-            output_prefix=f"DS_E_{lab}_matching")
+            output_prefix="DS_E_pat" if unit == "patient" else "DS_E_eye")
         out.append(sc.write_settings(
             f"Settings_E_confounded_{lab}_matching.json", cfg,
             f"Dataset E - confounded cohorts, {lab}-level matching",
@@ -336,7 +382,8 @@ def write_settings():
                                                                         "of patients (both eyes kept together)."),
             "Patient-clustered tests, the adjusted GEE, propensity-score matching (nearest neighbor 1:1 without replacement, "
             "caliper 0.2 SD of the logit of the score) with the love plot and the matched tables, and crude, adjusted and matched "
-            "estimates side by side against the documented true effects (SEQ -0.20 D, dry-eye OR 2.0, no cylinder effect).",
+            "estimates side by side against the documented true effects (SEQ -0.20 D, dry-eye OR 2.0, no cylinder effect). "
+            + matched_note(unit),
             notes=("psm_unit = 'patient' matches (patient, group) units with both eyes kept together; it is a StandardEyes 1.2.0 "
                    "setting - StandardEyes 1.1.0 ignores it and matches eyes." if unit == "patient" else
                    "psm_unit = 'eye' (the default, and the 1.1.0 behavior) makes each eye a matching unit.")))

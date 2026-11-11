@@ -61,6 +61,7 @@ NOISE_P_SD, NOISE_E_SD = 0.11, 0.06
 CDVA_RHO, CDVA_SEQ_SHIFT, LETTER_NOISE = 0.75, 0.10, 0.02      # letter noise in logMAR (1 letter)
 GLARE = {"intercept": -2.0, "seq": -0.15, "rho": 0.6}           # + platform log OR; per D of preop SEQ + 4
 MONOVISION = {"min_age": 40, "p": 0.35, "targets": (-0.50, -0.75, -1.00), "p_targets": (0.3, 0.5, 0.2)}
+MONO_MIN_TREAT = 0.75                    # D: a monovision eye has preop SEQ <= target - 0.75
 P_OUT_OF_WINDOW, P_MISSED_6M = 0.03, 0.06
 MISSING = {"Preop_Pachymetry_um": 0.015, "Postop_UDVA_Letters": 0.010, "Postop_CDVA_Letters": 0.015,
            "Glare_Halo_Symptoms": 0.02}
@@ -85,6 +86,7 @@ def simulate(rng, n):
     mono = (age >= MONOVISION["min_age"]) & pres.all(1) & (rng.random(n) < MONOVISION["p"])
     me = (rng.random(n) < 0.5).astype(int)
     mt = rng.choice(MONOVISION["targets"], size=n, p=MONOVISION["p_targets"])
+    mono &= seq[np.arange(n), me] <= mt - MONO_MIN_TREAT        # treated by at least 0.75 D, otherwise plano
     target = np.zeros((n, 2))
     target[np.flatnonzero(mono), me[mono]] = mt[mono]
 
@@ -124,10 +126,10 @@ def build_dataset(seed=SEED):
     df["Eye"] = e.Eye.to_numpy()
     for c in ("Platform", "Age_Years", "Sex"):
         df[c] = e[c].to_numpy()
-    df["Preop_Sphere_D"], df["Preop_Cylinder_D"], df["Preop_Axis_Deg"] = sc.minus_triple(
+    df["Preop_Sphere_D"], df["Preop_Cylinder_D"], df["Preop_Axis_Deg"] = sc.minus_recorded(
         e.pre_sph.to_numpy(), e.pre_mag.to_numpy(), e.pre_pax.to_numpy())
     df["Preop_SEQ_D"] = e.Preop_SEQ_D.to_numpy()
-    df["Preop_UDVA_Letters"] = sc.letters_of(e.ud_pre)
+    df["Preop_UDVA_Letters"] = sc.letters_or_off(e.ud_pre)      # CF below 20 letters (20/400)
     df["Preop_CDVA_Letters"] = sc.letters_of(e.cd_pre)
     for c in ("Preop_Pachymetry_um", "Optical_Zone_mm", "Ablation_Depth_um", "Target_SEQ_D"):
         df[c] = e[c].to_numpy()
@@ -135,7 +137,7 @@ def build_dataset(seed=SEED):
     oow = rng.random(n) < P_OUT_OF_WINDOW
     day6 = np.where(oow & (rng.random(n) < 0.5), rng.integers(125, 150, n), np.where(oow, rng.integers(211, 245, n), day6))
     df["FollowUp_Days"] = day6.astype(float)
-    df["Postop_Sphere_D"], df["Postop_Cylinder_D"], df["Postop_Axis_Deg"] = sc.minus_triple(
+    df["Postop_Sphere_D"], df["Postop_Cylinder_D"], df["Postop_Axis_Deg"] = sc.minus_recorded(
         e.post_sph.to_numpy(), e.post_mag.to_numpy(), e.post_pax.to_numpy())
     df["Postop_SEQ_D"] = e.Postop_SEQ_D.to_numpy()
     df["Postop_UDVA_Letters"] = sc.letters_of(e.ud_post)
@@ -145,8 +147,9 @@ def build_dataset(seed=SEED):
     for c in [c for c in df.columns if c.startswith("Postop_")] + ["FollowUp_Days", "Glare_Halo_Symptoms"]:
         df[c] = df[c].astype(object).where(~gone, None)
     sc.blank_out(rng, df, MISSING)
+    # Preop_UDVA_Letters keeps its "CF" cells (off the chart) beside the letter scores
     ints = ["Age_Years", "Preop_Axis_Deg", "Postop_Axis_Deg", "Preop_Pachymetry_um", "Ablation_Depth_um",
-            "FollowUp_Days", "Preop_UDVA_Letters", "Preop_CDVA_Letters", "Postop_UDVA_Letters", "Postop_CDVA_Letters"]
+            "FollowUp_Days", "Preop_CDVA_Letters", "Postop_UDVA_Letters", "Postop_CDVA_Letters"]
     floats = [c for c in df.columns if c.endswith(("_D", "_mm")) and c not in ints]
     df = sc.typed(df, ints, floats)
     return df, e
@@ -194,16 +197,20 @@ COLUMNS = [
     ("Platform", "-", "Excimer laser platform used for LASIK: Platform 1, 2, 3 or 4 (patient level)."),
     ("Age_Years", "years", "Age at surgery (patient level)."),
     ("Sex", "-", "F or M (patient level)."),
-    ("Preop_Sphere_D / _Cylinder_D / _Axis_Deg", "D / D / degrees", "Preoperative manifest refraction, minus-cylinder notation, 0.25 D steps."),
+    ("Preop_Sphere_D / _Cylinder_D / _Axis_Deg", "D / D / degrees", "Preoperative manifest refraction, minus-cylinder notation, "
+     "0.25 D steps; blank axis when the cylinder is 0."),
     ("Preop_SEQ_D", "D", "Preoperative SEQ = sphere + cylinder/2 exactly."),
     ("Preop_UDVA_Letters / Preop_CDVA_Letters", "ETDRS letters", "Preoperative uncorrected / corrected distance acuity as an "
-     "ETDRS letter score (0-100; 85 = 20/20 = logMAR 0.0; logMAR = 1.7 - 0.02 x letters)."),
+     "ETDRS letter score (0-100; 85 = 20/20 = logMAR 0.0; logMAR = 1.7 - 0.02 x letters); an uncorrected acuity below "
+     "20 letters (poorer than 20/400) is recorded as CF (counting fingers)."),
     ("Preop_Pachymetry_um", "µm", "Central corneal thickness."),
     ("Optical_Zone_mm", "mm", "Optical zone (6.5 mm on Platforms 1-3, 6.0 mm on Platform 4)."),
     ("Ablation_Depth_um", "µm", "Maximum ablation depth."),
-    ("Target_SEQ_D", "D", "Intended postoperative SEQ: plano, or a monovision target in one eye of some patients aged 40+."),
+    ("Target_SEQ_D", "D", "Intended postoperative SEQ: plano, or a monovision target in one eye of some patients aged 40+ "
+     "(only in an eye whose preop SEQ is at least 0.75 D more myopic than the target)."),
     ("FollowUp_Days", "days", "Days from surgery to the 6-month (primary endpoint) visit; blank when that visit was missed."),
-    ("Postop_Sphere_D / _Cylinder_D / _Axis_Deg", "D / D / degrees", "Refraction at 6 months, minus notation."),
+    ("Postop_Sphere_D / _Cylinder_D / _Axis_Deg", "D / D / degrees", "Refraction at 6 months, minus notation; blank axis "
+     "when the cylinder is 0."),
     ("Postop_SEQ_D", "D", "SEQ at 6 months = sphere + cylinder/2 exactly."),
     ("Postop_UDVA_Letters / Postop_CDVA_Letters", "ETDRS letters", "Acuity at 6 months, ETDRS letter score (at most 95 = 20/12.5 for CDVA)."),
     ("Glare_Halo_Symptoms", "-", "Glare or halo symptoms at 6 months: Yes or No."),
@@ -224,9 +231,12 @@ def readme(df, truth, sha):
     R.add("Settings files", "Settings_C_four_platforms.json", "four groups on every chart, reference Platform 1")
     R.blank()
     R.add("NOTATION")
-    R.add("Refraction", "minus-cylinder notation; SEQ = sphere + cylinder/2 exactly")
-    R.add("Acuity", "ETDRS letter scores for UDVA and CDVA: 85 letters = 20/20 = logMAR 0.0, 5 letters per 0.1-logMAR line",
-          "StandardEyes reads one acuity notation per settings file, so all acuity columns are letters")
+    R.add("Refraction", "minus-cylinder notation (a blank axis when the cylinder is 0); SEQ = sphere + cylinder/2 exactly")
+    R.add("Acuity", "ETDRS letter scores for UDVA and CDVA: 85 letters = 20/20 = logMAR 0.0, 5 letters per 0.1-logMAR line; "
+          f"below 20 letters (poorer than 20/400) recorded as {sc.OFF_CHART} (counting fingers): "
+          f"{int((df.Preop_UDVA_Letters == sc.OFF_CHART).sum())} preoperative UDVA readings",
+          "StandardEyes reads one acuity notation per settings file, so all acuity columns are letters; CF is off the "
+          "chart, set to missing and counted in the run log")
     R.blank()
     R.add("TRUE PLATFORM PROFILES", "parameter", "value", "note")
     for p in PLATFORMS:
@@ -263,15 +273,18 @@ def readme(df, truth, sha):
         ("Eyes", "preop SEQ", f"SEQp + N(0, {SEQ_E_SD}), limited to {SEQ_MIN} / {SEQ_MAX} D", "sphere on 0.25 D, SEQ derived"),
         ("Eyes", "cylinder", f"exp(log cyl + N(0, {CYL_LOG_E_SD})), 0.25 D steps, <= {CYL_MAX}; plus axis WTR / ATR / oblique {AXIS_TYPE_P}", "OS mirror image of OD"),
         ("Eyes", "depth", "OZ^2/3 (|SEQ| + |cyl|/2) + N(0, 3) µm", "Munnerlyn"),
-        ("Target", "monovision", f"bilateral patients aged >= {MONOVISION['min_age']}, probability {MONOVISION['p']}, one eye, {MONOVISION['targets']} D", "others plano"),
+        ("Target", "monovision", f"bilateral patients aged >= {MONOVISION['min_age']}, probability {MONOVISION['p']}, one eye, {MONOVISION['targets']} D",
+         f"only when that eye's preop SEQ <= target - {MONO_MIN_TREAT:.2f} D (no hyperopic treatment in this myopic series); others plano"),
         ("Postop SEQ", "model", f"target + bias[platform] {SEQ_SLOPE:+}(preop SEQ+4) + u + e", "u, e ~ N(0, the platform's SDs)"),
         ("Astigmatism", "correction", f"SIA = -CI R(2 AoE) PRE; CI = platform mean + N(0, {CI_P_SD}) + N(0, {CI_E_SD}); AoE = N(0, {AOE_P_SD}) + "
          f"N(0, {AOE_E_SD}) deg; POST = PRE + SIA + N(0, {NOISE_P_SD}) + N(0, {NOISE_E_SD}) per component", "plus-format double-angle vectors"),
-        ("CDVA", "lines gained (+) / lost (-)", ", ".join(f"{k:+d}: {v:.1%}" for k, v in sc.CDVA_CHANGE_P.items()),
+        ("CDVA", "lines gained (+) / lost (-)", sc.cdva_change_text(),
          f"at preop SEQ -4 D and platform shift 0; latent shift {CDVA_SEQ_SHIFT}(-preop SEQ-4) + platform shift; fellow-eye correlation "
          f"{CDVA_RHO}; postop latent + N(0, {LETTER_NOISE}) logMAR (about 1 letter); 95 letters at best"),
-        ("UDVA", "postop", "CDVA + blur of the residual refraction (dataset A model)", "never better than CDVA"),
-        ("Acuity", "recording", "letters = round(85 - 50 x latent logMAR), 0-100", "letter-level, not whole lines"),
+        ("UDVA", "preop / postop", "dataset A model: preop from CDVA and the refraction, postop CDVA + blur of the residual "
+         "refraction", "never better than CDVA"),
+        ("Acuity", "recording", "letters = round(85 - 50 x latent logMAR), 0-100; preop UDVA below 20 letters recorded as CF",
+         "letter-level, not whole lines"),
         ("Glare / halo", "P(yes)", f"expit({GLARE['intercept']} + platform log OR {GLARE['seq']:+}(preop SEQ+4))",
          f"Gaussian copula, fellow-eye latent correlation {GLARE['rho']}: the ORs are exact population-averaged values"),
         ("Visits", "6-month visit", f"180 +/- 25 days; outside 150-210 days in {P_OUT_OF_WINDOW:.0%}; missed by {P_MISSED_6M:.0%} of patients", ""),
@@ -304,7 +317,7 @@ def write_settings():
                "post_sph": "Postop_Sphere_D", "post_cyl": "Postop_Cylinder_D", "post_axis": "Postop_Axis_Deg",
                "pre_seq": "Preop_SEQ_D", "post_seq": "Postop_SEQ_D", "target_seq": "Target_SEQ_D", "eye": "Eye"},
         dichotomous_preferred_level={"Sex": "F", "Glare_Halo_Symptoms": "Yes"},
-        output_prefix="DS_C_Four_platforms")
+        output_prefix="DS_C")
     return [sc.write_settings(
         "Settings_C_four_platforms.json", cfg, "Dataset C - four platforms",
         "Four groups (Platform 1 to 4) on every chart, Platform 1 the reference; acuity recorded as ETDRS letters.",

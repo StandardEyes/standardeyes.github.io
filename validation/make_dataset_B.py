@@ -57,6 +57,7 @@ CENTERS = ["Center 1", "Center 2"]
 P_CENTER2 = 0.5
 P_PLUS_PRE, P_PLUS_POST = 0.40, 0.40          # per patient, independently
 MONOVISION = {"min_age": 38, "p": 0.35, "targets": (-0.50, -0.75), "p_targets": (0.5, 0.5)}
+MONO_MIN_TREAT = 0.75                          # D: a monovision eye has preop SEQ <= target - 0.75
 RESIDUAL_CYL = {"min_pre_cyl": 1.75, "p": 0.70, "mag": 0.50}   # planned residual cylinder
 
 SEQ_OUT = {"Center 1": 0.03, "Center 2": -0.12, "seq": 0.05, "sd_patient": 0.22, "sd_eye": 0.20}
@@ -64,7 +65,7 @@ CI_MEAN, CI_P_SD, CI_E_SD = 0.96, 0.10, 0.04
 AOE_P_SD, AOE_E_SD = 3.0, 6.0
 NOISE_P_SD, NOISE_E_SD = 0.11, 0.06
 CDVA_RHO, CDVA_SEQ_SHIFT = 0.75, 0.10
-UDVA_PRE_WORST = 1.6                           # logMAR chart at 1 m
+UDVA_PRE_WORST = 1.6                           # logMAR chart at 1 m: its last line; poorer is recorded as CF
 P_OUT_OF_WINDOW, P_MISSED_6M = 0.03, 0.06
 RETREAT = {"seq_err": 0.75, "cyl": 1.00}
 MISSING = {"Preop_Pachymetry_um": 0.02}
@@ -90,6 +91,7 @@ def simulate(rng, n_patients):
     mono = (age >= MONOVISION["min_age"]) & pres.all(1) & (rng.random(n) < MONOVISION["p"])
     me = (rng.random(n) < 0.5).astype(int)
     mt = rng.choice(MONOVISION["targets"], size=n, p=MONOVISION["p_targets"])
+    mono &= seq[np.arange(n), me] <= mt - MONO_MIN_TREAT        # treated by at least 0.75 D, otherwise plano
     t_sph[np.flatnonzero(mono), me[mono]] = mt[mono]
     resid = (mag >= RESIDUAL_CYL["min_pre_cyl"]) & (rng.random((n, 2)) < RESIDUAL_CYL["p"])
     t_mag[resid] = RESIDUAL_CYL["mag"]
@@ -97,7 +99,7 @@ def simulate(rng, n_patients):
     t_seq = t_sph - t_mag / 2
 
     cd_pre = sc.cdva_pre_latent(rng, seq, n)
-    ud_pre = sc.udva_pre_latent(rng, cd_pre, seq, mag, n, worst=UDVA_PRE_WORST)
+    ud_pre = sc.udva_pre_latent(rng, cd_pre, seq, mag, n)
     err = (np.where(center[:, None] == 1, SEQ_OUT["Center 2"], SEQ_OUT["Center 1"]) + SEQ_OUT["seq"] * (seq - C_SEQ)
            + rng.normal(0, SEQ_OUT["sd_patient"], (n, 1)) + rng.normal(0, SEQ_OUT["sd_eye"], (n, 2)))
     A = sc.astig_post(rng, mag, pax, t_mag, t_pax, CI_MEAN, CI_P_SD, CI_E_SD, 0.0, AOE_P_SD, AOE_E_SD,
@@ -154,7 +156,11 @@ def build_dataset(seed=SEED):
     df["Target_Sphere_D"], df["Target_Cylinder_D"], df["Target_Axis_Deg"] = triple(
         e.t_sph.to_numpy(), e.t_mag.to_numpy(), e.t_pax.to_numpy(), pp)
     df["Target_SEQ_D"] = e.Target_SEQ_D.to_numpy()
-    df["Preop_UDVA_logMAR"] = sc.line_of(e.ud_pre) / 10
+    ud_line = sc.line_of(e.ud_pre)                 # beyond the 1-m chart's last line: CF
+    on = ud_line <= round(UDVA_PRE_WORST * 10)
+    lm = np.empty(n, dtype=object)
+    lm[on], lm[~on] = ud_line[on] / 10, sc.OFF_CHART
+    df["Preop_UDVA_logMAR"] = lm
     df["Preop_CDVA_logMAR"] = sc.line_of(e.cd_pre) / 10
     df["Preop_UDVA_Snellen"] = sc.snellen_of(e.ud_pre.to_numpy())
     df["Preop_CDVA_Snellen"] = sc.snellen_of(e.cd_pre.to_numpy())
@@ -186,7 +192,8 @@ def build_dataset(seed=SEED):
         df[c] = df[c].astype(object).where(~gone, None)
     sc.blank_out(rng, df, MISSING)
     ints = ["Age_Years", "Preop_Axis_Deg", "Target_Axis_Deg", "Postop_Axis_Deg", "Preop_Pachymetry_um", "FollowUp_Days"]
-    floats = [c for c in df.columns if c.endswith(("_D", "_um", "_logMAR")) and c not in ints]
+    # Preop_UDVA_logMAR keeps its "CF" cells (off the chart) beside the numbers
+    floats = [c for c in df.columns if c.endswith(("_D", "_um", "_logMAR")) and c not in ints and c != "Preop_UDVA_logMAR"]
     df = sc.typed(df, ints, floats)
     return df, e
 
@@ -238,7 +245,8 @@ COLUMNS = [
      "= plus -0.25 +0.50 x the preoperative plus axis)."),
     ("Target_SEQ_D", "D", "Intended postoperative SEQ = target sphere + target cylinder/2."),
     ("Preop_UDVA_logMAR / Preop_CDVA_logMAR", "logMAR", "Preoperative uncorrected / corrected distance acuity as a "
-     "logMAR line score (0.1 steps; 0.0 = 20/20; logMAR chart at 4 m, at 1 m for the poorest uncorrected acuities)."),
+     "logMAR line score (0.1 steps; 0.0 = 20/20; logMAR chart at 4 m, at 1 m for the poorest uncorrected acuities); "
+     "CF (counting fingers) when poorer than 1.6, the last line of the chart at 1 m."),
     ("Preop_UDVA_Snellen / Preop_CDVA_Snellen", "Snellen", "The same measurement as typed in the clinic record: a classic "
      "Snellen chart line 20/x (x = " + ", ".join(map(str, sc.SNELLEN_CHART)) + ") with a letter suffix -1, -2 "
      "(letters missed) or +1, +2 (letters read on the next line); CF (counting fingers) below the 20/400 line."),
@@ -283,10 +291,10 @@ def readme(df, truth, sha):
           "preoperative in one notation, postoperative in the other")
     for lab, col in (("Preop", "Preop_Cylinder_D"), ("Postop", "Postop_Cylinder_D"), ("Target", "Target_Cylinder_D")):
         v = pd.to_numeric(df[col])
+        nz, nn = int((v == 0).sum()), int((v < 0).sum())
         R.add(f"{lab} cylinders that are positive", f"{int((v > 0).sum())}",
-              f"the cells StandardEyes transposes (sphere + cylinder, -cylinder, axis +/- 90); {int((v == 0).sum())} zero "
-              "cylinders (identical in both notations, blank axis) and "
-              f"{int((v < 0).sum())} negative")
+              f"the cells StandardEyes transposes (sphere + cylinder, -cylinder, axis +/- 90); {nz} zero "
+              f"cylinder{'s' if nz != 1 else ''} (identical in both notations, blank axis) and {nn} negative")
     R.add("Targets", f"{int((tc != 0).sum())} eyes with a target cylinder (0.50 D planned residual cylinder), "
           f"{int(((tc == 0) & (pd.to_numeric(df.Target_SEQ_D) != 0)).sum())} monovision targets, the rest plano",
           "targets typed in the preoperative notation of the row")
@@ -296,8 +304,13 @@ def readme(df, truth, sha):
     R.add("ACUITY NOTATION")
     snu = pd.concat([df[c] for c in df.columns if c.endswith("_Snellen")])
     snu = snu[snu.notna()].astype(str)
-    R.add("logMAR columns", "line scores 0.1 apart: " + ", ".join(f"{v:.1f}" for v in sorted(pd.concat(
-        [pd.to_numeric(df[c]) for c in df.columns if c.endswith("_logMAR")]).dropna().unique())))
+    lmu = pd.concat([df[c] for c in df.columns if c.endswith("_logMAR")])
+    lmu = lmu[lmu.notna()]
+    n_cf_lm = int((lmu.astype(str) == sc.OFF_CHART).sum())
+    R.add("logMAR columns", "line scores 0.1 apart: " + ", ".join(f"{v:.1f}" for v in sorted(
+        pd.to_numeric(lmu, errors="coerce").dropna().unique()))
+          + f"; {n_cf_lm} CF (counting fingers, poorer than {UDVA_PRE_WORST:.1f}, the last line of the chart at 1 m; "
+            "all preoperative uncorrected)", "CF is off the chart: StandardEyes sets it to missing and counts it in the run log")
     R.add("Snellen columns", f"{snu.str.contains(r'[+-][0-9]$').mean():.1%} of the readings carry a letter suffix; "
           f"{int((snu == 'CF').sum())} are CF (counting fingers, below the 20/400 line, all preoperative uncorrected)",
           "StandardEyes reads 20/x-k as log10(x/20) + 0.02 k logMAR and +k as - 0.02 k; CF is off the chart and set to missing")
@@ -333,7 +346,7 @@ def readme(df, truth, sha):
         ("Eyes", "preop SEQ", f"SEQp + N(0, {SEQ_E_SD}), limited to {SEQ_MIN} / {SEQ_MAX} D", "sphere on 0.25 D, SEQ derived"),
         ("Eyes", "cylinder", f"exp(log cyl + N(0, {CYL_LOG_E_SD})), 0.25 D steps, <= {CYL_MAX}; plus axis WTR / ATR / oblique {AXIS_TYPE_P}", "OS mirror image of OD"),
         ("Target", "monovision", f"bilateral patients aged >= {MONOVISION['min_age']}, probability {MONOVISION['p']}, one eye, "
-         f"{MONOVISION['targets']} D sphere", ""),
+         f"{MONOVISION['targets']} D sphere", f"only when that eye's preop SEQ <= target - {MONO_MIN_TREAT:.2f} D; otherwise plano"),
         ("Target", "planned residual cylinder", f"eyes with preop cylinder >= {RESIDUAL_CYL['min_pre_cyl']:.2f} D, probability "
          f"{RESIDUAL_CYL['p']}: {RESIDUAL_CYL['mag']:.2f} D at the preoperative steep meridian, SEQ plano", "TIA = target - PRE"),
         ("Postop SEQ", "model", f"target + {SEQ_OUT['Center 1']:+}[Center 1] {SEQ_OUT['Center 2']:+}[Center 2] "
@@ -341,7 +354,8 @@ def readme(df, truth, sha):
         ("Astigmatism", "correction", f"SIA = CI R(2 AoE) (T - PRE); CI = {CI_MEAN} + N(0, {CI_P_SD}) + N(0, {CI_E_SD}); "
          f"AoE = N(0, {AOE_P_SD}) + N(0, {AOE_E_SD}) deg; POST = PRE + SIA + N(0, {NOISE_P_SD}) + N(0, {NOISE_E_SD})",
          "plus-format double-angle vectors, same at both centers"),
-        ("Acuity", "latent logMAR", "preop CDVA, preop UDVA (worst 1.6), CDVA change and postop UDVA as in dataset A "
+        ("Acuity", "latent logMAR", "preop CDVA, preop UDVA (CF beyond 1.6 in the logMAR record and beyond 20/400 in the "
+         "Snellen record), CDVA change and postop UDVA as in dataset A "
          f"(the acuity model of the 1.1.0 example dataset); fellow-eye correlation of the CDVA change {CDVA_RHO}",
          "each measurement recorded twice: logMAR line = round(latent, 1); Snellen = nearest classic chart line + letters"),
         ("Visits", "6-month visit", f"180 +/- 25 days; outside 150-210 days in {P_OUT_OF_WINDOW:.0%}; missed by {P_MISSED_6M:.0%} of patients", ""),

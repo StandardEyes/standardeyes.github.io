@@ -95,7 +95,9 @@ crude estimate on the same eyes; workbooks name "StandardEyes" as their author.
    page now offers R 4.6, which may not load the bundled packages; several R versions can be installed side by side.
 2. Download `StandardEyes-windows.zip` from the [latest release](https://github.com/StandardEyes/standardeyes.github.io/releases/latest)
    and extract the **whole folder** to a folder you can write to (e.g. `C:\StandardEyes` or Documents —
-   not `C:\Program Files`). Unblocking the ZIP first (right-click → Properties → Unblock) avoids the
+   not `C:\Program Files`). A folder near the drive root, such as `C:\StandardEyes`, is best: Windows cannot write a
+   file whose full path passes 260 characters, and the figures of a matched run have long names.
+   Unblocking the ZIP first (right-click → Properties → Unblock) avoids the
    SmartScreen prompt on first start.
 3. Double-click **`Start StandardEyes.bat`**. Your browser opens on a free local port.
 

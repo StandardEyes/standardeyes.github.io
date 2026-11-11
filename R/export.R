@@ -353,7 +353,7 @@ make_meyestro_tabs <- function(df, wb, roles, pairing = NULL, target = list(), l
       }
       cy <- as_numeric_safe(out[[sc[2]]])
       n_plus <- n_plus + sum(is.finite(cy) & cy > 0)
-      out <- standardize_minus_cyl(out, sc[1], sc[2], sc[3], logger = tab_log)
+      out <- standardize_minus_cyl(out, sc[1], sc[2], sc[3], logger = tab_log, report = FALSE)
     }
     if (n_plus > 0)
       logger(sprintf("mEYEstro tab '%s': %d plus-cylinder refraction(s) written in minus-cylinder notation, as the template requires.",
@@ -2006,8 +2006,13 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
         # (graphs.R save_graph), so it follows the chosen formats, resolution,
         # width and figure style, and every failed write is logged with its
         # reason (a half-drawn file is never left behind)
+        # the key names the samples "Before matching" / "After matching", not
+        # cobalt's "Unadjusted" / "Adjusted", which a reader of crude,
+        # covariate-adjusted and matched estimates would take for the
+        # covariate-adjusted model
         lp_args <- list(pr$bal, threshold = 0.1, stars = "raw",
-                        colors = c("grey55", "black"), shapes = c("circle", "triangle"))
+                        colors = c("grey55", "black"), shapes = c("circle", "triangle"),
+                        sample.names = c("Before matching", "After matching"))
         renamed <- bal_shown != bal_vars
         if (any(renamed)) lp_args$var.names <- stats::setNames(bal_shown[renamed], bal_vars[renamed])
         lp_what <- paste0("Love plot for ", lab)
@@ -2024,9 +2029,12 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
           lh <- lw * 2 / 3
           # a single journal column (narrower than 12 cm, finding F9): the key
           # goes under the plot, so the plotting area keeps the full width, and
-          # the axis title is fitted to the figure (loveplot_title_fit)
+          # the axis title is fitted to the figure (loveplot_title_fit); the two
+          # samples ("Before matching", "After matching") are stacked, as side
+          # by side they are wider than a single column
           if (lw < 12 / 2.54) {
-            lp_plot <- lp_plot + ggplot2::theme(legend.position = "bottom", legend.title = ggplot2::element_blank())
+            lp_plot <- lp_plot + ggplot2::theme(legend.position = "bottom", legend.title = ggplot2::element_blank(),
+                                                legend.direction = "vertical")
             lh <- lw * 0.8
             lp_plot <- loveplot_title_fit(lp_plot, lw, lh)
           }
@@ -2041,7 +2049,8 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
                                    if (!is.null(run) && length(run$values)) paste0(", subset: ", run$label) else "",
                                    if (by_patient) paste0(", ", PSM_PATIENT_UNIT_TEXT) else ""),
                             c(paste0("Standardized mean differences of the matching covariates before ",
-                                     "(Unadjusted) and after matching (Adjusted), computed by cobalt",
+                                     "and after matching (the key's \"Before matching\" and \"After matching\" ",
+                                     "samples), computed by cobalt",
                                      if (by_patient) paste0(" on the patient units (one per patient per group; ",
                                                             "eye-level covariates averaged over the patient's ",
                                                             "analyzed eyes in the group)"),

@@ -54,11 +54,18 @@ DEC_LINE = {-3: 2.0, -2: 1.6, -1: 1.25, 0: 1.0, 1: 0.8, 2: 0.63, 3: 0.5, 4: 0.4,
 SNELLEN_CHART = (10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 100, 200, 400)
 SNELLEN_CF_ABOVE = 1.35        # logMAR worse than this: "CF" (counting fingers), off the chart
 
-# the 0.1-logMAR change in CDVA (gain +) at the reference covariates: the
-# distribution of make_example_data.py (Waring / Reinstein-type outcomes)
-CDVA_CHANGE_P = {-3: 0.003, -2: 0.012, -1: 0.060, 0: 0.605, 1: 0.265, 2: 0.050, 3: 0.005}
+# the 0.1-logMAR change in CDVA (gain +) at the reference covariates, with the
+# thin loss tails of contemporary myopic LASIK / PRK series (about 0.5% of eyes
+# lose 2 or more lines, almost none 3); make_example_data.py (v1.1.0) had
+# {-3: 0.003, -2: 0.012, -1: 0.060, 0: 0.605, 1: 0.265, 2: 0.050, 3: 0.005}
+CDVA_CHANGE_P = {-3: 0.0005, -2: 0.004, -1: 0.045, 0: 0.62, 1: 0.27, 2: 0.055, 3: 0.0055}
 CDVA_PRE = {"mean": -0.035, "per_D": 0.010, "sd_patient": 0.05, "sd_eye": 0.025}
-UDVA_PRE = {"offset": -0.05, "per_D": 0.27, "per_cyl": 0.12, "sd": 0.07}
+UDVA_PRE = {"offset": -0.05, "per_D": 0.22, "per_cyl": 0.12, "sd": 0.07}
+# the last line of a distance chart: logMAR 1.3 = decimal 0.05 = 20/400 = 20
+# ETDRS letters; a poorer acuity is recorded as off the chart ("CF", counting
+# fingers), which StandardEyes sets to missing and counts in the run log
+CHART_LAST_LINE = 13
+OFF_CHART = "CF"
 UDVA_POST = {"offset": -0.03, "myopic": 0.30, "myopic_dz": 0.20, "hyperopic": 0.12, "hyperopic_dz": 0.37,
              "per_cyl": 0.15, "cyl_dz": 0.25, "sd_patient": 0.03, "sd_eye": 0.04}
 
@@ -177,6 +184,14 @@ def minus_triple(sph, mag, plus_axis):
     return sph, -np.asarray(mag, float) + 0.0, wrap_axis(np.asarray(plus_axis, float) + 90)
 
 
+def minus_recorded(sph, mag, plus_axis):
+    """The minus triple as a clinic records it: a blank axis where the cylinder is 0."""
+    s, c, a = minus_triple(sph, mag, plus_axis)
+    a = np.asarray(a, float).copy()
+    a[np.asarray(mag, float) == 0] = np.nan
+    return s, c, a
+
+
 def plus_triple(sph, mag, plus_axis):
     return np.asarray(sph, float) - mag, np.asarray(mag, float) + 0.0, wrap_axis(plus_axis)
 
@@ -230,7 +245,10 @@ def cdva_pre_latent(rng, seq, n):
     return np.clip(lat, -0.24, 0.34)
 
 
-def udva_pre_latent(rng, cd_pre_lat, seq, mag, n, worst=1.7):
+def udva_pre_latent(rng, cd_pre_lat, seq, mag, n, worst=2.5):
+    """Continuous preoperative UDVA (logMAR), never better than CDVA. It is not
+    held at the chart's last line: an eye beyond it is recorded off the chart
+    (dec_or_off, letters_or_off), so no reading piles up at the chart floor."""
     u = UDVA_PRE
     lat = cd_pre_lat + u["offset"] + u["per_D"] * np.abs(seq) + u["per_cyl"] * mag + rng.normal(0, u["sd"], (n, 2))
     return np.clip(np.maximum(lat, cd_pre_lat), -0.24, worst)
@@ -270,9 +288,49 @@ def dec_of(line):
     return np.vectorize(DEC_LINE.get)(np.asarray(line, int)).astype(float)
 
 
+def dec_or_off(line, last=CHART_LAST_LINE):
+    """Decimal acuity of a chart line as recorded: OFF_CHART ("CF") beyond the
+    chart's last line (logMAR 1.3, decimal 0.05); an object array."""
+    ln = np.asarray(line, int)
+    out = np.empty(ln.shape, dtype=object)
+    on = ln <= last
+    out[on] = dec_of(np.where(on, ln, 0))[on]
+    out[~on] = OFF_CHART
+    return out
+
+
 def letters_of(logmar):
     """ETDRS letter score of a logMAR value (85 letters = logMAR 0.0), 0..100."""
     return np.clip(np.round(85 - 50 * np.asarray(logmar, float)), 0, 100).astype(int)
+
+
+def cdva_change_text(probs=CDVA_CHANGE_P):
+    """The CDVA-change distribution for a README row: '-3: 0.05%, -2: 0.4%, ...'."""
+    return ", ".join(f"{k:+d}: {round(v * 100, 4):g}%" for k, v in probs.items())
+
+
+def decimal_lines_text(last=CHART_LAST_LINE):
+    """The decimal chart lines a README lists, and what is recorded beyond the last one."""
+    vals = ", ".join(f"{DEC_LINE[k]:g}" for k in sorted(DEC_LINE) if k <= last)
+    return (f"decimal notation of whole 0.1-logMAR chart lines: {vals}; an acuity poorer than the last line "
+            f"({DEC_LINE[last]:g} = 20/400) is recorded as {OFF_CHART} (counting fingers), which StandardEyes sets to "
+            "missing and counts in the run log")
+
+
+# the README note on the preoperative UDVA model of every dataset
+UDVA_OFF_NOTE = (f"never better than CDVA; poorer than logMAR {CHART_LAST_LINE / 10:.1f} (20/400, the chart's last line) "
+                 f"recorded as {OFF_CHART}")
+
+
+def letters_or_off(logmar, last=CHART_LAST_LINE):
+    """ETDRS letters as recorded: OFF_CHART ("CF") below 85 - 5 x last letters
+    (20 letters = logMAR 1.3); an object array."""
+    let = letters_of(logmar)
+    out = np.empty(let.shape, dtype=object)
+    on = let >= 85 - 5 * last
+    out[on] = [int(v) for v in let[on]]
+    out[~on] = OFF_CHART
+    return out
 
 
 def snellen_of(logmar):

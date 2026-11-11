@@ -204,7 +204,7 @@
   },
   "output_dir": "Example Output",
   "export_filtered_csv": true,
-  "output_prefix": "DS_A_Two_techniques",
+  "output_prefix": "DS_A",
   "stability_include_preop": true,
   "stability_change_from": "6",
   "stability_change_to": "12",

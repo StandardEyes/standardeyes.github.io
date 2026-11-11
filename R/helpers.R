@@ -1627,8 +1627,11 @@ wrap_axis_0_180 <- function(ax) {
 # axis modulo 180 themselves). The three columns become numeric, so a text
 # cell becomes missing - and is counted in the log.
 # display_names: optional clean -> original header map, for the log lines.
+# report: log the count of each kind of cylinder (plus ones transposed, minus,
+# zero, blank) - the run log of the analysis data (decision DS-B); the export
+# tabs, which log their own count, pass FALSE.
 standardize_minus_cyl <- function(df, sph_clean, cyl_clean, axis_clean, logger = message,
-                                  display_names = NULL) {
+                                  display_names = NULL, report = TRUE) {
   if (any(is.na(c(sph_clean, cyl_clean, axis_clean)))) {
     logger("Standardization skipped: one or more columns not found."); return(df)
   }
@@ -1649,6 +1652,13 @@ standardize_minus_cyl <- function(df, sph_clean, cyl_clean, axis_clean, logger =
   cyl <- as_num_logged(cyl_clean)
   ax  <- as_num_logged(axis_clean)
   idx <- which(is.finite(cyl) & cyl > 0)
+  # counted on the cylinder values as read, before the transposition
+  if (isTRUE(report))
+    logger(sprintf(
+      "Standardization of '%s' / '%s' / '%s': %d plus-cylinder value(s) transposed to minus cylinder; %d already minus, %d zero, %d blank.",
+      disp_name(sph_clean, display_names), disp_name(cyl_clean, display_names),
+      disp_name(axis_clean, display_names), length(idx), sum(is.finite(cyl) & cyl < 0),
+      sum(is.finite(cyl) & cyl == 0), sum(!is.finite(cyl))))
   if (length(idx) > 0) {
     sph[idx] <- sph[idx] + cyl[idx]
     cyl[idx] <- -cyl[idx]

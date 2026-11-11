@@ -105,7 +105,7 @@ def simulate(rng, n):
     dl = sc.ordinal_change(rng, n, rho=CDVA_RHO, shift=CDVA_SEQ_SHIFT * (-seq - 4))
     cd_pre_line = np.clip(sc.line_of(cd_pre), -2, 3)
     cd_post_line = np.maximum(cd_pre_line - dl, -2)
-    ud_pre_line = np.clip(np.maximum(sc.line_of(ud_pre), cd_pre_line), -2, 17)
+    ud_pre_line = np.maximum(np.maximum(sc.line_of(ud_pre), cd_pre_line), -2)      # beyond line 13: recorded as CF
     ud_post = sc.udva_post_latent(rng, cd_post_line / 10, pseq, pmag, n)
     ud_post_line = np.clip(np.maximum(sc.line_of(ud_post), cd_post_line), -2, 17)
 
@@ -145,7 +145,7 @@ def build_dataset(seed=SEED):
     df["Preop_Sphere_D"], df["Preop_Cylinder_D"], df["Preop_Axis_Deg"] = triple(
         e.pre_sph.to_numpy(), e.pre_mag.to_numpy(), e.pre_pax.to_numpy())
     df["Preop_SEQ_D"] = e.Preop_SEQ_D.to_numpy()
-    df["Preop_UDVA"], df["Preop_CDVA"] = sc.dec_of(e.pre_ud), sc.dec_of(e.pre_cd)
+    df["Preop_UDVA"], df["Preop_CDVA"] = sc.dec_or_off(e.pre_ud), sc.dec_of(e.pre_cd)
     for c in ("Preop_Mean_K_D", "Preop_Pachymetry_um", "Ablation_or_Lenticule_Depth_um"):
         df[c] = e[c].to_numpy()
     df["Target_Sphere_D"], df["Target_Cylinder_D"], df["Target_Axis_Deg"] = triple(
@@ -165,7 +165,8 @@ def build_dataset(seed=SEED):
     sc.blank_out(rng, df, MISSING)
     ints = ["Age_Years", "Preop_Axis_Deg", "Target_Axis_Deg", "Postop_Axis_Deg", "Preop_Pachymetry_um",
             "Ablation_or_Lenticule_Depth_um", "FollowUp_Days"]
-    floats = [c for c in df.columns if c.endswith(("_D", "_um", "VA")) and c not in ints]
+    # Preop_UDVA keeps its "CF" cells (off the chart) beside the decimal numbers
+    floats = [c for c in df.columns if c.endswith(("_D", "_um", "VA")) and c not in ints and c != "Preop_UDVA"]
     df = sc.typed(df, ints, floats)
     return df, e
 
@@ -219,7 +220,8 @@ COLUMNS = [
     ("Sex", "-", "F or M (patient level)."),
     ("Preop_Sphere_D / _Cylinder_D / _Axis_Deg", "D / D / degrees", "Preoperative manifest refraction, minus-cylinder notation (cylinder -0.75 to -4.00 D)."),
     ("Preop_SEQ_D", "D", "Preoperative SEQ = sphere + cylinder/2 exactly."),
-    ("Preop_UDVA / Preop_CDVA", "decimal", "Preoperative uncorrected / corrected distance acuity, decimal value of a 0.1-logMAR chart line."),
+    ("Preop_UDVA / Preop_CDVA", "decimal", "Preoperative uncorrected / corrected distance acuity, decimal value of a 0.1-logMAR chart line; "
+     "an uncorrected acuity poorer than the chart's last line (0.05 = 20/400) is recorded as CF (counting fingers)."),
     ("Preop_Mean_K_D", "D", "Mean keratometry."),
     ("Preop_Pachymetry_um", "µm", "Central corneal thickness."),
     ("Ablation_or_Lenticule_Depth_um", "µm", "Maximum ablation depth (LASIK) or lenticule thickness (KLEx)."),
@@ -305,7 +307,8 @@ def readme(df, truth, sha):
          f"{NOISE_P_SD}) patient (mirrored in OS) + N(0, {NOISE_E_SD}) eye per component", "plus-format double-angle vectors"),
         ("Postop SEQ", "model", f"target + bias[procedure] {SEQ_OUT['seq']:+}(preop SEQ+4) + u + e",
          f"u ~ N(0, {SEQ_OUT['sd_patient']}), e ~ N(0, {SEQ_OUT['sd_eye']})"),
-        ("Acuity", "CDVA, UDVA", "dataset A model (decimal chart lines; UDVA from the residual SEQ and cylinder)", "no procedure term"),
+        ("Acuity", "CDVA, UDVA", "dataset A model (decimal chart lines; preop UDVA from the refraction, postop UDVA from "
+         "the residual SEQ and cylinder)", f"no procedure term; preop UDVA {sc.UDVA_OFF_NOTE}"),
         ("Visits", "6-month visit", f"180 +/- 25 days; outside 150-210 days in {P_OUT_OF_WINDOW:.0%}; missed by {P_MISSED_6M:.0%} of patients", ""),
         ("Missing values", "share of rows", ", ".join(f"{k} {v:.1%}" for k, v in MISSING.items()), ""),
     ]
@@ -315,7 +318,7 @@ def readme(df, truth, sha):
     R.add("COLUMN DICTIONARY", "unit", "description")
     for c in COLUMNS:
         R.add(*c)
-    R.add("Acuity", "decimal notation of whole 0.1-logMAR lines: " + ", ".join(f"{v:g}" for v in sc.DEC_LINE.values()))
+    R.add("Acuity", sc.decimal_lines_text(), f"Preop_UDVA: {int((df.Preop_UDVA == sc.OFF_CHART).sum())} eyes CF")
     return R
 
 
@@ -334,7 +337,7 @@ def write_settings():
                      {"sph": "Postop_Sphere_D", "cyl": "Postop_Cylinder_D", "axis": "Postop_Axis_Deg"}],
         astig_target={"cyl": "Target_Cylinder_D", "axis": "Target_Axis_Deg"},
         astig_sheet=True, astig_whwk_files=True, astig_centroid_region="bootstrap",
-        output_prefix="DS_D_Astigmatism")
+        output_prefix="DS_D")
     return [sc.write_settings(
         "Settings_D_astigmatism.json", cfg, "Dataset D - astigmatism (KLEx vs LASIK)",
         "Two groups (LASIK, KLEx) with 0.75-4.00 D of preoperative cylinder; the target refraction is mapped, so TIA is the "

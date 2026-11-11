@@ -181,13 +181,13 @@
   },
   "output_dir": "Example Output",
   "export_filtered_csv": true,
-  "output_prefix": "DS_E_patient_matching",
+  "output_prefix": "DS_E_pat",
   "psm_unit": "patient",
   "num_groups": 2,
   "num_filters": 1,
   "num_subsets": 0,
   "_title": "Dataset E - confounded cohorts, patient-level matching",
   "_description": "Condition versus Control with measured confounding (age, preop SEQ, pachymetry): crude tables, covariate-adjusted GEE and regression, and 1:1 propensity-score matching of patients (both eyes kept together).",
-  "_demonstrates": "Patient-clustered tests, the adjusted GEE, propensity-score matching (nearest neighbor 1:1 without replacement, caliper 0.2 SD of the logit of the score) with the love plot and the matched tables, and crude, adjusted and matched estimates side by side against the documented true effects (SEQ -0.20 D, dry-eye OR 2.0, no cylinder effect).",
+  "_demonstrates": "Patient-clustered tests, the adjusted GEE, propensity-score matching (nearest neighbor 1:1 without replacement, caliper 0.2 SD of the logit of the score) with the love plot and the matched tables, and crude, adjusted and matched estimates side by side against the documented true effects (SEQ -0.20 D, dry-eye OR 2.0, no cylinder effect). On this file, 1:1 matching of patients with a caliper of 0.2 SD of the logit leaves preop SEQ at a standardized difference of 0.17 (patient units; beyond the love plot's 0.1 line, and the PSM sheet marks it 'no'); the covariate-adjusted matched GEE (-0.18 D for postop SEQ, true -0.20 D) removes that residual imbalance. The caliper is the default and was not tuned to balance this sample.",
   "_notes": "psm_unit = 'patient' matches (patient, group) units with both eyes kept together; it is a StandardEyes 1.2.0 setting - StandardEyes 1.1.0 ignores it and matches eyes."
 }

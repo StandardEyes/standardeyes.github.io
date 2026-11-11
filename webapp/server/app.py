@@ -223,8 +223,8 @@ def shutdown_cleanup() -> None:
 # this file (R/export.R standardeyes_version) for every workbook's Manifest,
 # also in a run from the command line; the release tools read them too. Keep
 # each a plain string assignment on its own line.
-APP_VERSION = "2026-10-04-se.10"  # build id; bump together with static/app.js UI_VERSION
-PUBLIC_VERSION = "1.1.0"          # the release number the website and citation use
+APP_VERSION = "2026-11-11-se.11"  # build id; bump together with static/app.js UI_VERSION
+PUBLIC_VERSION = "1.2.0"          # the release number the website and citation use
 
 app = FastAPI(title="StandardEyes")
 

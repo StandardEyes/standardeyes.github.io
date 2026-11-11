@@ -4192,8 +4192,9 @@ astig_bivariate_p <- function(x, y, g, id = NULL, w = NULL, matched = isTRUE(.gr
       # named in the test label (decision R3-4)
       fc <- gee_fit_checked(function(cs_) quiet_eval(suppressWarnings(
               if (weighted) geepack::geeglm(v ~ comp * g, id = cid, data = d2, weights = .w,
-                                            corstr = cs_)
-              else geepack::geeglm(v ~ comp * g, id = cid, data = d2, corstr = cs_)))$value, cs)
+                                            corstr = cs_, control = gee_control())
+              else geepack::geeglm(v ~ comp * g, id = cid, data = d2, corstr = cs_,
+                                   control = gee_control())))$value, cs)
       f2 <- fc$fit
       if (!is.null(f2)) {
         if (nzchar(fc$refit)) gee_refit_note(fc$refit)
@@ -4759,7 +4760,8 @@ astig_zero_p <- function(x, y, id = NULL, method = "robust", trim = ASTIG_TRIM, 
     d2$comp <- factor(d2$comp); d2$cid <- as.integer(factor(d2$cid))
     d2 <- d2[order(d2$cid), , drop = FALSE]
     fit <- quiet_eval(suppressWarnings(
-      geepack::geeglm(v ~ comp - 1, id = cid, data = d2, corstr = "independence")))$value
+      geepack::geeglm(v ~ comp - 1, id = cid, data = d2, corstr = "independence",
+                      control = gee_control())))$value
     if (is.null(fit)) return(astig_na("the GEE could not be fitted", tst))
     wt <- gee_wald(fit, 1:2, unit)
     if (!is.finite(wt$p))

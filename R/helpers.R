@@ -573,6 +573,17 @@ gee_inference_text <- function(mode = gee_small_sample(), unit = "patient") {
 # ------------------------------------------------------------
 GEE_EXCH_ALPHA_MAX <- 0.95
 GEE_EXCH_STEP_MAX <- 0.01
+# The convergence of every GEE the engine fits (geepack::geeglm, control =
+# gee_control()). geepack's default stops once no coefficient changes by more
+# than 1e-4 between iterations, which can leave an exchangeable fit more than
+# 1e-4 of a standard error short of its solution (found by the independent
+# validation of 1.2.0 on dataset E: the adjusted GEE of preoperative UDVA,
+# 1.4e-4 SE). The same iterations run to a change of 1e-8, with up to 100
+# iterations; a fit that does not get there is not converged (gee_converged)
+# and handled as before.
+GEE_EPSILON <- 1e-8
+GEE_MAXIT <- 100L
+gee_control <- function() geepack::geese.control(epsilon = GEE_EPSILON, maxit = GEE_MAXIT)
 # The label of an independence refit states the actual reason (decision
 # V12-2): "independence working correlation (the exchangeable fit was not
 # accepted: working correlation 0.973)", "(...: did not converge)", "(...:
@@ -844,9 +855,10 @@ gee_group_p <- function(x, g, id, kind = "continuous", event = NULL, w = NULL,
   # accepted; otherwise the independence refit, recorded and labeled through
   # attr "refit" (decision R3-4; gee_fit_checked)
   fc <- gee_fit_checked(function(cs_) quiet_eval(suppressWarnings(
-           if (is.null(w)) geepack::geeglm(y ~ g, id = cid, data = d, family = fam, corstr = cs_)
+           if (is.null(w)) geepack::geeglm(y ~ g, id = cid, data = d, family = fam, corstr = cs_,
+                                           control = gee_control())
            else geepack::geeglm(y ~ g, id = cid, data = d, weights = .w, family = fam,
-                                corstr = cs_)))$value, cs)
+                                corstr = cs_, control = gee_control())))$value, cs)
   fit <- fc$fit
   if (is.null(fit)) {
     if (nzchar(fc$refit)) return(na_why(fc$why))
@@ -925,9 +937,9 @@ gee_categorical_p <- function(v, g, id, unit = "patient", w = NULL) {
   f <- if (length(levs) > 2) ind ~ lev * g else ind ~ g
   fit <- quiet_eval(suppressWarnings(
            if (is.null(w)) geepack::geeglm(f, id = cid, data = d, family = stats::gaussian(),
-                                           corstr = "independence")
+                                           corstr = "independence", control = gee_control())
            else geepack::geeglm(f, id = cid, data = d, weights = .w, family = stats::gaussian(),
-                                corstr = "independence")))$value
+                                corstr = "independence", control = gee_control())))$value
   # (a fit is accepted only when it converged: gee_converged)
   if (!gee_converged(fit)) return(NA_real_)
   # the group and level:group terms, found through the model's term

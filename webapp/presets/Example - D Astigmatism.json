@@ -1,16 +1,13 @@
 {
-  "file_path": "Example Data/Example_Refractive_Dataset.xlsx",
+  "file_path": "Example Data/Dataset_D_astigmatism.xlsx",
   "sheet_name": 1,
   "guess_max": 120000,
   "patient_id_raw": "PatientID",
   "eye_id_raw": "EyeID",
-  "group_source_var": "Cohort",
+  "group_source_var": "Procedure",
   "patient_level_params_raw": [
     "Age_Years",
-    "Sex",
-    "Smoker",
-    "Optical_Zone_mm",
-    "Surgeon"
+    "Sex"
   ],
   "exclude_params_raw": [],
   "age_var": "Age_Years",
@@ -24,30 +21,22 @@
       "Preop_Cylinder_D",
       "Preop_UDVA",
       "Preop_CDVA",
-      "Preop_Pachymetry_um",
-      "Preop_Mean_K_D"
+      "Preop_Mean_K_D",
+      "Preop_Pachymetry_um"
     ],
-    "ordinal": [
-      "Preop_DryEye_Grade"
-    ],
+    "ordinal": [],
     "dichotomous": [
-      "Sex",
-      "Smoker"
+      "Sex"
     ],
-    "categorical": [
-      "Surgeon"
-    ]
+    "categorical": []
   },
   "preop": {
     "continuous": [
-      "Optical_Zone_mm",
       "Ablation_or_Lenticule_Depth_um"
     ],
     "ordinal": [],
     "dichotomous": [],
-    "categorical": [
-      "Procedure"
-    ]
+    "categorical": []
   },
   "outcome": {
     "continuous": [
@@ -57,17 +46,9 @@
       "Postop_UDVA",
       "Postop_CDVA"
     ],
-    "ordinal": [
-      "Postop_Haze_Grade",
-      "Patient_Satisfaction_1to5"
-    ],
-    "dichotomous": [
-      "DryEye_Symptoms",
-      "Retreatment_Required"
-    ],
-    "categorical": [
-      "Complication_Type"
-    ]
+    "ordinal": [],
+    "dichotomous": [],
+    "categorical": []
   },
   "within_group": {
     "continuous": [],
@@ -78,55 +59,33 @@
   "within_group_levels": {},
   "filter_rules": [
     {
-      "var": "Age_Years",
-      "op": ">=",
-      "value": [
-        18
-      ]
-    },
-    {
       "var": "FollowUp_Days",
       "op": "between",
       "value": [
         150,
         210
       ]
-    },
-    {
-      "var": "SurgeryNumber",
-      "op": "==",
-      "value": [
-        1
-      ]
-    },
-    {
-      "var": "Preop_Cylinder_D",
-      "op": "abs_le",
-      "value": [
-        5
-      ]
     }
   ],
   "groups": {
-    "Reference": [
-      "Reference"
+    "LASIK": [
+      "LASIK"
     ],
-    "Cohort A": [
-      "Cohort A"
+    "KLEx": [
+      "KLEx"
     ]
   },
-  "reference_group": "Reference",
+  "reference_group": "LASIK",
   "group_colors": {
-    "Reference": "#5B2C86",
-    "Cohort A": "#F26522",
-    "Cohort B": "#1B9E4B"
+    "LASIK": "#F26522",
+    "KLEx": "#1B9E4B"
   },
   "group_labels": {},
   "do_matching": false,
   "psm_covariates_raw": [],
   "psm_method": "nearest",
   "psm_distance": "linear.logit",
-  "psm_ratio": 2,
+  "psm_ratio": 1,
   "psm_replace": false,
   "psm_caliper": 0.2,
   "psm_std_caliper": true,
@@ -152,6 +111,11 @@
       "axis": "Preop_Axis_Deg"
     },
     {
+      "sph": "Target_Sphere_D",
+      "cyl": "Target_Cylinder_D",
+      "axis": "Target_Axis_Deg"
+    },
+    {
       "sph": "Postop_Sphere_D",
       "cyl": "Postop_Cylinder_D",
       "axis": "Postop_Axis_Deg"
@@ -160,6 +124,7 @@
   "std_sph_raw": "Preop_Sphere_D",
   "std_cyl_raw": "Preop_Cylinder_D",
   "std_axis_raw": "Preop_Axis_Deg",
+  "va_format": "decimal",
   "do_logmar": true,
   "logmar_cols_raw": [
     "Preop_UDVA",
@@ -202,18 +167,22 @@
     "eye": "Eye"
   },
   "dichotomous_preferred_level": {
-    "Sex": "F",
-    "Smoker": "Yes",
-    "DryEye_Symptoms": "Yes",
-    "Retreatment_Required": "Yes"
+    "Sex": "F"
   },
   "output_dir": "Example Output",
   "export_filtered_csv": true,
-  "output_prefix": "Ex01_Simple",
+  "output_prefix": "DS_D_Astigmatism",
+  "astig_target": {
+    "cyl": "Target_Cylinder_D",
+    "axis": "Target_Axis_Deg"
+  },
+  "astig_sheet": true,
+  "astig_whwk_files": true,
+  "astig_centroid_region": "bootstrap",
   "num_groups": 2,
-  "num_filters": 4,
+  "num_filters": 1,
   "num_subsets": 0,
-  "_title": "Two groups, tables and figures only",
-  "_description": "Two groups compared with the standard tests (P values clustered by patient). No matching, GEE sheets or regression.",
-  "_demonstrates": "The smallest useful run: the group summary tables and the comparative figure set."
+  "_title": "Dataset D - astigmatism (KLEx vs LASIK)",
+  "_description": "Two groups (LASIK, KLEx) with 0.75-4.00 D of preoperative cylinder; the target refraction is mapped, so TIA is the intended change and PE = postoperative - target.",
+  "_demonstrates": "The JCRS 2025 astigmatism analysis: plus-cylinder double-angle plots of the preoperative astigmatism, SIA, prediction error and postoperative astigmatism with each group's centroid, total SD, the 95% depth polygon of the eyes and the bootstrap polygon of the centroid; the robust centroid tests; the Alpins semicircle graphs; the Astigmatism and AstigMATIC sheets; and the WHWK input files."
 }

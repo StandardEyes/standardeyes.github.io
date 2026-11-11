@@ -19,6 +19,56 @@ On macOS or Linux, run it from source (see README.md).
 
 
 -----------------------------------------------------------
+ WHAT IS NEW IN 1.2.0
+-----------------------------------------------------------
+Version 1.2.0 changes no default: a preset or settings
+file saved by 1.1.0 (or 1.0.0) loads and runs as before,
+and it matches eyes.
+
+* Patient-level matching (option). Matching tab, "Match"
+  = patients (both eyes together); settings file key
+  psm_unit = "patient" (the default "eye" matches eyes, as
+  in 1.1.0). Each patient's analyzed eyes in a group form
+  one matching unit: eye-level covariates are averaged over
+  those eyes, per-patient covariates are taken once, and
+  the propensity model, caliper, ratio and order work on
+  these units. Every eye of a matched patient enters the
+  matched cohort with the patient's matching weight, so
+  both eyes enter or leave together; balance (love plot,
+  PSM sheet) is computed on the patients. The outcome
+  models do not change. Details under OUTPUT below
+  ("Matching unit").
+
+* The independence-refit label states its reason. When an
+  exchangeable GEE is not accepted and is refitted with an
+  independence working correlation, its label in the
+  tables and on the GEE sheets, and the run log, say why:
+  "the exchangeable fit was not accepted: working
+  correlation 0.984", "... did not converge" or "...
+  unstable step". The outcome is called constant within
+  patients only when it is; the figure legends point to
+  the run log. The models do not change.
+
+* GEE fits converge more tightly. Every GEE now iterates
+  until no coefficient changes by more than 1e-8
+  (geepack's default, used up to 1.1.0, stops at 1e-4,
+  which left one model of example dataset E about 1.4e-4
+  of a standard error short of its solution in the
+  independent validation). Full-precision GEE values on
+  the sheets can change in about the fifth significant
+  digit; in the 14 example runs of the release gate no
+  printed value changed.
+
+* Five demonstration datasets replace the single example
+  dataset in "Example Data": A two techniques, B notation
+  harmonization, C four platforms, D astigmatism and E
+  confounded cohorts, with seven settings files and the
+  seven "Example - ..." presets (see TRY IT FIRST below).
+  The astigmatism validation workbook moved to the
+  "validation" folder, beside the generators.
+
+
+-----------------------------------------------------------
  WHAT IS NEW IN 1.1.0
 -----------------------------------------------------------
 Version 1.1.0 changes several defaults, so the same data
@@ -214,104 +264,117 @@ versions (4.3, 4.4, 4.6...) may fail to load them.
 
 
 -----------------------------------------------------------
- TRY IT FIRST: THE EXAMPLE DATASET
+ TRY IT FIRST: THE EXAMPLE DATASETS
 -----------------------------------------------------------
-The folder "Example Data" contains a ready-made, made-up
-dataset (Example_Refractive_Dataset.xlsx) plus a library of
-seven worked examples, so you can see a full analysis before
-touching your own data. It contains no patient information.
-Its README sheet gives the generating model, the true
-cohort effects with this file's own estimates of them
-(which scatter around the true values), and the seed.
+The folder "Example Data" contains five ready-made,
+simulated datasets and seven worked settings files, so you
+can see a full analysis before touching your own data.
+They contain no patient information: patients and eyes
+carry codes only. Each dataset's README sheet gives the
+generating model with every true effect, this file's own
+estimates of them (which scatter around the true values),
+the seed and a column dictionary.
 
-The dataset, the astigmatism validation workbook and the
-seven settings files are written by the generators in the
-"validation" folder (make_example_data.py,
-make_astig_validation_data.py, make_example_settings.py).
-With Python 3 (numpy, pandas, openpyxl),
-"python <script> --out <folder>" writes a fresh copy into
-<folder>, so you can check or extend them.
+The datasets and their settings files are written by the
+generators in the "validation" folder (make_dataset_A.py,
+make_dataset_B.py, make_dataset_C.py, make_dataset_D.py
+and make_dataset_E.py, with their shared simcore.py), and
+the astigmatism validation workbook there by
+make_astig_validation_data.py. With Python 3 (numpy,
+pandas, openpyxl), "python <script> --out <folder>" writes
+a fresh copy into <folder>, so you can check or extend
+them.
 
-  1. Load  Example Data\Example_Refractive_Dataset.xlsx
-  2. Click one of the "Example - ..." presets (below)
+  1. Load  Example Data\Dataset_A_two_techniques.xlsx
+  2. Click the preset "Example - A Two techniques"
   3. Tick "Preview only", then press RUN
 
-The seven examples, each showing a different capability:
+The five datasets and their examples:
 
-  01_Two_cohorts_simple
-      The minimum useful run: two groups, no matching, no
-      GEE sheets or regression - the summary tables
-      (patient-clustered P values) and figures.
+  A Two techniques (Dataset_A_two_techniques.xlsx)
+      PRK versus LASIK at 6 months: the summary tables
+      (patient-clustered P values), the standard graphs,
+      the Publication Table, the mEYEstro and AstigMATIC
+      tabs, and the stability curve over the visits at 1,
+      3, 6 and 12 months. Decimal acuity, minus-cylinder
+      refraction.
+      Preset: Example - A Two techniques
 
-  02_Two_cohorts_full
-      The showcase. Propensity-score matching, clustered
-      GEE, covariate-adjusted regression, the full figure
-      suite with the stability-over-time panel, and the
-      within-group distribution tables - with smoking and
-      surgeon counted once per PATIENT while the two eye
-      measurements stay per eye.
+  B Notation harmonization (Dataset_B_notation.xlsx)
+      Two centers. Refraction typed in mixed plus and minus
+      cylinder notation (the targets too), transposed to
+      minus cylinder before the analysis; acuity recorded
+      both in logMAR and as Snellen fractions with letter
+      suffixes. The app reads one acuity notation per
+      settings file, so the same eyes come with two: one
+      reads the logMAR columns, one the Snellen columns
+      (the run log counts the acuity values read and those
+      set to missing).
+      Presets: Example - B Notation (logMAR),
+               Example - B Notation (Snellen)
 
-  03_Three_cohorts
-      More than two groups: omnibus tests, one adjusted
-      estimate per group against the reference, and every
-      cohort superimposed on the same figures.
+  C Four platforms (Dataset_C_four_platforms.xlsx)
+      Four groups on one chart, each in its own color: an
+      overall test on every panel and each platform against
+      Platform 1 with Holm-adjusted P values. Acuity as
+      ETDRS letter scores.
+      Preset: Example - C Four platforms
 
-  04_Subsets_PRK_LASIK
-      One configuration producing a complete, independent
-      analysis for PRK and for LASIK.
+  D Astigmatism (Dataset_D_astigmatism.xlsx)
+      KLEx versus LASIK in eyes with 0.75-4.00 D of
+      cylinder and some non-plano targets: the JCRS 2025
+      double-angle plots (preoperative astigmatism, SIA,
+      prediction error, postoperative astigmatism) with the
+      centroids, the 95% regions and the centroid tests,
+      the Alpins graphs, the AstigMATIC sheet and the WHWK
+      input files.
+      Preset: Example - D Astigmatism
 
-  05_Stability_focus
-      The stability-over-time curve as its own panel.
-      Five follow-up visits are mapped; SEQ is taken from a
-      column for two of them and computed from sphere +
-      cylinder for the other three, so one run exercises
-      both routes.
-
-  06_Figures_only_no_stats
-      Figure toggles - astigmatism panels and vector plots
-      off, stability on - showing the combined figure
-      without the astigmatism panels (seven panels,
-      lettered A to G).
-
-  07_Full_figure_suite
-      The full suite on three cohorts: every group on ONE
-      chart in its own color, omnibus + vs-reference stat
-      lines, p-values clustered by patient, and double-angle
-      astigmatism plots - the presentation JCRS now
-      requires - with each group's centroid, a 95% region
-      and a 95% confidence interval of the centroid.
+  E Confounded cohorts (Dataset_E_confounded_cohorts.xlsx)
+      A Condition cohort versus Control with measured
+      confounding (age, preoperative SEQ, pachymetry):
+      crude tables, covariate-adjusted GEE and regression,
+      and 1:1 propensity-score matching with the love plot
+      and the matched tables - matching eyes in one
+      example, patients (both eyes together) in the other.
+      The README sheet gives the true effects, to compare
+      the crude, adjusted and matched estimates with.
+      Presets: Example - E Confounded cohorts
+               (eye matching), and Example - E Confounded
+               cohorts (patient matching)
 
 Each is supplied BOTH as a clickable preset inside the app
 and as a settings file you can run directly:
 
-  Example Data\Settings_01_Two_cohorts_simple.json
-  Example Data\Settings_02_Two_cohorts_full.json
-  Example Data\Settings_03_Three_cohorts.json
-  Example Data\Settings_04_Subsets_PRK_LASIK.json
-  Example Data\Settings_05_Stability_focus.json
-  Example Data\Settings_06_Figures_only_no_stats.json
-  Example Data\Settings_07_Full_figure_suite.json
+  Example Data\Settings_A_two_techniques.json
+  Example Data\Settings_B_notation_logMAR.json
+  Example Data\Settings_B_notation_Snellen.json
+  Example Data\Settings_C_four_platforms.json
+  Example Data\Settings_D_astigmatism.json
+  Example Data\Settings_E_confounded_eye_matching.json
+  Example Data\Settings_E_confounded_patient_matching.json
 
 Use them in either of two ways:
 
   * In the app - click "Load config JSON" (bottom left)
-    and pick one, then load the example spreadsheet.
+    and pick one, then load its dataset.
 
   * Without the app - run the engine directly from THIS
     folder (results appear in "Example Output"):
 
       "C:\Program Files\R\R-4.5.2\bin\Rscript.exe" --vanilla ^
          engine\run_pipeline.R ^
-         "Example Data\Settings_02_Two_cohorts_full.json"
+         "Example Data\Settings_A_two_techniques.json"
 
 All of them use paths RELATIVE to this folder, so they keep
 working wherever you copy the app to.
 
-The example deliberately includes both eyes of many
-patients, retreatment rows, mixed plus/minus cylinder
-notation, five consecutive follow-up visits with realistic
-drop-out, all four variable types and missing values - so
-every feature of the app has something to act on.
+Between them the datasets include both eyes of most
+patients, mixed plus and minus cylinder notation, decimal,
+logMAR, Snellen and ETDRS-letter acuity, follow-up visits
+with drop-out, continuous, ordinal, two-level and
+multi-level variables, and missing values at low rates -
+so every feature of the app has something to act on.
 
 
 -----------------------------------------------------------
@@ -422,8 +485,8 @@ crash, the next time the app starts). You get:
     for example (a run without subsets is named "All";
     with subsets the pooled run is named "Pooled" and each
     subset run by its subset name):
-      LovePlot_Ex02_Full_All_Cohort A_vs_Reference_20261004_185353.tiff
-      LovePlot_Ex02_Full_All_Cohort A_vs_Reference_20261004_185353_legend.txt
+      LovePlot_DS_E_eye_matching_All_Condition_vs_Control_20261111_111221.tiff
+      LovePlot_DS_E_eye_matching_All_Condition_vs_Control_20261111_111221_legend.txt
   * Figure folders: each panel as its own TIFF plus the
     combined multi-panel figure, the double-angle plots
     and the semicircle vector plots (PNG, JPEG, PDF and
@@ -569,7 +632,7 @@ The browser shows nothing / cannot connect
 Am I looking at the right app?
     The header says "StandardEyes - By Noyman DBE,
     Mimouni M, Safir M" followed by its version in the
-    form "v1.1.0 (build <date>-se.<n>)": the release
+    form "v1.2.0 (build <date>-se.<n>)": the release
     number, then the internal build id, which contains
     "-se".
     The console window prints both at startup. Quote both

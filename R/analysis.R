@@ -154,7 +154,8 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
   # independence working correlation (R4-1); anything geepack prints stays off
   # the console (quiet_eval, helpers.R)
   fit <- quiet_eval(suppressWarnings(geepack::geeglm(
-           f, data = d, id = .cid, weights = .w, family = fam, corstr = "independence")))$value
+           f, data = d, id = .cid, weights = .w, family = fam, corstr = "independence",
+           control = gee_control())))$value
   if (is.null(fit)) return(res(NA))
   # a fit is accepted only when it converged (helpers.R gee_converged; the
   # figures' weighted GEE gives the same reason)
@@ -1636,12 +1637,12 @@ fit_gee <- function(f, df2, patient_id_clean, family_name, use_weights, corstr =
       # a weighted quasi-likelihood fit); glm's start-value warning is noise
       withCallingHandlers(
         geepack::geeglm(formula = f, data = df2, id = .gee_id,
-                        family = fam, corstr = corstr, weights = .gee_w),
+                        family = fam, corstr = corstr, weights = .gee_w, control = gee_control()),
         warning = function(w) if (grepl("non-integer #successes", conditionMessage(w)))
           invokeRestart("muffleWarning"))
     } else {
       geepack::geeglm(formula = f, data = df2, id = .gee_id,
-                      family = fam, corstr = corstr)
+                      family = fam, corstr = corstr, control = gee_control())
     }
   })
   if (is.null(q$value)) .gee_err$msg <- quiet_error_text(q)

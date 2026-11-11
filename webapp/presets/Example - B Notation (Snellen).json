@@ -1,16 +1,13 @@
 {
-  "file_path": "Example Data/Example_Refractive_Dataset.xlsx",
+  "file_path": "Example Data/Dataset_B_notation.xlsx",
   "sheet_name": 1,
   "guess_max": 120000,
   "patient_id_raw": "PatientID",
   "eye_id_raw": "EyeID",
-  "group_source_var": "Cohort",
+  "group_source_var": "Center",
   "patient_level_params_raw": [
     "Age_Years",
-    "Sex",
-    "Smoker",
-    "Optical_Zone_mm",
-    "Surgeon"
+    "Sex"
   ],
   "exclude_params_raw": [],
   "age_var": "Age_Years",
@@ -22,52 +19,35 @@
       "Preop_SEQ_D",
       "Preop_Sphere_D",
       "Preop_Cylinder_D",
-      "Preop_UDVA",
-      "Preop_CDVA",
       "Preop_Pachymetry_um",
-      "Preop_Mean_K_D"
-    ],
-    "ordinal": [
-      "Preop_DryEye_Grade"
-    ],
-    "dichotomous": [
-      "Sex",
-      "Smoker"
-    ],
-    "categorical": [
-      "Surgeon"
-    ]
-  },
-  "preop": {
-    "continuous": [
-      "Optical_Zone_mm",
-      "Ablation_or_Lenticule_Depth_um"
+      "Preop_UDVA_Snellen",
+      "Preop_CDVA_Snellen"
     ],
     "ordinal": [],
+    "dichotomous": [
+      "Sex"
+    ],
+    "categorical": []
+  },
+  "preop": {
+    "continuous": [],
+    "ordinal": [],
     "dichotomous": [],
-    "categorical": [
-      "Procedure"
-    ]
+    "categorical": []
   },
   "outcome": {
     "continuous": [
       "FollowUp_Days",
       "Postop_SEQ_D",
       "Postop_Cylinder_D",
-      "Postop_UDVA",
-      "Postop_CDVA"
+      "Postop_UDVA_Snellen",
+      "Postop_CDVA_Snellen"
     ],
-    "ordinal": [
-      "Postop_Haze_Grade",
-      "Patient_Satisfaction_1to5"
-    ],
+    "ordinal": [],
     "dichotomous": [
-      "DryEye_Symptoms",
-      "Retreatment_Required"
+      "Retreatment_Indicated"
     ],
-    "categorical": [
-      "Complication_Type"
-    ]
+    "categorical": []
   },
   "within_group": {
     "continuous": [],
@@ -78,55 +58,33 @@
   "within_group_levels": {},
   "filter_rules": [
     {
-      "var": "Age_Years",
-      "op": ">=",
-      "value": [
-        18
-      ]
-    },
-    {
       "var": "FollowUp_Days",
       "op": "between",
       "value": [
         150,
         210
       ]
-    },
-    {
-      "var": "SurgeryNumber",
-      "op": "==",
-      "value": [
-        1
-      ]
-    },
-    {
-      "var": "Preop_Cylinder_D",
-      "op": "abs_le",
-      "value": [
-        5
-      ]
     }
   ],
   "groups": {
-    "Reference": [
-      "Reference"
+    "Center 1": [
+      "Center 1"
     ],
-    "Cohort A": [
-      "Cohort A"
+    "Center 2": [
+      "Center 2"
     ]
   },
-  "reference_group": "Reference",
+  "reference_group": "Center 1",
   "group_colors": {
-    "Reference": "#5B2C86",
-    "Cohort A": "#F26522",
-    "Cohort B": "#1B9E4B"
+    "Center 1": "#1F5FA8",
+    "Center 2": "#D1495B"
   },
   "group_labels": {},
   "do_matching": false,
   "psm_covariates_raw": [],
   "psm_method": "nearest",
   "psm_distance": "linear.logit",
-  "psm_ratio": 2,
+  "psm_ratio": 1,
   "psm_replace": false,
   "psm_caliper": 0.2,
   "psm_std_caliper": true,
@@ -152,6 +110,11 @@
       "axis": "Preop_Axis_Deg"
     },
     {
+      "sph": "Target_Sphere_D",
+      "cyl": "Target_Cylinder_D",
+      "axis": "Target_Axis_Deg"
+    },
+    {
       "sph": "Postop_Sphere_D",
       "cyl": "Postop_Cylinder_D",
       "axis": "Postop_Axis_Deg"
@@ -160,12 +123,13 @@
   "std_sph_raw": "Preop_Sphere_D",
   "std_cyl_raw": "Preop_Cylinder_D",
   "std_axis_raw": "Preop_Axis_Deg",
+  "va_format": "snellen",
   "do_logmar": true,
   "logmar_cols_raw": [
-    "Preop_UDVA",
-    "Preop_CDVA",
-    "Postop_UDVA",
-    "Postop_CDVA"
+    "Preop_UDVA_Snellen",
+    "Preop_CDVA_Snellen",
+    "Postop_UDVA_Snellen",
+    "Postop_CDVA_Snellen"
   ],
   "make_meyestro": true,
   "make_alpins": true,
@@ -183,49 +147,13 @@
   "astig_jcrs_standard": true,
   "astig_test_method": "robust",
   "cluster_by_patient": true,
-  "stability_figs": true,
-  "stability_visits": [
-    {
-      "label": "1",
-      "time": "Visit1_Days_PostOp",
-      "sph": "Visit1_Sphere_D",
-      "cyl": "Visit1_Cylinder_D",
-      "seq": "Visit1_SEQ_D"
-    },
-    {
-      "label": "3",
-      "time": "Visit2_Days_PostOp",
-      "sph": "Visit2_Sphere_D",
-      "cyl": "Visit2_Cylinder_D",
-      "seq": ""
-    },
-    {
-      "label": "6",
-      "time": "Visit3_Days_PostOp",
-      "sph": "Visit3_Sphere_D",
-      "cyl": "Visit3_Cylinder_D",
-      "seq": "Visit3_SEQ_D"
-    },
-    {
-      "label": "12",
-      "time": "Visit4_Days_PostOp",
-      "sph": "Visit4_Sphere_D",
-      "cyl": "Visit4_Cylinder_D",
-      "seq": ""
-    },
-    {
-      "label": "24",
-      "time": "Visit5_Days_PostOp",
-      "sph": "Visit5_Sphere_D",
-      "cyl": "Visit5_Cylinder_D",
-      "seq": ""
-    }
-  ],
+  "stability_figs": false,
+  "stability_visits": [],
   "roles": {
-    "pre_ucva": "Preop_UDVA",
-    "pre_bcva": "Preop_CDVA",
-    "post_ucva": "Postop_UDVA",
-    "post_bcva": "Postop_CDVA",
+    "pre_ucva": "Preop_UDVA_Snellen",
+    "pre_bcva": "Preop_CDVA_Snellen",
+    "post_ucva": "Postop_UDVA_Snellen",
+    "post_bcva": "Postop_CDVA_Snellen",
     "pre_sph": "Preop_Sphere_D",
     "pre_cyl": "Preop_Cylinder_D",
     "pre_axis": "Preop_Axis_Deg",
@@ -239,21 +167,20 @@
   },
   "dichotomous_preferred_level": {
     "Sex": "F",
-    "Smoker": "Yes",
-    "DryEye_Symptoms": "Yes",
-    "Retreatment_Required": "Yes"
+    "Retreatment_Indicated": "Yes"
   },
   "output_dir": "Example Output",
   "export_filtered_csv": true,
-  "output_prefix": "Ex05_Stability",
-  "stability_include_preop": true,
-  "stability_change_from": "6",
-  "stability_change_to": "24",
-  "stability_change_threshold": 0.5,
+  "output_prefix": "DS_B_Snellen",
+  "astig_target": {
+    "cyl": "Target_Cylinder_D",
+    "axis": "Target_Axis_Deg"
+  },
   "num_groups": 2,
-  "num_filters": 4,
+  "num_filters": 1,
   "num_subsets": 0,
-  "_title": "Stability over time",
-  "_description": "The stability-over-time curve as its own figure panel.",
-  "_demonstrates": "Five mapped follow-up visits and the preoperative point. The spherical equivalent is read from a column for visits 1 and 3, and computed from sphere and cylinder for the others."
+  "_title": "Dataset B - notation harmonization (Snellen columns)",
+  "_description": "Two centers; refraction typed in mixed plus and minus cylinder notation (targets too); acuity read from the Snellen columns (VA notation: Snellen).",
+  "_demonstrates": "The built-in harmonization: every plus cylinder (preoperative, target, postoperative) is transposed to minus cylinder before the analysis, the astigmatism vectors are built in plus-cylinder format whatever the typed form, and acuity recorded as Snellen fractions with letter suffixes is converted to logMAR (counting fingers set to missing); tables and figures show acuity as the Snellen geometric mean with the logMAR mean and SD.",
+  "_notes": "StandardEyes applies one acuity notation (va_format) to every acuity column, so the logMAR and the Snellen columns of this dataset are read by two settings files."
 }

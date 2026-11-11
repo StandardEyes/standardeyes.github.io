@@ -67,7 +67,7 @@ const PSM_UNITS = [["eye","eyes"],["patient","patients (both eyes together)"]];
 const NON_PS_DISTANCES = ["mahalanobis","robust_mahalanobis","euclidean","scaled_euclidean"];
 // must equal APP_VERSION in server/app.py — mismatch means the running server
 // process is older than the page and needs a restart
-const UI_VERSION = "2026-10-04-se.10";
+const UI_VERSION = "2026-11-11-se.11";
 // manuscript group colors (mEYEstro-like); index = group order
 const DEFAULT_GROUP_COLORS = ["#5B2C86","#F26522","#1B9E4B","#2166AC","#00838F","#C2185B"];
 

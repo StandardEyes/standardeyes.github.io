@@ -20,6 +20,40 @@ Everything runs on your own computer. Nothing is uploaded, and no internet conne
 
 **➡ Website and download: https://standardeyes.github.io**
 
+## What is new in 1.2.0
+
+Version 1.2.0 changes no default: a preset or settings file saved by 1.1.0 (or 1.0.0) loads and runs as
+before, and it matches eyes.
+
+- **Patient-level matching (option).** Matching tab, *Match* = patients (both eyes together); settings-file key
+  `psm_unit: "patient"` (the default `"eye"` matches eyes, as in 1.1.0). Each patient's analyzed eyes in a
+  group form one matching unit: eye-level covariates are averaged over those eyes, per-patient covariates are
+  taken once, and the propensity model, caliper, ratio and order work on these units. Every eye of a matched
+  patient enters the matched cohort with the patient's matching weight, so both eyes enter or leave together;
+  balance (love plot, PSM sheet) is computed on the patients. A patient with eyes in two groups forms one unit
+  in each group (the run log and the PSM sheet count them). The live match preview uses the same units, and the
+  PSM sheet, the Manifest, the figure legends and the run log say "patients matched (both eyes kept together)".
+  It needs a patient ID column. The outcome models do not change.
+- **The independence-refit label states its reason.** When an exchangeable GEE is not accepted and is refitted
+  with an independence working correlation, its label in the tables and on the GEE sheets, and the run log, say
+  why: "the exchangeable fit was not accepted: working correlation 0.984", "... did not converge" or "...
+  unstable step". The outcome is called constant within patients only when it is; the figure legends point to
+  the run log. The models do not change.
+- **GEE fits converge more tightly.** Every GEE now iterates until no coefficient changes by more than 1e-8
+  (geepack's default, used up to 1.1.0, stops at 1e-4, which left one model of example dataset E about 1.4e-4 of a
+  standard error short of its solution in the independent validation). Full-precision GEE values on the sheets
+  can change in about the fifth significant digit; in the 14 example runs of the release gate no printed value
+  changed.
+- **Five demonstration datasets** replace the single example dataset in `Example Data` - simulated (no real
+  patients; patients and eyes carry codes only), each with a README sheet (the generating model with every true
+  effect, this file's own estimates, the seed and a column dictionary) and its settings files, also included in the app as the seven
+  *Example - …* presets: **A** two techniques (PRK vs LASIK, the standard graphs and the stability curve),
+  **B** notation harmonization (mixed plus and minus cylinder, logMAR and Snellen acuity; two settings files),
+  **C** four platforms (four groups on one chart, Holm-adjusted comparisons), **D** astigmatism (KLEx vs LASIK,
+  the JCRS 2025 analysis and the Alpins graphs) and **E** confounded cohorts (crude, adjusted and matched
+  estimates; eye-level and patient-level matching in two settings files). Their generators are in
+  `validation/`, where the astigmatism validation workbook moved too.
+
 ## What is new in 1.1.0
 
 Version 1.1.0 changes several defaults, so the same data and settings can give different numbers than
@@ -62,10 +96,10 @@ crude estimate on the same eyes; workbooks name "StandardEyes" as their author.
 The release ZIP is for Windows 10/11 (64-bit) only. The Python runtime for the interface and all 48 R
 packages the analysis needs are inside it, together with their license texts (`licenses/` and
 `THIRD_PARTY_NOTICES.md`); nothing is installed. See [`README.txt`](README.txt) for the full user notes and
-troubleshooting, and the `Example Data` folder for a made-up dataset with seven worked settings files
+troubleshooting, and the `Example Data` folder for five simulated datasets with seven worked settings files
 (also included in the app as the seven *Example - …* presets).
 
-The app shows its version as `v1.1.0 (build <id>)`: the release number used on the website and in
+The app shows its version as `v1.2.0 (build <id>)`: the release number used on the website and in
 `CITATION.cff`, then the internal build id. Every workbook's Manifest sheet records both - also when the
 engine runs from the command line, since the engine reads them from `webapp/server/app.py` - with the run duration.
 
@@ -76,9 +110,9 @@ engine runs from the command line, since the engine reads them from `webapp/serv
 | `R/` | The statistical engine (analysis, pipeline, export, figures) |
 | `engine/` | Headless R entry points (`run_pipeline.R`, `match_preview.R`) and the decimal-to-Snellen lookup |
 | `webapp/` | The local FastAPI server, the Alpine.js interface and the seven *Example - …* presets |
-| `Example Data/` | Simulated dataset, astigmatism validation dataset and the seven example settings files (`Settings_01_Two_cohorts_simple.json` … `Settings_07_Full_figure_suite.json`) |
+| `Example Data/` | The five simulated demonstration datasets (`Dataset_A_two_techniques.xlsx` … `Dataset_E_confounded_cohorts.xlsx`) and their seven settings files (`Settings_A_two_techniques.json` … `Settings_E_confounded_patient_matching.json`) |
 | `docs/` | The project website (GitHub Pages) |
-| `validation/` | The generators of the simulated example data, the astigmatism validation workbook and the seven example settings (`make_example_data.py`, `make_astig_validation_data.py`, `make_example_settings.py`; with Python 3, numpy, pandas and openpyxl, `python <script> --out <folder>` writes a copy into that folder), and the fellow-eye simulation behind the clustered tests of the figures (the script and its results) |
+| `validation/` | The generators of the demonstration datasets and their settings files (`make_dataset_A.py`, `make_dataset_B.py`, `make_dataset_C.py`, `make_dataset_D.py` and `make_dataset_E.py`, with their shared `simcore.py`), the astigmatism validation workbook and its generator (`Astigmatism_Validation_Dataset.xlsx`, `make_astig_validation_data.py`) - with Python 3, numpy, pandas and openpyxl, `python <script> --out <folder>` writes a copy into that folder - and the fellow-eye simulation behind the clustered tests of the figures (the script and its results) |
 
 The bundled runtime (`runtime/`: a private copy of Python and the R library) is **not** in the repository — it is
 attached to each release as part of the ZIP, which is Windows-only (`Start StandardEyes.bat` and
@@ -98,7 +132,7 @@ attached to each release as part of the ZIP, which is Windows-only (`Start Stand
   Rscript saved on its R Setup screen, else the `RSCRIPT_PATH` environment variable, else the standard
   Windows install locations, else `Rscript` on the `PATH`.
 - The engine also runs without the interface:
-  `Rscript --vanilla engine/run_pipeline.R "Example Data/Settings_02_Two_cohorts_full.json"`.
+  `Rscript --vanilla engine/run_pipeline.R "Example Data/Settings_A_two_techniques.json"`.
 
 ## Citing
 

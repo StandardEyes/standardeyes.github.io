@@ -16,7 +16,7 @@ Deliberately built to exercise every astigmatism option in one file:
     centroids genuinely separate: with-the-rule / against-the-rule / oblique / wide
   * fellow eyes (mirror-symmetric axes) in the with-the-rule, against-the-rule and
     wide cohorts, so patient-level resampling has clusters to work on
-  * astigmatic correction modelled per cohort: the prediction error (PE) centroid is
+  * astigmatic correction modeled per cohort: the prediction error (PE) centroid is
     close to zero in every cohort (about 0.02 D: the scatter of the angle of error
     alone leaves 1.5% of the preoperative centroid) except Cohort B, which is
     undercorrected (CI 0.85) and rotated (angle of error +5 deg): about 0.28 D
@@ -34,10 +34,12 @@ Deliberately built to exercise every astigmatism option in one file:
 Vector definitions (D2): PRE = preop, POST = postop, T = target refractive astigmatism;
   SIA = POST - PRE; PE = POST - T; Alpins TIA (intended change) = T - PRE; DV = -PE.
 
-Column names mirror Example_Refractive_Dataset.xlsx so the example settings apply.
+Column names mirror the 1.1.0 example dataset (Example_Refractive_Dataset.xlsx)
+so its settings apply. Since StandardEyes 1.2.0 the workbook ships in the
+app's validation folder, beside this script.
 
-Usage:  python make_astig_validation_data.py                 (writes into the app)
-        python make_astig_validation_data.py --out <folder>  (writes <folder>\\Example Data\\...)
+Usage:  python make_astig_validation_data.py                 (writes into the app's validation folder)
+        python make_astig_validation_data.py --out <folder>  (writes <folder>\\validation\\...)
 """
 from __future__ import annotations
 import argparse, hashlib, os, platform
@@ -451,9 +453,9 @@ def write_workbook(df, readme, exp, path):
 def main():
     ap = argparse.ArgumentParser(description="Astigmatism validation workbook (simulated data).")
     ap.add_argument("--out", default=default_app(),
-                    help="folder that receives 'Example Data\\" + FNAME + "' (default: the app folder)")
+                    help="folder that receives 'validation\\" + FNAME + "' (default: the app folder)")
     a = ap.parse_args()
-    ddir = os.path.join(a.out, "Example Data")
+    ddir = os.path.join(a.out, "validation")
     os.makedirs(ddir, exist_ok=True)
     df, edges = build(np.random.default_rng(SEED))
     sha = hashlib.sha256(df.to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()

@@ -1870,6 +1870,44 @@ p_value_guard <- function(v, g, kind = "continuous") {
   ""
 }
 
+# ------------------------------------------------------------
+# No variation within the compared groups: a continuous or ordinal variable
+# whose values differ between the groups but not within any of them (e.g. one
+# optical zone per platform). The table test and the GEE then have nothing to
+# estimate the variability from (an SE of 0: a P of 0 and a CI of zero
+# width), so they are not estimable: the effect, CI and P cells print "NE"
+# (NE_TEXT), the footnote of the Publication Tables is NE_WITHIN_FOOT and the
+# run log names the rows. TRUE only when at least two groups have data, the
+# variable is not constant in the cohort (p_value_guard's own case) and the
+# values of every group are identical. v: the values; g: the group of each.
+# ------------------------------------------------------------
+NE_TEXT <- "NE"
+NE_WITHIN_REASON <- "no variation within groups"
+NE_WITHIN_FOOT <- "NE, not estimable: no variation within groups"
+no_within_variation <- function(v, g) {
+  x <- if (is.numeric(v)) as.numeric(v) else as_numeric_safe(v)
+  ok <- is.finite(x) & !is.na(g)
+  if (!any(ok)) return(FALSE)
+  x <- x[ok]; gg <- as.character(g[ok])
+  if (length(unique(gg)) < 2) return(FALSE)
+  tol <- 1e-9 * max(1, max(abs(x)))
+  if (diff(range(x)) <= tol) return(FALSE)
+  all(vapply(split(x, gg), function(z) diff(range(z)) <= tol, logical(1)))
+}
+# The variables reported NE for this reason while one workbook is built
+# (create_summary_table, run_gee_models, run_regression_models), for the run
+# log line pipeline.R writes per workbook (ne_within_log_text).
+.ne_within_rows <- new.env(parent = emptyenv())
+.ne_within_rows$vars <- character(0)
+ne_within_add <- function(var) .ne_within_rows$vars <- unique(c(.ne_within_rows$vars, as.character(var)))
+ne_within_take <- function() { v <- .ne_within_rows$vars; .ne_within_rows$vars <- character(0); v }
+ne_within_log_text <- function(v, where) {
+  if (!length(v)) return(NULL)
+  sprintf(paste0("%s: %d row(s) not estimable (NE) - no variation within groups: %s. Their table test, GEE and ",
+                 "adjusted-regression comparisons print NE in the effect, CI and P cells."),
+          where, length(v), paste0("'", v, "'", collapse = ", "))
+}
+
 # "" when every group present in `g` (the group of each USABLE value) has at
 # least two values, else "B has n = 1" naming each smaller group, in level
 # order ("B has n = 1; C has n = 1").

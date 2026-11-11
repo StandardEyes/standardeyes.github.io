@@ -2,7 +2,7 @@
 # graphs.R
 # StandardEyes publication figure set: ALL groups superimposed
 # on each panel, user colors, stat+P annotations, %-labels,
-# indicator lines (blue identity, green +/-0.50 D, magenta
+# indicator lines (black identity, green +/-0.50 D, magenta
 # +/-1.00 D), per-group regression lines + equations on the scatters,
 # JCRS-standard double-angle astigmatism plots, grey semicircle
 # vector plots, and a sectioned composite figure with captions
@@ -16,7 +16,39 @@ suppressPackageStartupMessages({ requireNamespace("ggplot2", quietly = TRUE) })
 # 7-8 exist so 7+ groups no longer silently reuse colour 1 and 2.
 DEFAULT_GROUP_COLS <- c("#5B2C86", "#F26522", "#1B9E4B", "#2166AC", "#00838F", "#C2185B",
                         "#8B5A2B", "#3A3A3A")
-IND_IDENT <- "#1F4FD8"; IND_HALF <- "#1E8A2E"; IND_ONE <- "#E31FC4"   # blue / green / magenta
+IND_HALF <- "#1E8A2E"; IND_ONE <- "#E31FC4"   # green / magenta (the ±0.50 D and ±1.00 D lines)
+
+# The identity line (y = x) of the two scatters and the zero line of the
+# stability graph: a neutral solid line that is never a group color - black,
+# or dark gray / gray when a group is drawn in a color close to it (finding
+# F22: the blue identity line was Platform 4's blue). The first candidate
+# whose RGB distance from every group color is at least REF_LINE_MIN_DIST.
+# gr_ref_line_col() is the color of the current figure set (set from its
+# palette in generate_standard_graphs), gr_ref_line_name() its name for the
+# legends.
+REF_LINE_CANDIDATES <- c(black = "#000000", `dark gray` = "#4D4D4D", gray = "#8C8C8C")
+REF_LINE_MIN_DIST <- 60
+ref_line_col_for <- function(pal) {
+  pal <- as.character(unlist(pal)); pal <- pal[!is.na(pal) & nzchar(pal)]
+  rgb_of <- function(cols) tryCatch(grDevices::col2rgb(cols), error = function(e) NULL)
+  pm <- if (length(pal)) rgb_of(pal) else NULL
+  for (nm in names(REF_LINE_CANDIDATES)) {
+    cc <- REF_LINE_CANDIDATES[[nm]]
+    if (is.null(pm)) return(stats::setNames(cc, nm))
+    d <- sqrt(colSums((pm - as.vector(rgb_of(cc)))^2))
+    if (all(d >= REF_LINE_MIN_DIST)) return(stats::setNames(cc, nm))
+  }
+  # every candidate is close to a group color (three near-black, gray and
+  # mid-gray groups): the farthest candidate
+  far <- vapply(REF_LINE_CANDIDATES, function(cc) min(sqrt(colSums((pm - as.vector(rgb_of(cc)))^2))), numeric(1))
+  REF_LINE_CANDIDATES[which.max(far)]
+}
+gr_ref_line_col <- function() unname(.gr_opts$ref_line %||% REF_LINE_CANDIDATES[["black"]])
+gr_ref_line_name <- function() {
+  v <- .gr_opts$ref_line %||% REF_LINE_CANDIDATES["black"]
+  nm <- names(v)
+  if (is.null(nm) || !nzchar(nm[1])) "black" else nm[1]
+}
 
 gr_num <- function(v) as_numeric_safe(v)
 gr_logmar <- function(dec) { d <- gr_num(dec); d[!is.finite(d) | d <= 0] <- NA; -log10(d) }
@@ -234,8 +266,9 @@ GR_THIN_NOTE <- paste0("Value labels of some bars are not printed at this width 
 # Method lines a panel's legend carries whatever its text (journal style): the
 # reference lines of the two scatters, and the bin rules of the two histograms
 # (decisions D20, D27), so an eye on a bin edge can be placed from the legend.
+# (the scatter line's "{REF}" is the identity line's color, gr_ref_line_name)
 GR_PANEL_NOTES <- list(
-  scatter = paste0("Solid blue line, y = x (attempted equals achieved); green lines, ±0.50 D; ",
+  scatter = paste0("Solid {REF} line, y = x (attempted equals achieved); green lines, ±0.50 D; ",
                    "magenta lines, ±1.00 D; dotted line, the least-squares regression line of each group."),
   "10_CIhist" = paste0("Correction index bins are closed on the right: a bin labeled 0.16 to 0.30 holds ",
                        "0.15 < CI ≤ 0.30, so a ratio of 0.153 is in it."),
@@ -257,10 +290,12 @@ gr_panel_notes <- function(nm, texts = NULL) {
   pl <- if (nm %in% names(GR_PANEL_P) &&
             (is.null(texts) || any(grepl("\\bP ?[=<>]", as.character(unlist(texts)))))) GR_PANEL_P[[nm]]
         else character(0)
+  sc <- sub("{REF}", gr_ref_line_name(), GR_PANEL_NOTES$scatter, fixed = TRUE)
   if (key == "scatter" && nm == "09_CYLregress")
-    return(c(sub("attempted equals achieved", "SIA equals TIA", GR_PANEL_NOTES$scatter, fixed = TRUE),
+    return(c(sub("attempted equals achieved", "SIA equals TIA", sc, fixed = TRUE),
              GR_SCATTER_HDR[["09_CYLregress"]]))
-  c(GR_PANEL_NOTES[[key]] %||% character(0), GR_SCATTER_HDR[[nm]] %||% character(0), pl)
+  c(if (key == "scatter") sc else GR_PANEL_NOTES[[key]] %||% character(0),
+    GR_SCATTER_HDR[[nm]] %||% character(0), pl)
 }
 # What the statistics lines of the two scatters give, per group (finding
 # FIG2-07: the compact form's numbers were not named in the panel or legend)
@@ -2811,7 +2846,7 @@ scatter_ind <- function(d, pal, xlab, ylab, title, from_zero = FALSE,
     length(xx) >= 2 && length(unique(xx)) >= 2 }, logical(1))]
   d_fit <- d[d$Group %in% fit_grp, , drop = FALSE]
   p <- ggplot2::ggplot(d, ggplot2::aes(x, y, colour = Group)) +
-    ggplot2::geom_abline(slope = 1, intercept = 0, colour = IND_IDENT, linewidth = .55) +
+    ggplot2::geom_abline(slope = 1, intercept = 0, colour = gr_ref_line_col(), linewidth = .55) +
     ggplot2::geom_abline(slope = 1, intercept = c(-.5, .5), colour = IND_HALF, linewidth = .45) +
     ggplot2::geom_abline(slope = 1, intercept = c(-1, 1), colour = IND_ONE, linewidth = .45) +
     ggplot2::geom_point(alpha = .7, size = 1.5) +
@@ -3444,7 +3479,7 @@ g_stability <- function(df, visits, gl, glv, pal, pre_seq = NULL,
   # labels are drawn transparent, with margins for the leaders and the N rows.
   n_rows <- if (rein) 0 else k
   p <- ggplot2::ggplot(sm, ggplot2::aes(x = xpos, y = mean, colour = grp, group = grp)) +
-    ggplot2::geom_hline(yintercept = 0, colour = "grey55", linewidth = .4) +
+    ggplot2::geom_hline(yintercept = 0, colour = gr_ref_line_col(), linewidth = .4) +
     ggplot2::geom_vline(xintercept = xs, colour = "grey88", linewidth = .3,
                         linetype = if (rein) "dashed" else "solid") +
     ggplot2::geom_errorbar(ggplot2::aes(ymin = mean - sd, ymax = mean + sd, width = ew),
@@ -6591,6 +6626,8 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
   }, character(1))
   glv <- unname(lab_map)
   pal <- stats::setNames(unname(pal0), glv)
+  # the identity and zero lines: neutral, never a group color (ref_line_col_for)
+  .gr_opts$ref_line <- ref_line_col_for(pal)
   gl <- unname(lab_map[as.character(df$GroupLabel)])
   tg <- gr_file_tag(tag, out_dir, logger)
 
@@ -6736,7 +6773,14 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
     mw <- suppressWarnings(as.numeric(df$weights))
     if (any(is.finite(mw) & abs(mw - 1) > 1e-8)) {
       .gr_opts$weights <- mw
-      w_note <- "Matched cohort: P values use the matching weights; bars and means show the matched eyes unweighted."
+      # (and which weighting the matched tables use: setting
+      # matched_table_weights, analysis.R matched_table_weights_of)
+      w_note <- paste0("Matched cohort: P values use the matching weights; bars and means show the matched eyes ",
+                       "unweighted; the matched tables are ",
+                       if (exists("matched_table_weights_of", mode = "function") &&
+                           identical(matched_table_weights_of(cfg), "none"))
+                         "unweighted (every matched eye counts once)."
+                       else "weighted by the matching weights.")
       logger(sprintf("StandardEyes figures%s: matching weights are non-unit (%s to %s) - figure P values are weighted GEE Wald tests; bars, means and N show the matched eyes unweighted.",
                      run_lab, format(signif(min(mw, na.rm = TRUE), 3)),
                      format(signif(max(mw, na.rm = TRUE), 3))))

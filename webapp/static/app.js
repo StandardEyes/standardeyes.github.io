@@ -61,13 +61,17 @@ const PSM_METHODS = [["nearest","nearest neighbor"],["exact","exact"],
 // the matching unit (decision V12-1; config_schema PSM_UNITS): every eye, or
 // one unit per patient per group with both eyes kept together
 const PSM_UNITS = [["eye","eyes"],["patient","patients (both eyes together)"]];
+// how the matched tables treat the matching weights (config_schema
+// MATCHED_TABLE_WEIGHTS; R/analysis.R matched_table_weights_of)
+const MATCHED_TABLE_WEIGHTS = [["weights","weighted by the matching weights (default)"],
+                               ["none","unweighted: every matched eye counts once"]];
 // matching distances that are not propensity scores (config_schema
 // _NON_PS_DISTANCES): MatchIt takes no caliper in score SDs and no
 // largest / smallest match order with them, and subclass cannot use them
 const NON_PS_DISTANCES = ["mahalanobis","robust_mahalanobis","euclidean","scaled_euclidean"];
 // must equal APP_VERSION in server/app.py — mismatch means the running server
 // process is older than the page and needs a restart
-const UI_VERSION = "2026-11-11-se.11";
+const UI_VERSION = "2026-11-12-se.12";
 // an output folder whose full path is longer than this many characters gets a
 // warning in the pre-run summary (R/pipeline.R PL_LONG_OUTPUT_FOLDER, the run
 // log's warning): some figure files inside it may pass the Windows limit
@@ -238,6 +242,7 @@ function defaultState(){
       psm_replace:false, psm_caliper:0.2, psm_std_caliper:true, psm_m_order:"largest",
       psm_seed:20250601,       // fixed seed: random match order / ties give the same cohort every run
       psm_unit:"eye",          // "patient": both eyes of a patient matched together (V12-1)
+      matched_table_weights:"weights",   // "none": matched tables unweighted (every matched eye once)
       run_gee_stage:"matched", run_main_gee:true, run_adjusted_gee:false,
       gee_adjust_covariates_raw:[], use_matching_weights_in_gee:true,
       add_gee_columns:true, gee_source_for_tables:"main",
@@ -331,7 +336,7 @@ function builder(){
     dichoUnseen:{},       // column -> kept preset level that does not occur in a single-valued column (0 events)
     vaGuess:{},           // VA column -> notation guessed by /api/va-detect (null = undecided)
     vaWarn:[],            // /api/va-detect warnings for the declared notation (e.g. ETDRS declared, decimal recorded)
-    VA_FORMATS, PSM_METHODS, PSM_UNITS,
+    VA_FORMATS, PSM_METHODS, PSM_UNITS, MATCHED_TABLE_WEIGHTS,
     psmMethodNote:"",     // shown under the Method select when a config's method was replaced by nearest
     _stdNoSeed:false,     // true: the cylinder sets came from a config or the user removed one
     _logmarUser:false,    // true: the logMAR column list was chosen (edited, or kept from a config)
@@ -1610,7 +1615,7 @@ function builder(){
         psm_method:s.psm_method, psm_distance:s.psm_distance, psm_ratio:s.psm_ratio,
         psm_replace:s.psm_replace, psm_caliper:s.psm_caliper, psm_std_caliper:s.psm_std_caliper, psm_m_order:s.psm_m_order,
         psm_seed:(s.psm_seed===""||s.psm_seed===null||!isFinite(Number(s.psm_seed))) ? 20250601 : Math.trunc(Number(s.psm_seed)),
-        psm_unit:s.psm_unit,
+        psm_unit:s.psm_unit, matched_table_weights:s.matched_table_weights,
         run_gee_stage:s.run_gee_stage, run_main_gee:s.run_main_gee, run_adjusted_gee:s.run_adjusted_gee,
         gee_adjust_covariates_raw:s.gee_adjust_covariates_raw, use_matching_weights_in_gee:s.use_matching_weights_in_gee,
         add_gee_columns:s.add_gee_columns, gee_source_for_tables:s.gee_source_for_tables,
@@ -1678,7 +1683,8 @@ function builder(){
       const set=(k)=>{ if(c[k]===undefined) return; if(c[k]===null && !NULLABLE.has(k)) return; s[k]=c[k]; };
       ["guess_max","patient_id_raw","eye_id_raw","group_source_var",
        "age_var","fu_var","sex_var","do_matching","psm_covariates_raw","psm_method","psm_distance",
-       "psm_ratio","psm_replace","psm_caliper","psm_std_caliper","psm_m_order","psm_unit","run_gee_stage",
+       "psm_ratio","psm_replace","psm_caliper","psm_std_caliper","psm_m_order","psm_unit",
+       "matched_table_weights","run_gee_stage",
        "run_main_gee","run_adjusted_gee","gee_adjust_covariates_raw","use_matching_weights_in_gee",
        "add_gee_columns","gee_source_for_tables","gee_small_sample","table_tests","subset_col_raw",
        "do_standardize_minus_cyl",
@@ -1701,7 +1707,7 @@ function builder(){
                           ["figure_style","journal"],["p_style","ama"],
                           ["psm_distance","linear.logit"],["astig_region","polygon"],
                           ["astig_centroid_region","bootstrap"],["astig_test_method","robust"],
-                          ["psm_unit","eye"]]){
+                          ["psm_unit","eye"],["matched_table_weights","weights"]]){
         const v=String(s[k]??"").trim().toLowerCase(); s[k]= v || d; }
       // aliases the engine reads as the same setting
       if(s.astig_region==="depth") s.astig_region="polygon";
@@ -2128,7 +2134,8 @@ function builder(){
             ? "; caliper "+s.psm_caliper+(s.psm_std_caliper ? " SD of the "+(NON_PS_DISTANCES.includes(dist) ? "distance" : scale) : " (raw units)")
             : (this.psmUses('caliper') ? "; no caliper" : ""))
           + (s.psm_unit==="patient" ? (pid ? "; patients matched (both eyes kept together)"
-                                           : "; patients requested, but no patient ID column is mapped") : "")]);
+                                           : "; patients requested, but no patient ID column is mapped") : "")
+          + (s.do_matching && s.matched_table_weights==="none" ? "; matched tables unweighted (every matched eye counts once)" : "")]);
       out.push(["GEE inference", s.gee_small_sample==="none"
         ? "uncorrected robust SE, normal reference (v1.0.0)"
         : "Mancl-DeRouen robust SE, t reference (F for joint tests)"]);

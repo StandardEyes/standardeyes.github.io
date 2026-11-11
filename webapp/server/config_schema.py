@@ -59,6 +59,11 @@ DEFAULTS: dict[str, Any] = {
     # eyes kept together (eye-level covariates averaged, per-patient ones taken
     # once; every eye of a matched patient carries the patient's weight)
     "psm_unit": "eye",
+    # the matched summary tables (R/analysis.R matched_table_weights_of):
+    # "weights" = descriptives and table tests weighted by the matching weights
+    # (the 1.1.0 rule); "none" = every matched eye counts once. The matched
+    # GEE / regression follow use_matching_weights_in_gee
+    "matched_table_weights": "weights",
     "run_gee_stage": "matched",
     # small-sample inference of every GEE test and interval (decision D11):
     # "md" = Mancl-DeRouen bias-corrected robust SE with a t reference (F for
@@ -399,6 +404,8 @@ TABLE_TESTS = ("auto", "classical")
 # words, "eyes" / "patients" included)
 PSM_UNITS = ("eye", "patient")
 _PSM_UNIT_ALIASES = {"eyes": "eye", "patients": "patient"}
+# the matched tables' weighting (R/analysis.R MATCHED_TABLE_WEIGHTS)
+MATCHED_TABLE_WEIGHTS = ("weights", "none")
 
 
 def psm_unit(cfg: dict) -> str:
@@ -512,6 +519,8 @@ def normalize_cfg(cfg: dict, file_path: str, sheet: Any = None) -> dict:
     out["psm_distance"] = psm_distance(out)
     # a settings file of 1.1.0 has no matching unit: eyes (decision V12-1)
     out["psm_unit"] = psm_unit(out)
+    # a settings file of 1.1.0 has no matched-table weighting: weights
+    out["matched_table_weights"] = _choice(out, "matched_table_weights")
     # a settings file of v1.0.0 has neither key: the v1.1.0 defaults apply
     out["gee_small_sample"] = _choice(out, "gee_small_sample")
     out["table_tests"] = _choice(out, "table_tests")
@@ -763,6 +772,9 @@ def validate_cfg(cfg: dict, columns: list | None = None, data: Any = None) -> li
     if _choice(cfg, "table_tests") not in TABLE_TESTS:
         errs.append(f"Table tests '{cfg.get('table_tests')}' is not supported - use auto "
                     "(patient-clustered when a patient has two analyzed eyes) or classical.")
+    if _choice(cfg, "matched_table_weights") not in MATCHED_TABLE_WEIGHTS:
+        errs.append(f"Matched tables '{cfg.get('matched_table_weights')}' is not supported - use weights "
+                    "(weighted by the matching weights) or none (every matched eye counts once).")
 
     bad_fmts = [f for f in (cfg.get("graph_formats") or []) if f not in GRAPH_FORMATS]
     if bad_fmts:

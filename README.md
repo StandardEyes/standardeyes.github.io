@@ -62,6 +62,27 @@ before, and it matches eyes.
   pre-run summary (Run & Results tab) and the run log warn, before a run with figures, that some figure files may
   pass the 260-character limit Windows sets on a full path, and suggest a folder near the drive root. Nothing
   else changes.
+- **The mEYEstro and AstigMATIC tabs are laid out in the input format of those programs.** The mEYEstro tab
+  holds the 20 columns of mEYEstro's data file in its order (row 1 its headers, one row per eye from row 2):
+  refraction in minus cylinder, vertex distance 12 mm, acuity as the Snellen denominator (text), and the
+  postoperative SEQ at up to five stability visits in its last five columns (blank without stability visits),
+  so the block pastes into the data file as one range. The AstigMATIC tab holds its 5 input columns. A zero
+  cylinder gets the axis 180 in both (a blank axis made AstigMATIC drop the eye); an unknown cylinder stays
+  blank. AstigMATIC assumes a plano astigmatic target, so eyes with a non-plano astigmatic target are left out of
+  its tab, and the tab's note, the Contents sheet and the run log count them ("183 eyes kept, 39 left out:
+  non-plano astigmatic target"). The Contents sheet gives the cells to copy for each tab.
+- **NE when a variable does not vary within the groups.** A continuous or ordinal variable that is constant
+  within each compared group but differs between them (one optical zone per platform) leaves no variability to
+  test against: its table test, GEE and adjusted-regression comparisons, unmatched and matched, print NE in the
+  effect, CI and P cells instead of β = 0.00 (95% CI, 0.00 to 0.00) and P < .001, with the footnote "NE, not
+  estimable: no variation within groups"; the run log names the rows. Every other value is unchanged.
+- **The identity and zero lines are never a group color.** The y = x line of the two scatters and the zero line
+  of the stability graph are solid black (dark gray when a group is drawn close to black); the legends name it.
+- **Matched tables without the weights (option).** Matching tab, *Matched tables* = unweighted; settings-file
+  key `matched_table_weights: "none"` (the default `"weights"` keeps the 1.1.0 rule). Every matched eye then
+  counts once in the matched descriptives and table tests; the matched GEE and regression models still follow
+  *Use matching weights in matched GEE* (GEE tab). The note above each matched table, the Publication Table
+  footnote, the Manifest and the figure legends say which weighting the matched tables use.
 - **A review build for blinded peer review.** The release can also be built as `StandardEyes-review.zip`: the
   same program with the author names and every link to the website and repository withheld (the program name
   stays); every workbook's Manifest then records "review build".
@@ -170,7 +191,7 @@ See [`CITATION.cff`](CITATION.cff).
 
 StandardEyes follows the standardized-graph conventions of the JRS/JCRS editorial standards, the Alpins
 vector framework and the JCRS 2025 astigmatism standards, and is complementary to the single-cohort
-tools AstigMATIC and mEYEstro, whose worksheet formats it can write for cross-checking.
+tools AstigMATIC and mEYEstro, in whose input formats it can lay out worksheet tabs for cross-checking.
 
 ## License
 

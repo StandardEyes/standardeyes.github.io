@@ -153,6 +153,71 @@ decimal_to_snellen <- function(va, offchart = NULL) {
   else unique(as.character(stats::na.omit(df$GroupLabel)))
 }
 
+# The axis written in the mEYEstro and AstigMATIC tabs wherever the cylinder
+# is 0 (preoperative, postoperative and target): a numeric axis, because both
+# programs read a blank cell as missing data (AstigMATIC drops the row). The
+# axis of a zero cylinder enters no calculation. An unknown (blank) cylinder
+# keeps its axis cell as recorded.
+EXPORT_ZERO_CYL_AXIS <- 180
+export_zero_cyl_axis <- function(cyl, axis) {
+  cy <- as_numeric_safe(cyl)
+  zero <- is.finite(cy) & cy == 0
+  if (!any(zero)) return(axis)
+  ax <- if (is.numeric(axis)) as.numeric(axis) else as_numeric_safe(axis)
+  ax[zero] <- EXPORT_ZERO_CYL_AXIS
+  ax
+}
+
+# The columns of the mEYEstro data file, in its order (Gauvin & Wallerstein,
+# BMC Ophthalmol 2023;23:171, "Input data format": 20 columns, 15 of them
+# required, 16-20 the postoperative SEQ at up to five time points for the
+# stability graph), with the header text of the data file as the authors'
+# mEYEstro input workbooks carry it (their spelling kept). Columns 14 and 15
+# are the postoperative UDVA, then CDVA, as in those workbooks.
+MEYESTRO_COLUMNS <- c("Preop_MR_Sphere", "Preop_MR_Cylinder", "Preop_MR_Axis", "Preop_MR_Vertex_Distancce",
+                      "Preop_CDVA", "Intended_Postop_MR_Sphere", "Intended_Postop_MR_Cylinder",
+                      "Intended_Postop_MR_Axis", "Intended_Postop_MR_Vertex_Distance", "Postop_MR_Sphere",
+                      "Postop_MR_Cylinder", "Postop_MR_Axis", "Postop_MR_Vertex_Distancce", "Postop_UDVA",
+                      "Postop_CDVA", paste0("Postop_SEQ_Timepoint_", 1:5))
+MEYESTRO_TIMEPOINTS <- 5L
+
+# Per-sheet text for the Contents index (the eyes of an export tab and where
+# its block goes), keyed by the sheet name actually used.
+.sheet_notes <- new.env(parent = emptyenv())
+set_sheet_note <- function(sheet, txt) assign(sheet, txt, envir = .sheet_notes)
+sheet_note <- function(sheet) {
+  v <- .sheet_notes[[sheet]]
+  if (is.null(v)) "" else as.character(v)
+}
+
+# The postoperative SEQ of each eye at each of the first five stability
+# visits (columns 16-20 of the mEYEstro data file), by the rule of the
+# stability figure (graphs.R stability_long): the visit's SEQ column, else its
+# sphere + cylinder / 2, counted only where the visit's time is recorded.
+# Returns a matrix n x 5 (NA where an eye has no value, and for the time
+# points beyond the mapped visits) with attr "labels" (the visits used) and
+# attr "n_more" (the visits beyond the fifth, not written).
+meyestro_stability_seq <- function(dfg, visits) {
+  n <- nrow(dfg)
+  out <- matrix(NA_real_, n, MEYESTRO_TIMEPOINTS)
+  visits <- visits %||% list()
+  use <- utils::head(visits, MEYESTRO_TIMEPOINTS)
+  has <- function(cc) length(cc) == 1 && !is.na(cc) && cc %in% names(dfg)
+  labs <- character(0)
+  for (i in seq_along(use)) {
+    v <- use[[i]]
+    s <- if (has(v$seq)) as_numeric_safe(dfg[[v$seq]])
+         else if (has(v$sph) && has(v$cyl)) as_numeric_safe(dfg[[v$sph]]) + as_numeric_safe(dfg[[v$cyl]]) / 2
+         else rep(NA_real_, n)
+    tt <- if (has(v$time)) as_numeric_safe(dfg[[v$time]]) else rep(NA_real_, n)
+    out[, i] <- ifelse(is.finite(s) & is.finite(tt), s, NA_real_)
+    labs <- c(labs, as.character(v$label %||% "")[1])
+  }
+  attr(out, "labels") <- labs
+  attr(out, "n_more") <- max(0L, length(visits) - MEYESTRO_TIMEPOINTS)
+  out
+}
+
 # Intended postoperative refraction per eye for the mEYEstro tab: SEQ from the
 # target_seq role (absent = plano), cylinder and axis from the astigmatism
 # target (absent = none). Sphere = SEQ - cyl / 2, written in minus-cylinder
@@ -188,8 +253,10 @@ meyestro_intended <- function(dfg, seq_col, target = list(), logger = NULL, what
                              tab, sum(noaxis)))
   s[!is.finite(s)] <- 0
   cy[!is.finite(cy)] <- 0
-  # no intended cylinder: the axis is meaningless and written as 0 (R4-9)
-  ax[cy == 0] <- 0
+  # no intended cylinder: the axis does not enter any calculation; it is
+  # written as 180, as every axis cell of a zero cylinder in these tabs (a
+  # blank cell would read as missing data)
+  ax[cy == 0] <- EXPORT_ZERO_CYL_AXIS
   sp <- s - cy / 2
   pos <- is.finite(cy) & cy > 0
   sp[pos] <- sp[pos] + cy[pos]
@@ -226,24 +293,32 @@ export_group_tab <- function(wb, fmt, g, pairing = NULL, pairing_no = NULL) {
   sh
 }
 
-# One mEYEstro-format tab per group. pairing = NULL for the full cohort, else
-# the matched pairing label (pairing_no: its number in the run): the format and
-# the matched marker lead the sheet name ("mEYEstro_<group>",
+# One mEYEstro-format tab per group, laid out in the input format of mEYEstro:
+# the 20 columns of its data file in their order (MEYESTRO_COLUMNS), row 1 the
+# headers, one row per eye from row 2, so the block A2:T<n + 1> pastes into the
+# data file as one range (or the sheet is saved as a workbook of its own; the
+# Contents sheet gives each tab's range). pairing = NULL for the full cohort,
+# else the matched pairing label (pairing_no: its number in the run): the
+# format and the matched marker lead the sheet name ("mEYEstro_<group>",
 # "mEYEstro_M<k>_<group>", export_group_tab) so they survive Excel's
-# 31-character truncation. Columns A-D (group, decimal acuities) are
-# for reference; E-S are the 15 columns of the mEYEstro template in its
-# order; T (postop SEQ) is for reference. Missing roles leave a blank column
-# (logged); with fewer than 6 of the 10 roles the tabs are skipped (logged).
-# Acuities are written as the canonical decimal values (no floor); a cell
-# recorded as CF / HM / LP / NLP shows that label in its Snellen column.
-# Refractions are written in minus-cylinder notation, as the template
-# requires, whatever the analysis data carry: a plus-cylinder row is
-# transposed in the tab only (the SEQ is unchanged by the transposition).
+# 31-character truncation. The data file's units and notation: refraction in
+# diopters and minus cylinder (a plus-cylinder row is transposed in the tab
+# only; the SEQ is unchanged by the transposition); axis in degrees, 180
+# wherever the cylinder is 0 - preoperative, intended and postoperative - and
+# as recorded where the cylinder is blank; vertex distance 12 mm; acuity as
+# the Snellen denominator (20/20 written 20, letters 20-1 / 20+2) in cells
+# formatted as text, from the canonical decimal value (no floor), a cell
+# recorded as CF / HM / LP / NLP showing that label; the intended refraction
+# from the target columns (meyestro_intended); columns 16-20 (P-T) the
+# postoperative SEQ at the first five stability visits (visits: the
+# pipeline's res$stability_visits; meyestro_stability_seq), blank when the
+# analysis has none. Missing roles leave a blank column (logged); with fewer
+# than 6 of the 9 roles the tabs are skipped (logged).
 make_meyestro_tabs <- function(df, wb, roles, pairing = NULL, target = list(), logger = message,
-                               display_names = NULL, pairing_no = NULL) {
+                               display_names = NULL, pairing_no = NULL, visits = list()) {
   r <- function(nm) .role_col(roles, nm)
-  need_roles <- c("pre_bcva","post_ucva","post_bcva",
-                  "pre_sph","pre_cyl","pre_axis","post_sph","post_cyl","post_axis","post_seq")
+  need_roles <- c("pre_sph","pre_cyl","pre_axis","pre_bcva",
+                  "post_sph","post_cyl","post_axis","post_ucva","post_bcva")
   cols <- vapply(need_roles, r, character(1))
   found <- !is.na(cols) & cols %in% names(df)
   miss <- need_roles[!found]
@@ -258,25 +333,31 @@ make_meyestro_tabs <- function(df, wb, roles, pairing = NULL, target = list(), l
                             paste(miss, collapse = ", "), " - mEYEstro needs every column filled."))
   if (is.null(get_snellen_table()))
     log_once(logger, paste0("Snellen lookup table (engine/data/snellen_lookup.csv) not found - ",
-                            "the Snellen columns of the mEYEstro tabs are left blank."))
+                            "the acuity columns of the mEYEstro tabs are left blank."))
   log_once(logger, paste0("mEYEstro tabs: intended refraction - ",
                           meyestro_intended_source(roles, target, display_names), "."))
+  visits <- visits %||% list()
+  if (length(visits)) {
+    vl <- vapply(utils::head(visits, MEYESTRO_TIMEPOINTS), function(v) as.character(v$label %||% "")[1], character(1))
+    vl[is.na(vl) | !nzchar(vl)] <- "(no label)"
+    log_once(logger, paste0("mEYEstro tabs: columns P-T (Postop_SEQ_Timepoint_1 to 5) hold the SEQ at the stability ",
+                            "visit(s) ", paste0("'", vl, "'", collapse = ", "),
+                            if (length(visits) > MEYESTRO_TIMEPOINTS)
+                              paste0("; the data file has 5 time points, so the other ",
+                                     length(visits) - MEYESTRO_TIMEPOINTS, " visit(s) are not written")
+                            else "", "."))
+  } else
+    log_once(logger, paste0("mEYEstro tabs: no stability visits are mapped - columns P-T (Postop_SEQ_Timepoint_1 ",
+                            "to 5) are left blank."))
 
-  gray   <- openxlsx::createStyle(fgFill = "#D3D3D3", halign = "center", textDecoration = "bold")
-  yellow <- openxlsx::createStyle(fgFill = "#FFFF99", halign = "center", textDecoration = "bold")
-  green  <- openxlsx::createStyle(fgFill = "#CCFFCC", halign = "center", textDecoration = "bold")
-  red    <- openxlsx::createStyle(fgFill = "#FF9999", halign = "center", textDecoration = "bold")
-  blue   <- openxlsx::createStyle(fgFill = "#99CCFF", halign = "center", textDecoration = "bold")
+  head_st <- function(fill) openxlsx::createStyle(fgFill = fill, halign = "center", textDecoration = "bold")
+  txt_st <- openxlsx::createStyle(numFmt = "@")
 
   for (g in .group_levels(df)) {
     dfg <- df[!is.na(df$GroupLabel) & as.character(df$GroupLabel) == g, , drop = FALSE]
     tab_what <- paste0(g, if (is.null(pairing)) "" else paste0(" (", pairing, ")"))
     n <- nrow(dfg)
     it <- meyestro_intended(dfg, r("target_seq"), target, logger = logger, what = tab_what)
-    filled <- data.frame(
-      Preop_MR_Vertex_Distance = rep(12, n), Intended_Postop_MR_Sphere = it$sph,
-      Intended_Postop_MR_Cylinder = it$cyl, Intended_Postop_MR_Axis = it$axis,
-      Intended_Postop_MR_Vertex_Distance = rep(12, n), Postop_MR_Vertex_Distance = rep(12, n))
 
     pick <- function(role) {
       cc <- r(role)
@@ -304,46 +385,36 @@ make_meyestro_tabs <- function(df, wb, roles, pairing = NULL, target = list(), l
         return(parse_va(dfg[[cc]], "decimal")$offchart)
       rep(NA_character_, n)
     }
-
-    # Snellen columns computed from the embedded table (no external workbook)
+    # the Snellen denominator from the embedded table (no external workbook);
+    # no value = a blank cell, as the data file leaves a missing acuity
     snel <- function(role) {
       x <- decimal_to_snellen(pick_va(role), offchart = pick_off(role))
       k <- attr(x, "n_out_of_range")
       if (isTRUE(k > 0))
         logger(sprintf("mEYEstro tab '%s': %d %s acuity value(s) outside logMAR -0.5 to 3.0 have no Snellen line - the Snellen cell is left blank.",
                        tab_what, k, role))
-      as.vector(x)
+      x <- as.vector(x)
+      x[!is.na(x) & !nzchar(x)] <- NA_character_
+      x
     }
-    formulas <- data.frame(
-      Preop_CDVA  = snel("pre_bcva"),
-      Postop_UDVA = snel("post_ucva"),
-      Postop_CDVA = snel("post_bcva"),
-      stringsAsFactors = FALSE)
-    # template order (block E-S): 1-3 preop sphere/cylinder/axis, 4 vertex,
-    # 5 preop CDVA, 6-9 intended sphere/cylinder/axis/vertex, 10-13 postop
-    # sphere/cylinder/axis/vertex, 14 postop CDVA, 15 postop UDVA
-    out <- data.frame(
-      GroupLabel = rep(as.character(g), n),
-      Pre_BCVA = pick_va("pre_bcva"), Post_UCVA = pick_va("post_ucva"), Post_BCVA = pick_va("post_bcva"),
-      Pre_Sph = pick("pre_sph"), Pre_Cyl = pick("pre_cyl"), Pre_Axis = pick("pre_axis"),
-      filled[, "Preop_MR_Vertex_Distance", drop = FALSE],
-      formulas[, "Preop_CDVA", drop = FALSE],
-      filled[, c("Intended_Postop_MR_Sphere","Intended_Postop_MR_Cylinder",
-                 "Intended_Postop_MR_Axis","Intended_Postop_MR_Vertex_Distance"), drop = FALSE],
-      Post_Sph = pick("post_sph"), Post_Cyl = pick("post_cyl"), Post_Axis = pick("post_axis"),
-      filled[, "Postop_MR_Vertex_Distance", drop = FALSE],
-      formulas[, c("Postop_CDVA","Postop_UDVA"), drop = FALSE],
-      Post_SEQ = pick("post_seq"),
-      check.names = FALSE, stringsAsFactors = FALSE)
+    sq <- meyestro_stability_seq(dfg, visits)
+    # the data file's 20 columns, in its order (MEYESTRO_COLUMNS)
+    out <- data.frame(pick("pre_sph"), pick("pre_cyl"), pick("pre_axis"), rep(12, n), snel("pre_bcva"),
+                      it$sph, it$cyl, it$axis, rep(12, n),
+                      pick("post_sph"), pick("post_cyl"), pick("post_axis"), rep(12, n),
+                      snel("post_ucva"), snel("post_bcva"),
+                      sq[, 1], sq[, 2], sq[, 3], sq[, 4], sq[, 5],
+                      check.names = FALSE, stringsAsFactors = FALSE)
+    names(out) <- MEYESTRO_COLUMNS
 
-    # minus-cylinder notation for the template (export copy only). "plano" /
+    # minus-cylinder notation for the data file (export copy only). "plano" /
     # "pl" in a sphere or cylinder cell is 0; any other text cell cannot be
-    # written as a number and is logged with the tab it belongs to.
+    # written as a number and is logged with the tab it belongs to. A zero
+    # cylinder then gets the axis 180 (EXPORT_ZERO_CYL_AXIS).
     n_plus <- 0L
     tab_log <- function(m) logger(paste0("mEYEstro tab '", tab_what, "': ", m))
-    for (s in c("Pre", "Post")) {
-      sc <- paste0(s, c("_Sph", "_Cyl", "_Axis"))
-      for (k in sc[1:2]) {
+    for (s in list(MEYESTRO_COLUMNS[1:3], MEYESTRO_COLUMNS[10:12])) {
+      for (k in s[1:2]) {
         v <- out[[k]]
         if (is.character(v) || is.factor(v)) {
           v <- as.character(v)
@@ -351,30 +422,43 @@ make_meyestro_tabs <- function(df, wb, roles, pairing = NULL, target = list(), l
           out[[k]] <- v
         }
       }
-      cy <- as_numeric_safe(out[[sc[2]]])
+      cy <- as_numeric_safe(out[[s[2]]])
       n_plus <- n_plus + sum(is.finite(cy) & cy > 0)
-      out <- standardize_minus_cyl(out, sc[1], sc[2], sc[3], logger = tab_log, report = FALSE)
+      out <- standardize_minus_cyl(out, s[1], s[2], s[3], logger = tab_log, report = FALSE)
+      out[[s[3]]] <- export_zero_cyl_axis(out[[s[2]]], out[[s[3]]])
     }
     if (n_plus > 0)
-      logger(sprintf("mEYEstro tab '%s': %d plus-cylinder refraction(s) written in minus-cylinder notation, as the template requires.",
+      logger(sprintf("mEYEstro tab '%s': %d plus-cylinder refraction(s) written in minus-cylinder notation, as the data file requires.",
                      tab_what, n_plus))
 
     sh <- export_group_tab(wb, "mEYEstro", g, pairing, pairing_no)
     openxlsx::writeData(wb, sh, out)
-    nc <- ncol(out)
-    if (nc >= 1)  openxlsx::addStyle(wb, sh, gray,   1, 1:min(4, nc),   gridExpand = TRUE)
-    if (nc >= 5)  openxlsx::addStyle(wb, sh, yellow, 1, 5:min(9, nc),   gridExpand = TRUE)
-    if (nc >= 10) openxlsx::addStyle(wb, sh, green,  1, 10:min(13, nc), gridExpand = TRUE)
-    if (nc >= 14) openxlsx::addStyle(wb, sh, red,    1, 14:min(19, nc), gridExpand = TRUE)
-    if (nc >= 20) openxlsx::addStyle(wb, sh, blue,   1, 20:min(20, nc), gridExpand = TRUE)
+    # the acuity columns as text (E, N, O), as the data file asks, so Excel
+    # never reads a denominator such as 25-2 as a date
+    va_j <- match(c("Preop_CDVA", "Postop_UDVA", "Postop_CDVA"), MEYESTRO_COLUMNS)
+    openxlsx::addStyle(wb, sh, txt_st, rows = seq_len(n + 1), cols = va_j, gridExpand = TRUE, stack = TRUE)
+    # header bands: preoperative A-E, intended F-I, postoperative J-O,
+    # stability P-T
+    openxlsx::addStyle(wb, sh, head_st("#FFFF99"), 1, 1:5,   gridExpand = TRUE, stack = TRUE)
+    openxlsx::addStyle(wb, sh, head_st("#CCFFCC"), 1, 6:9,   gridExpand = TRUE, stack = TRUE)
+    openxlsx::addStyle(wb, sh, head_st("#FF9999"), 1, 10:15, gridExpand = TRUE, stack = TRUE)
+    openxlsx::addStyle(wb, sh, head_st("#99CCFF"), 1, 16:20, gridExpand = TRUE, stack = TRUE)
+    openxlsx::setColWidths(wb, sh, cols = seq_along(MEYESTRO_COLUMNS), widths = "auto")
+    set_sheet_note(sh, sprintf("%d %s in rows 2-%d: copy A2:T%d into cell A2 of the mEYEstro data file.",
+                               n, if (n == 1) "eye" else "eyes", n + 1, n + 1))
   }
 }
 
-# AstigMATIC reads a positional five-column sheet: eye (OD/OS), preoperative
+# AstigMATIC reads a positional five-column sheet (Gauvin & Wallerstein, BMC
+# Ophthalmol 2018;18:255, "Input data format"): eye (OD/OS), preoperative
 # cylinder, preoperative axis, postoperative cylinder, postoperative axis
 # (negative cylinder accepted; the tab is written in minus-cylinder notation,
-# a plus-cylinder row transposed in the tab only). The group is in the sheet
-# name, so columns A-E load as they are. Eye codes R/RE/Right and L/LE/Left become OD/OS; the
+# a plus-cylinder row transposed in the tab only); it drops a row with missing
+# data, so a zero cylinder gets the axis 180, and it has no target input (a
+# plano target is assumed), so eyes with a non-plano astigmatic target are
+# left out of the tab and counted in its note (row 1), the Contents sheet and
+# the run log. The group is in the sheet name; the input columns A-E start at
+# row 3. Eye codes R/RE/Right and L/LE/Left become OD/OS; the
 # numeric codes 1 / 2 too, unless numeric_ok = FALSE (the column also holds
 # a 0, i.e. a 0/1 coding whose meaning cannot be told): then every numeric
 # code is left blank.
@@ -394,7 +478,7 @@ eye_codes_ambiguous <- function(x) {
 }
 
 make_alpins_tabs <- function(df, wb, roles, pairing = NULL, logger = message, display_names = NULL,
-                             pairing_no = NULL) {
+                             pairing_no = NULL, target = list()) {
   r <- function(nm) .role_col(roles, nm)
   need_roles <- c("eye","pre_cyl","pre_axis","post_cyl","post_axis")
   cols <- vapply(need_roles, r, character(1))
@@ -419,9 +503,27 @@ make_alpins_tabs <- function(df, wb, roles, pairing = NULL, logger = message, di
                             "numeric eye codes are ambiguous (0/1?), so they are left blank in the Eye column; ",
                             "map them to OD/OS (or R/L) in the data."))
   }
+  # AstigMATIC has no target input: it takes every target as plano (its TIA is
+  # the preoperative astigmatism). An eye whose astigmatism target (the
+  # pipeline's res$astig_target cylinder column) is a cylinder other than 0
+  # is therefore left out of the tab, and counted; a blank or zero target
+  # cylinder is plano, as the astigmatism vectors read it
+  tcyl <- if (length(target) == 2 && length(target$cyl) == 1 && !is.na(target$cyl) &&
+              target$cyl %in% names(df)) target$cyl else NA_character_
+  note_st <- openxlsx::createStyle(textDecoration = "bold", fontColour = "#C00000")
   for (g in .group_levels(df)) {
     dfg <- df[!is.na(df$GroupLabel) & as.character(df$GroupLabel) == g, , drop = FALSE]
+    tab_what <- paste0(g, if (is.null(pairing)) "" else paste0(" (", pairing, ")"))
+    tc <- if (!is.na(tcyl)) as_numeric_safe(dfg[[tcyl]]) else rep(NA_real_, nrow(dfg))
+    out_t <- is.finite(tc) & tc != 0
+    n_out <- sum(out_t)
+    dfg <- dfg[!out_t, , drop = FALSE]
     n <- nrow(dfg)
+    kept_txt <- sprintf("%d %s kept, %d left out: non-plano astigmatic target", n, if (n == 1) "eye" else "eyes", n_out)
+    logger(sprintf("AstigMATIC tab '%s': %s%s.", tab_what, kept_txt,
+                   if (is.na(tcyl)) " (no astigmatism target mapped: every target taken as plano)"
+                   else paste0(" (a cylinder other than 0 in '", disp_name(tcyl, display_names),
+                               "'; AstigMATIC assumes a plano astigmatic target)")))
     pick <- function(role) {
       cc <- r(role)
       if (is.na(cc)) return(rep(NA, n))
@@ -439,7 +541,9 @@ make_alpins_tabs <- function(df, wb, roles, pairing = NULL, logger = message, di
     # minus-cylinder notation, as the tab has always been read (export copy
     # only): a plus cylinder is transposed (axis + 90), whatever the analysis
     # data carry - with the minus-cylinder switch off, or a row typed in plus
-    # form, the tab is still fed the same astigmatism (decision D1)
+    # form, the tab is still fed the same astigmatism (decision D1). A zero
+    # cylinder gets the axis 180 (EXPORT_ZERO_CYL_AXIS): AstigMATIC drops a
+    # row with a blank cell
     minus_of <- function(cyl_role, ax_role) {
       cy <- pick(cyl_role); ax <- pick(ax_role)
       if (is.character(cy) || is.factor(cy)) {
@@ -451,7 +555,8 @@ make_alpins_tabs <- function(df, wb, roles, pairing = NULL, logger = message, di
       if (all(is.na(cy))) return(list(cyl = cy, axis = ax, n_plus = 0L))
       cyn[pos] <- -cyn[pos]
       axn[pos & is.finite(axn)] <- wrap_axis_0_180(axn[pos & is.finite(axn)] + 90)
-      list(cyl = cyn, axis = if (all(is.na(ax))) ax else axn, n_plus = sum(pos))
+      axo <- if (all(is.na(ax))) ax else axn
+      list(cyl = cyn, axis = export_zero_cyl_axis(cyn, axo), n_plus = sum(pos))
     }
     pre <- minus_of("pre_cyl", "pre_axis"); post <- minus_of("post_cyl", "post_axis")
     if (pre$n_plus + post$n_plus > 0)
@@ -465,7 +570,16 @@ make_alpins_tabs <- function(df, wb, roles, pairing = NULL, logger = message, di
       `postoperative axis` = post$axis,
       check.names = FALSE, stringsAsFactors = FALSE)
     sh <- export_group_tab(wb, "AstigMATIC", g, pairing, pairing_no)
-    openxlsx::writeDataTable(wb, sh, out)
+    # the sheet note (row 1), then AstigMATIC's input columns only, from row 3
+    openxlsx::writeData(wb, sh, paste0("NOTE: ", kept_txt, ". AstigMATIC has no target input and assumes a plano ",
+                                       "astigmatic target. Rows 3-", n + 3, " are laid out in its input format: eye ",
+                                       "(OD/OS), preoperative cylinder and axis, postoperative cylinder and axis; minus ",
+                                       "cylinder; axis 180 where the cylinder is 0."), startRow = 1, startCol = 1)
+    openxlsx::addStyle(wb, sh, note_st, rows = 1, cols = 1)
+    if (n > 0) openxlsx::writeDataTable(wb, sh, out, startRow = 3)
+    else openxlsx::writeData(wb, sh, out, startRow = 3)
+    set_sheet_note(sh, paste0(kept_txt, ". Copy A3:E", n + 3, " (the header row and one row per eye) to cell A1 of ",
+                              "a new workbook and load that file in AstigMATIC."))
   }
 }
 
@@ -946,6 +1060,10 @@ gee_sheet_frame <- function(d, ref = NULL) {
   if ("p.value" %in% names(d)) {
     pn <- suppressWarnings(as.numeric(d$p.value))
     pf <- fmt_p(pn); pf[is.na(pf)] <- ""
+    # no variation within groups (analysis.R run_gee_models): NE, as the
+    # effect (95% CI) cell of the row
+    if ("Model" %in% names(d))
+      pf[!is.na(d$Model) & grepl(paste0("not estimable - ", NE_WITHIN_REASON), d$Model, fixed = TRUE)] <- NE_TEXT
     at <- if ("CI" %in% names(d)) match("CI", names(d)) else ncol(d)
     d <- data.frame(d[seq_len(at)], .p_fmt = pf, d[setdiff(seq_len(ncol(d)), seq_len(at))],
                     check.names = FALSE, stringsAsFactors = FALSE)
@@ -980,8 +1098,13 @@ gee_skip_note <- function(g, corstr = NULL) {
   if (is.null(g) || nrow(g) == 0) return("NOTE: no GEE models were fitted.")
   if (!("Model" %in% names(g))) return(if (length(wtxt)) paste("NOTE:", wtxt) else NULL)
   by_design <- !is.na(g$Model) & grepl("outcome not modeled in GEE", g$Model, fixed = TRUE)
-  hit <- !is.na(g$Model) & grepl("Skipped|failed", g$Model) & !by_design
+  # no variation within groups: NE, said in a sentence of its own
+  ne_w <- !is.na(g$Model) & grepl(paste0("not estimable - ", NE_WITHIN_REASON), g$Model, fixed = TRUE)
+  hit <- !is.na(g$Model) & grepl("Skipped|failed", g$Model) & !by_design & !ne_w
   bad <- if ("Outcome" %in% names(g)) length(unique(g$Outcome[hit])) else sum(hit)
+  n_ne <- if ("Outcome" %in% names(g)) length(unique(g$Outcome[ne_w])) else sum(ne_w)
+  ne_txt <- if (n_ne > 0) paste0(n_ne, " outcome(s) have no variation within groups: not estimable, NE in the ",
+                                 "effect, CI and P cells (", NE_WITHIN_FOOT, ").") else NULL
   cau <- if ("Note" %in% names(g)) as.character(g$Note) else character(0)
   cau <- cau[!is.na(cau) & startsWith(cau, "Caution")]
   few <- length(cau) > 0
@@ -1009,7 +1132,7 @@ gee_skip_note <- function(g, corstr = NULL) {
                                  "exchangeable fit was not accepted (working correlation 0.95 or more, no ",
                                  "convergence, or an unstable scoring step - the 'Model' column gives the reason of ",
                                  "each); the robust SE stay clustered by patient."))
-  if (bad == 0 && !few && !length(wtxt) && !length(r34)) return(NULL)
+  if (bad == 0 && !few && !length(wtxt) && !length(r34) && !length(ne_txt)) return(NULL)
   # without a patient ID each eye is its own cluster and the cautions count eyes
   unit <- if (few && all(grepl("with few eyes$", cau))) "eyes" else "patients"
   paste0("NOTE: ", paste(c(
@@ -1017,7 +1140,8 @@ gee_skip_note <- function(g, corstr = NULL) {
     if (bad > 0) paste0(bad, " outcome(s) could not be modeled by GEE (too few eyes or patients, ",
                         "a group or outcome without usable data, too few events, or model failure) - ",
                         "see the 'Model' column for the reason."),
-    if (few) paste0(if (bad > 0 || length(wtxt) || length(r34)) "Comparisons" else "comparisons", " with a group of fewer than ",
+    ne_txt,
+    if (few) paste0(if (bad > 0 || length(wtxt) || length(r34) || length(ne_txt)) "Comparisons" else "comparisons", " with a group of fewer than ",
                     get0("GEE_FEW_PATIENTS", ifnotfound = 10L), " ", unit,
                     " carry a caution - see the 'Note' column.")), collapse = " "))
 }
@@ -1186,16 +1310,20 @@ pub_values_note <- function(out, va_decimal = character(0)) {
   if (length(out_txt)) c("Values:", paste0("- ", out_txt)) else character(0)
 }
 
+# weights_note: an optional footnote line of a matched table that does not use
+# the matching weights (matched_table_weights = "none"). No variation within
+# groups (helpers.R NE_WITHIN_FOOT): a footnote line of its own, first.
 # tests_note: an optional footnote line under "Tests behind the P values",
 # printed when the table has a classical (eye-level) test - the statement that
 # the classical table tests can differ from the figures' clustered P values
 # (table_tests = "classical", finding S3). va_decimal: the acuity columns
 # analyzed as decimal acuity, by their headers (pub_values_note).
 make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_note = NULL,
-                                   va_decimal = character(0)) {
+                                   va_decimal = character(0), weights_note = NULL) {
   drop_cols <- c("Test", "Practical Interpretation")
   secs <- list()
   ne_why <- character(0); ne_row <- character(0)
+  nw_row <- character(0)
   t_lab <- character(0); t_row <- character(0)
   c_txt <- character(0); c_row <- character(0)
   for (nm in names(sections)) {
@@ -1211,6 +1339,15 @@ make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_
       as.character(d[["Practical Interpretation"]]) else rep(NA_character_, nrow(d))
     ne <- grepl("^Not estimable", interp)
     ne[is.na(ne)] <- FALSE
+    # no variation within groups (create_summary_table; the GEE and regression
+    # columns, analysis.R): NE in the effect, CI and P cells, with a footnote
+    # of its own (NE_WITHIN_FOOT) naming the rows
+    nw <- !is.na(interp) & startsWith(interp, paste0("Not estimable - ", NE_WITHIN_REASON))
+    for (cc in intersect(c("GEE effect (95% CI)", "Adjusted effect (95% CI)"), names(d)))
+      nw <- nw | (as.character(d[[cc]]) %in% NE_TEXT)
+    if (any(nw))
+      nw_row <- c(nw_row, if (!is.null(rv)) rv[nw] else if ("Parameter" %in% names(d)) d$Parameter[nw]
+                          else rep(nm, sum(nw)))
     # the few-patients caution of a row's P value or GEE column (D19, finding
     # S2-3): the Interpretation column is not in this sheet, so a footnote
     # names it with the rows it applies to
@@ -1285,10 +1422,13 @@ make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_
     openxlsx::addStyle(wb, sn, sec_st, rows = top + i, cols = seq_len(ncol(out)), gridExpand = TRUE)
   .wrap_multiline_cells(wb, sn, out, header_row = top)
   foot <- character(0)
+  if (length(nw_row))
+    foot <- paste0(NE_WITHIN_FOOT, " (", paste(unique(nw_row), collapse = "; "), ").")
   if (length(ne_why)) {
+    if (length(foot)) foot <- c(foot, "")
     # one line per distinct reason, in order of first appearance
     reasons <- unique(ne_why)
-    foot <- c("NE = not estimable (no P value):",
+    foot <- c(foot, "NE = not estimable (no P value):",
               vapply(reasons, function(w) {
                 rr <- unique(ne_row[ne_why == w])
                 paste0("- ", w, ": ", paste(rr, collapse = "; "), ".")
@@ -1298,6 +1438,8 @@ make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_
   # kinds of cell the table actually has
   vals <- pub_values_note(out, va_decimal)
   if (length(vals)) foot <- c(foot, if (length(foot)) "", vals)
+  # an unweighted matched table (matched_table_weights = none) says so
+  if (length(weights_note) && nzchar(weights_note[1])) foot <- c(foot, if (length(foot)) "", weights_note[1])
   if (length(t_lab)) {
     # one line per test, in order of first appearance (decision D12)
     foot <- c(foot, if (length(foot)) "", "Tests behind the P values:",
@@ -1680,6 +1822,8 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
                                     loveplot_dir = tempdir(), run = NULL) {
   # the workbook's author is the app, never the Windows user name (D25)
   wb <- openxlsx::createWorkbook(creator = WORKBOOK_CREATOR)
+  # the Contents text of the export tabs belongs to this workbook only
+  rm(list = ls(.sheet_notes, all.names = TRUE), envir = .sheet_notes)
   glevels <- levels(dat$GroupLabel)
   # clean key -> the header as typed in the file (pipeline.R, contract R4-3):
   # every label the user reads names the column by its header
@@ -1850,10 +1994,12 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
   if (isTRUE(cfg$make_meyestro))
     optional_tab("mEYEstro tabs", make_meyestro_tabs(dat, wb, res$roles, pairing = NULL,
                                                      target = res$astig_target %||% list(),
-                                                     logger = logger, display_names = dmap))
+                                                     logger = logger, display_names = dmap,
+                                                     visits = res$stability_visits %||% list()))
   if (isTRUE(cfg$make_alpins))
     optional_tab("AstigMATIC tabs", make_alpins_tabs(dat, wb, res$roles, pairing = NULL, logger = logger,
-                                                     display_names = dmap))
+                                                     display_names = dmap,
+                                                     target = res$astig_target %||% list()))
   # astigmatism per the JCRS 2025 standard (D8): its sheet, the per-eye
   # vectors and - after the matched pairings - a CSV copy of the tables
   astig_tables <- list()
@@ -2124,9 +2270,25 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
                        (isTRUE(cfg$run_main_gee) || isTRUE(cfg$run_adjusted_gee))) ||
                     (isTRUE(cfg$do_regression %||% FALSE) &&
                        (cfg$regression_stage %||% "unmatched") %in% c("matched", "both"))
-      w_note <- if (w_nonunit) paste0(
-        "NOTE: the matched cohort carries non-unit matching weights (",
-        format(signif(min(w_md, na.rm = TRUE), 3)), "-", format(signif(max(w_md, na.rm = TRUE), 3)),
+      # matched_table_weights = "none" (analysis.R matched_table_weights_of):
+      # the descriptives and table tests count every matched eye once; the
+      # GEE / regression columns still follow use_matching_weights_in_gee
+      tbl_unw <- identical(matched_table_weights_of(cfg), "none")
+      w_rng <- if (w_nonunit) paste0(format(signif(min(w_md, na.rm = TRUE), 3)), "-",
+                                     format(signif(max(w_md, na.rm = TRUE), 3))) else ""
+      w_note <- if (w_nonunit && tbl_unw) paste0(
+        "NOTE: the matched cohort carries non-unit matching weights (", w_rng, "). Descriptives and the table ",
+        "tests are UNWEIGHTED (matched_table_weights = none): every matched eye counts once; n = matched rows. ",
+        if (w_gee_cols) {
+          if (isTRUE(cfg$use_matching_weights_in_gee))
+            "The GEE / adjusted-regression columns are WEIGHTED (matching weights used in matched GEE), so their P values can differ from the unweighted test. "
+          else "The GEE / adjusted-regression columns are unweighted too (matching weights not used in matched GEE). "
+        },
+        "Within-group sections and the ",
+        "mEYEstro / AstigMATIC tabs list the matched rows unweighted. ",
+        matched_analysis_note())
+        else if (w_nonunit) paste0(
+        "NOTE: the matched cohort carries non-unit matching weights (", w_rng,
         "). Descriptives and the table tests are weighted by the MatchIt weights (weighted Wald test, GEE robust SE); ",
         "n = matched rows, ESS = effective sample size. ",
         if (w_gee_cols) {
@@ -2140,11 +2302,15 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
         # unit weights: the matched tables' clustered tests and models follow
         # decision D18 too, and the sheet says so
         else paste0("NOTE: matched cohort (unit matching weights). ", matched_analysis_note())
+      # the Publication Table's footnote of an unweighted matched table
+      w_foot <- if (w_nonunit && tbl_unw)
+        paste0("Matched cohort, unweighted (matched_table_weights = none): every matched eye counts once in the ",
+               "cells and P values; the matching weights (", w_rng, ") are not used.") else NULL
       sub_glevels <- pair_lvls
       msum <- function(params, tmap) create_summary_table(
         md, params, tmap, sub_glevels, "GroupLabel",
         res$patient_id_clean, res$patient_level_params_clean, res$dicho_pref_clean,
-        weights = w_md, logger = logger, display_names = dmap,
+        weights = if (tbl_unw) NULL else w_md, logger = logger, display_names = dmap,
         table_tests = tbl_tests, matched = TRUE, va_cols = va_lm)
       b_m <- msum(res$baseline_params_clean, res$baseline_type_map)
       p_m <- msum(res$preop_params_clean,    res$preop_type_map)
@@ -2211,7 +2377,7 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
           list(`Baseline characteristics`      = b_m,
                `Preoperative / intraoperative` = p_m,
                `Outcomes`                      = o_m), note = w_note, tests_note = tests_note,
-          va_decimal = dn(vi$as_decimal))
+          va_decimal = dn(vi$as_decimal), weights_note = w_foot)
 
       # the pairing's number names its export tabs ("AstigMATIC_M1_<group>")
       pair_no <- match(lab, vapply(pairings, function(q) as.character(q$label)[1], character(1)))
@@ -2219,10 +2385,12 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
         optional_tab("mEYEstro tabs", make_meyestro_tabs(md, wb, res$roles, pairing = lab,
                                                          target = res$astig_target %||% list(),
                                                          logger = logger, display_names = dmap,
-                                                         pairing_no = pair_no))
+                                                         pairing_no = pair_no,
+                                                         visits = res$stability_visits %||% list()))
       if (isTRUE(cfg$make_alpins))
         optional_tab("AstigMATIC tabs", make_alpins_tabs(md, wb, res$roles, pairing = lab, logger = logger,
-                                                         display_names = dmap, pairing_no = pair_no))
+                                                         display_names = dmap, pairing_no = pair_no,
+                                                         target = res$astig_target %||% list()))
       if (astig_on)
         optional_tab("Astigmatism (JCRS 2025) sheet", {
           # in text the pairing reads "Cohort A vs Reference"; the underscore
@@ -2277,12 +2445,19 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
 # first (GEE_Adj_M_ before GEE_Adj_, the matched export tabs before the
 # full-cohort ones).
 describe_sheet <- function(nm) {
-  mey <- paste0("copy columns E-S (15 columns, template order) into the mEYEstro template - ",
-                "yellow E-I preop refraction, vertex (12 mm), preop CDVA; green J-M intended refraction; ",
-                "red N-S postop refraction, vertex, postop CDVA, postop UDVA. Gray A-D (group, decimal ",
-                "acuities) and blue T (postop SEQ) are for reference only.")
-  ast <- paste0("columns A-E (eye OD/OS, preop cylinder, preop axis, postop cylinder, postop axis) ",
-                "load directly into AstigMATIC; written in minus-cylinder notation.")
+  # (the per-tab counts and the exact range to copy follow, from sheet_note())
+  mey <- paste0("laid out in the input format of mEYEstro - the 20 columns of its data file in their order, ",
+                "row 1 the data file's headers, one row per eye from row 2: yellow A-E preoperative sphere, ",
+                "cylinder, axis, vertex distance (12 mm), CDVA; green F-I intended sphere, cylinder, axis, vertex ",
+                "distance; red J-O postoperative sphere, cylinder, axis, vertex distance, UDVA, CDVA; blue P-T the ",
+                "postoperative SEQ at up to five stability visits (blank when the analysis has none). Refraction in ",
+                "diopters, minus cylinder; axis 180 where the cylinder is 0 (as recorded where the cylinder is ",
+                "blank); acuity as the Snellen denominator (20/20 written 20, letters as 20-1), as text.")
+  ast <- paste0("laid out in the input format of AstigMATIC - columns A-E from row 3 (eye OD/OS, preoperative ",
+                "cylinder, preoperative axis, postoperative cylinder, postoperative axis), minus cylinder, axis 180 ",
+                "where the cylinder is 0 (blank where the cylinder is unknown); row 1 is the sheet's note. ",
+                "AstigMATIC assumes a plano astigmatic target, so eyes with a non-plano astigmatic target are ",
+                "left out.")
   jcrs <- paste0("plus-cylinder format: per vector (PRE, SIA, PE, and POST with a target that is not plano) and ",
                  "cohort the centroid, total SD, magnitudes and cumulative intervals; the tests (centroid against ",
                  "zero; centroid, precision, mean magnitude and intervals between cohorts; McNemar preop vs postop) ",
@@ -2541,9 +2716,18 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
     # an independence working correlation (R4-1)
     w_corstr <- if (!is.null(match_weights) && weights_nonunit(match_weights))
       " (working correlation: independence (weighted))" else ""
+    # matched_table_weights = "none": the matched tables count every eye once
+    # (analysis.R matched_table_weights_of)
+    tbl_unw <- identical(matched_table_weights_of(cfg), "none")
     w_txt <- if (!matching_on && is.null(match_weights)) NULL
              else if (is.null(match_weights)) "no matched cohort"
              else if (is.na(weights_summary(match_weights))) "no matching weights recorded"
+             else if (tbl_unw && weights_nonunit(match_weights)) paste0(weights_summary(match_weights),
+                         "; not used in the matched tables (matched_table_weights = none: every matched eye counts once)",
+                         if (!m_models) " (no matched GEE / regression run)"
+                         else if (isTRUE(cfg$use_matching_weights_in_gee))
+                           paste0("; used in the matched GEE / regression", w_corstr)
+                         else "; not used in the matched GEE / regression either")
              else paste0(weights_summary(match_weights),
                          if (!m_models) "; used in the matched tables (no matched GEE / regression run)"
                          else if (isTRUE(cfg$use_matching_weights_in_gee))
@@ -2674,6 +2858,8 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
         c("Matching covariates", paste0(paste(dn(as.character(unlist(res$psm_covariates_clean))), collapse = ", "),
                                         if (length(unres$matching)) paste0("; ", .not_found_txt(unres$matching)) else "")),
       if (!is.null(w_txt))   c("Matching weights", w_txt),
+      # which weighting the matched tables use (setting matched_table_weights)
+      if (matching_on)       c("Matched tables", matched_table_weights_text(cfg)),
       if (!is.null(fail_txt)) c("Pairings not matched", fail_txt),
       # the v1.1.0 statistical settings that change results (D11-D18), with
       # the value this run used
@@ -2765,9 +2951,13 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
     sheets <- setdiff(names(wb), "Contents")
     sheets <- c(intersect("Manifest", sheets), setdiff(sheets, "Manifest"))
     full <- if (exists("sheet_full_name", mode = "function")) sheet_full_name(sheets) else sheets
+    desc <- vapply(full, describe_sheet, character(1), USE.NAMES = FALSE)
+    # an export tab's own counts and the range to copy (sheet_note)
+    extra <- vapply(sheets, sheet_note, character(1), USE.NAMES = FALSE)
+    desc <- ifelse(nzchar(extra), paste(desc, extra), desc)
     df <- data.frame(Sheet = sheets,
                      `Full name` = full,
-                     Description = vapply(full, describe_sheet, character(1), USE.NAMES = FALSE),
+                     Description = desc,
                      check.names = FALSE, stringsAsFactors = FALSE)
     openxlsx::writeData(wb, sn, df)
     for (i in seq_along(sheets)) {

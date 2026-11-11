@@ -1003,6 +1003,13 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
     logger(sprintf("Table tests setting '%s' is not known (use auto or classical) - auto is used.",
                    as.character(unlist(cfg$table_tests))[1]))
   logger(paste0("Table tests: ", table_tests_text(cfg, has_pid = !is.na(res$patient_id_clean)), "."))
+  # the matched tables' weighting (analysis.R matched_table_weights_of): an
+  # unknown value is named and "weights" used
+  mtw_req <- tolower(trimws(as.character(unlist(cfg$matched_table_weights %||% "weights"))[1]))
+  if (length(mtw_req) && !is.na(mtw_req) && nzchar(mtw_req) && !(mtw_req %in% MATCHED_TABLE_WEIGHTS))
+    logger(sprintf("Matched tables setting '%s' is not known (use weights or none) - weights is used.",
+                   as.character(unlist(cfg$matched_table_weights))[1]))
+  if (isTRUE(cfg$do_matching)) logger(paste0("Matched tables: ", matched_table_weights_text(cfg), "."))
 
   # matching on, but none of its covariates is in the file: said once, here
   # (the Manifest records the skip); export.R builds no matched cohort then
@@ -1295,10 +1302,14 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
 
     # the run (label + subset values) is recorded in the workbook's Manifest
     invisible(gee_refit_take()); invisible(.gee_fallback_take()); invisible(.pp_cross_take())
+    invisible(ne_within_take())
     built <- build_workbook_for_data(dat_run, cfg, res, logger, loveplot_dir = output_dir, run = run)
     # per-patient table rows tested clustered (a patient has eyes in two groups)
     pp_x <- pp_cross_log_text(.pp_cross_take(), paste0("Workbook of run '", run$label, "'"))
     if (!is.null(pp_x)) logger(pp_x)
+    # rows with no variation within the compared groups: NE (helpers.R)
+    ne_x <- ne_within_log_text(ne_within_take(), paste0("Workbook of run '", run$label, "'"))
+    if (!is.null(ne_x)) logger(ne_x)
     # the clustered table tests whose exchangeable GEE was not accepted (R3-4)
     refits <- gee_refit_take()
     n_refit <- length(refits)

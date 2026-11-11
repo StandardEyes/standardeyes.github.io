@@ -573,6 +573,17 @@ create_summary_table <- function(df, params_clean, type_map,
         } else fmt_quartiles(quart(sel), q_dig)
       }, character(1))
       cells <- with_n(cells, nn)
+      # no variation within the compared groups (helpers.R no_within_variation):
+      # no test can estimate the variability - the P cell prints NE, the reason
+      # in the Interpretation column, and the run log names the row. The other
+      # reasons (constant in the cohort, a group with n = 1) keep their words
+      ne_w <- !nzchar(p_value_guard(v_num, gvec, var_type)) && no_within_variation(v_num, gvec)
+      if (ne_w) {
+        ne_within_add(dn(pn))
+        r <- mk_row(cells, NA_real_, "Not tested", note = NE_WITHIN_REASON)
+        r$p_value <- NE_TEXT
+        return(r)
+      }
       tt <- if (weighted) .weighted_wald(v_num, gvec, w, ids, "gaussian", ranks = var_type == "ordinal",
                                          unit = cl_unit)
             else if (clustered_row(fin & !is.na(gvec), ids, unit_tag))
@@ -668,6 +679,34 @@ create_summary_table <- function(df, params_clean, type_map,
 }
 
 safe_colname_vec <- function(x, max_chars = 60) vapply(x, safe_colname, character(1), max_chars = max_chars)
+
+# How the matched summary tables (Baseline / Preop / Outcome after matching
+# and the Publication Table of each matched pairing) treat the matching
+# weights - setting matched_table_weights:
+#   "weights" (default; the rule since 1.1.0) - with weights that are not all
+#             1 the descriptives are weighted and every row is tested by the
+#             weighted Wald test (an independence GEE with the weights);
+#   "none"    - every matched eye counts once: unweighted descriptives and the
+#             table tests of an unweighted matched cohort (patient-clustered
+#             independence GEE where a patient has two analyzed eyes, the
+#             classical tests otherwise or with table_tests = "classical").
+# The matched GEE / regression models (GEE sheets and the GEE / adjusted
+# columns of the same tables) follow use_matching_weights_in_gee instead, so
+# "none" with that switch on prints unweighted cells beside weighted model
+# columns - the tables' note says which is which. Blank or missing = "weights";
+# an unknown value is logged by the pipeline and "weights" used.
+MATCHED_TABLE_WEIGHTS <- c("weights", "none")
+matched_table_weights_of <- function(cfg) {
+  v <- tolower(trimws(as.character(unlist(cfg$matched_table_weights %||% "weights"))[1]))
+  if (!length(v) || is.na(v) || !nzchar(v) || !(v %in% MATCHED_TABLE_WEIGHTS)) "weights" else v
+}
+matched_table_weights_text <- function(cfg) {
+  if (identical(matched_table_weights_of(cfg), "none"))
+    paste0("unweighted (matched_table_weights = none) - every matched eye counts once: unweighted descriptives ",
+           "and the unweighted table tests, whatever the matching weights")
+  else paste0("weighted by the matching weights (matched_table_weights = weights) - with weights that are not all 1, ",
+              "weighted descriptives and weighted Wald tests (GEE)")
+}
 
 # The table tests a configuration runs (decision D12): "classical" when
 # cfg$table_tests is "classical" or the patient clustering is switched off
@@ -1560,6 +1599,17 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
         next
       }
     }
+    # a continuous outcome with no variation within the compared groups
+    # (helpers.R no_within_variation): the model has nothing to estimate the
+    # variability from (an SE of 0), so every comparison is NE - its effect,
+    # CI and P cells print NE (build_gee_lookup, export.R gee_sheet_frame)
+    if (grp_in && !bin && no_within_variation(df2[[outc]], df2$GroupLabel)) {
+      ne_r <- skip_all(NE_WITHIN_REASON, except = c(empty, names(un$out)))
+      ne_r$CI <- NE_TEXT
+      res_list[[outc]] <- dplyr::bind_rows(ne_r, .unestimable_rows(un$out, outc, eff, bin, na_row), empty_rows)
+      ne_within_add(dn(outc))
+      next
+    }
     const <- preds[vapply(preds, is_const, logical(1))]
     if (length(const)) {
       notes <- c(notes, paste0("Covariate(s) dropped (constant in this cohort): ",
@@ -1784,25 +1834,32 @@ build_gee_lookup <- function(gee_df, group_term) {
   # S2-3)
   nt <- if ("Note" %in% names(rows)) as.character(rows$Note) else rep(NA_character_, nrow(rows))
   rows$gee_caution <- ifelse(!is.na(nt) & startsWith(nt, "Caution:") & !is.na(rows$EffectValue), nt, "")
+  # no variation within the compared groups (run_gee_models): NE in the effect
+  # (with its CI) and P cells; an outcome all of whose comparisons are NE
+  # prints one NE
+  rows$.ne_w <- grepl(paste0("not estimable - ", NE_WITHIN_REASON), mdl, fixed = TRUE)
   rows <- rows %>%
     dplyr::mutate(
       # one effect style for every table (D24): "β = -9.98 (95% CI, -29.04
       # to 9.08)" / "OR = 3.02 (95% CI, 1.21 to 7.57)"
       gee_effect_label = dplyr::case_when(
+        .ne_w ~ NE_TEXT,
         is.na(EffectValue) ~ "not estimable",
         Effect == "OR" ~ fmt_effect("OR", EffectValue, CI_low, CI_high),
         TRUE ~ fmt_effect("beta", EffectValue, CI_low, CI_high)),
       # a comparison without an estimate (or without a P) reads "not
       # estimable" in the P column too, never a bare "Cohort D: "
-      gee_p_label = ifelse(is.na(EffectValue) | !is.finite(p_shown), "not estimable",
-                           paste0(dplyr::coalesce(fmt_p(p_shown), ""), ifelse(holm, " [Holm]", ""), tag)))
+      gee_p_label = ifelse(.ne_w, NE_TEXT,
+                    ifelse(is.na(EffectValue) | !is.finite(p_shown), "not estimable",
+                           paste0(dplyr::coalesce(fmt_p(p_shown), ""), ifelse(holm, " [Holm]", ""), tag))))
   if (length(group_term) > 1 && nrow(rows) > 0) {
     rows <- rows %>%
       dplyr::mutate(.cmp = sub("^GroupLabel", "", term), .ord = match(term, group_term)) %>%
       dplyr::arrange(match(Outcome, unique(Outcome)), .ord) %>%
       dplyr::group_by(Outcome) %>%
-      dplyr::summarise(gee_effect_label = paste0(.cmp, ": ", gee_effect_label, collapse = "\n"),
-                       gee_p_label = paste0(.cmp, ": ", gee_p_label, collapse = "\n"),
+      dplyr::summarise(gee_effect_label = if (all(.ne_w)) NE_TEXT
+                                          else paste0(.cmp, ": ", gee_effect_label, collapse = "\n"),
+                       gee_p_label = if (all(.ne_w)) NE_TEXT else paste0(.cmp, ": ", gee_p_label, collapse = "\n"),
                        gee_caution = paste(unique(gee_caution[nzchar(gee_caution)]), collapse = "; "),
                        .groups = "drop")
   }
@@ -2067,6 +2124,20 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
       add_rows(list(whole(why, n_txt0(), except = c(empty, names(un$out))), unest_rows(), empty_rows))
       next
     }
+    # a continuous outcome with no variation within the compared groups
+    # (helpers.R no_within_variation): not estimable, NE in the effect, CI and
+    # P cells (adjusted and crude)
+    if (!dich && no_within_variation(df2[[outc]], df2$GroupLabel)) {
+      ne_r <- whole(paste0(drop_note, "Skipped: not estimable - ", NE_WITHIN_REASON), n_txt0(),
+                    except = c(empty, names(un$out)))
+      if (nzchar(ne_r$Comparison[1] %||% "")) {
+        ne_r[["Adjusted effect (95% CI)"]] <- NE_TEXT; ne_r[["P value"]] <- NE_TEXT
+        ne_r[[REG_CRUDE_EFF]] <- NE_TEXT; ne_r[[REG_CRUDE_P]] <- NE_TEXT
+      }
+      add_rows(list(ne_r, unest_rows(), empty_rows))
+      ne_within_add(dn(outc))
+      next
+    }
     if (dich) {
       sep <- .separation_levels(df2, outc, covs)
       sep_cov <- names(sep)
@@ -2284,9 +2355,12 @@ merge_regression_into_summary <- function(summary_tbl, reg_pub) {
     ph <- if (REG_HOLM_P %in% names(rows)) as.character(rows[[REG_HOLM_P]]) else rep("", nrow(rows))
     ph[is.na(ph)] <- ""
     pv  <- paste0(pre, ifelse(nzchar(ph), paste0(ph, " [Holm]"), rows[["P value"]]), collapse = "\n")
+    # no variation within groups (run_regression_models): one NE per cell
+    ne_all <- all(as.character(rows[["Adjusted effect (95% CI)"]]) %in% NE_TEXT)
+    if (ne_all) { eff <- NE_TEXT; pv <- NE_TEXT }
     # the eyes of the adjusted model: the n of its estimated comparisons
     pvv <- as.character(rows[["P value"]])
-    est <- !is.na(pvv) & nzchar(pvv)
+    est <- !is.na(pvv) & nzchar(pvv) & !(pvv %in% NE_TEXT)
     nn <- unique(as.character(rows$n[est & !is.na(rows$n)]))
     hit <- .rows_for(out, oc)
     if (length(hit)) {

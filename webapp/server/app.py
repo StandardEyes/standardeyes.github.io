@@ -1674,9 +1674,11 @@ def _safe_preset_name(name: str) -> str:
 @app.get("/api/health")
 def health():
     h = STATE.get("run")
+    # app_root: the folder a relative output folder is read from (the
+    # pre-run summary's long-path warning measures the folder's full path)
     return {"ok": True, "version": APP_VERSION, "public_version": PUBLIC_VERSION,
             "rscript": rrunner.find_rscript(), "loaded": STATE["path"],
-            "running": bool(h is not None and h.active())}
+            "running": bool(h is not None and h.active()), "app_root": APP_ROOT}
 
 
 class VaDetectReq(BaseModel):

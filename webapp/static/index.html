@@ -1281,7 +1281,7 @@
         <h3>Before you run: how the numbers are computed and shown</h3>
         <table class="small" style="border-collapse:collapse"><tbody>
           <template x-for="r in runSummary()" :key="r[0]">
-            <tr><td style="padding:2px 12px 2px 0; vertical-align:top; white-space:nowrap"><b x-text="r[0]"></b></td><td style="padding:2px 0" x-text="r[1]"></td></tr>
+            <tr :class="r[2]||''"><td style="padding:2px 12px 2px 0; vertical-align:top; white-space:nowrap"><b x-text="r[0]"></b></td><td style="padding:2px 0" x-text="r[1]"></td></tr>
           </template>
         </tbody></table>
         <p class="muted small" style="margin:6px 0 0">Each is set on its tab (Matching, GEE, Variables &amp; Types, Special outputs); the workbook's Manifest sheet records them.</p>

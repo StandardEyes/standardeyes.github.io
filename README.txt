@@ -52,16 +52,23 @@ and it matches eyes.
   the run log, which counts the reasons by kind. The
   models do not change.
 
-* Per-patient models when a patient has eyes in two
-  groups. A variable marked "per patient" is modeled on
-  one row per patient per group; a patient with a row in
-  each of two groups makes those rows dependent, so on an
+* Per-patient rows when a patient has eyes in two groups.
+  A variable marked "per patient" is modeled on one row
+  per patient per group; a patient with a row in each of
+  two groups makes those rows dependent, so on an
   unmatched cohort they are now fitted by an independence
   GEE clustered by patient (the matched cohort's model)
   instead of an ordinary linear or logistic model. The
   Model column says so and counts rows and patients ("294
-  rows from 275 patients"). Data without such patients
-  give the 1.1.0 numbers.
+  rows from 275 patients"). The summary tables test such
+  a row with the same clustered model instead of a Welch
+  t-test or chi-squared test on the duplicated patient
+  rows, so the row's P value and its GEE column agree;
+  the Test column gives the reason ("clustered: 19
+  patients have eyes in more than one group"), and the
+  Manifest and the run log say so. Data without such
+  patients give the 1.1.0 numbers, and the matched tables
+  do not change.
 
 * GEE fits converge more tightly. Every GEE now iterates
   until no coefficient changes by more than 1e-8
@@ -69,9 +76,32 @@ and it matches eyes.
   which left one model of example dataset E about 1.4e-4
   of a standard error short of its solution in the
   independent validation). Full-precision GEE values on
-  the sheets can change in about the fifth significant
-  digit; in the 14 example runs of the release gate no
-  printed value changed.
+  the sheets can change by up to about 5e-5 (about the
+  fifth significant digit); in the 14 example runs of the
+  release gate no printed value changed.
+
+* The run log counts the converted cylinders. For every
+  sphere / cylinder / axis set it counts the plus
+  cylinders transposed to minus cylinder (and those
+  already minus, zero or blank), beside its count, per
+  acuity column, of the off-chart entries (CF, HM, LP,
+  NLP) set to missing. The love plot's key reads "Before
+  matching" / "After matching".
+
+* A warning for a long output folder. When the output
+  folder's full path is longer than 100 characters, the
+  pre-run summary (Run & Results tab) and the run log
+  warn, before a run with figures, that some figure files
+  may pass the 260-character limit Windows sets on a full
+  path, and suggest a folder near the drive root. Nothing
+  else changes.
+
+* A review build for blinded peer review. The release can
+  also be built as StandardEyes-review.zip: the same
+  program with the author names and every link to the
+  website and repository withheld (the program name
+  stays); every workbook's Manifest then records "review
+  build".
 
 * Five demonstration datasets replace the single example
   dataset in "Example Data": A two techniques, B notation

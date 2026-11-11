@@ -232,13 +232,25 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
 # variable of a matched cohort with unit matching weights, finding S2-1), and
 # the label says so; the model is then the independence GEE of the GEE
 # column's per-patient model (.per_patient_model), so the row gives one P.
+# cross > 0: the per-patient rows of an UNMATCHED cohort in which `cross`
+# patients have a row in each of two groups (rows that are not independent):
+# the same independence GEE on the patient rows, clustered by patient - the
+# model of the row's GEE column (.per_patient_model, fix pass M6) - labeled
+# with the reason, "independence working correlation (clustered: 19 patients
+# have eyes in more than one group)".
 # Returns list(p, test, note) like group_test().
 .clustered_test <- function(v, g, id, kind = c("continuous", "ordinal", "dichotomous", "categorical"),
-                            matched = FALSE, unit = "patient", per_patient = FALSE) {
+                            matched = FALSE, unit = "patient", per_patient = FALSE, cross = 0L) {
   kind <- match.arg(kind)
-  cs <- if (isTRUE(matched)) "independence" else NULL
+  cross <- if (isTRUE(matched)) 0L else as.integer(cross %||% 0L)[1]
+  if (is.na(cross)) cross <- 0L
+  cs <- if (isTRUE(matched) || cross > 0) "independence" else NULL
   # the working correlation of the model, for the label
-  wc <- if (isTRUE(matched)) "independence working correlation (matched cohort)" else "exchangeable working correlation"
+  wc_cross <- if (cross > 0)
+    sprintf("independence working correlation (clustered: %d %s eyes in more than one group)", cross,
+            if (cross == 1) "patient has" else "patients have") else ""
+  wc <- if (isTRUE(matched)) "independence working correlation (matched cohort)"
+        else if (cross > 0) wc_cross else "exchangeable working correlation"
   num <- kind %in% c("continuous", "ordinal")
   x <- if (num) as_numeric_safe(v) else v
   use <- (if (num) is.finite(x) else !is.na(x)) & !is.na(g)
@@ -250,7 +262,8 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
     if (length(levs) > 2) {
       base <- "GEE on level indicators"
       # the stacked model always has an independence working correlation
-      wc <- if (isTRUE(matched)) "independence working correlation (matched cohort)" else "independence working correlation"
+      wc <- if (isTRUE(matched)) "independence working correlation (matched cohort)"
+            else if (cross > 0) wc_cross else "independence working correlation"
       q <- max(1L, (length(levs) - 1L) * (k - 1L))
       p <- gee_categorical_p(vv, g, id, unit = unit)
     } else {
@@ -320,6 +333,26 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
 .gee_fallback_rows <- new.env()
 .gee_fallback_rows$n <- 0L
 .gee_fallback_take <- function() { n <- .gee_fallback_rows$n; .gee_fallback_rows$n <- 0L; n }
+# per-patient rows of an unmatched cohort tested clustered because a patient
+# has eyes in two groups (create_summary_table): the variable -> the number of
+# such patients, for the run log (.pp_cross_take, logged once per workbook)
+.pp_cross_rows <- new.env()
+.pp_cross_rows$vars <- integer(0)
+.pp_cross_take <- function() { v <- .pp_cross_rows$vars; .pp_cross_rows$vars <- integer(0); v }
+# The run-log line of those rows (NULL when there is none): "Workbook of run
+# 'All': 2 per-patient summary-table row(s) ('Age_Years', 'Sex') were tested by
+# an independence GEE on one row per patient, clustered by patient, because
+# 19 patients have eyes in more than one group; the Test column says so."
+pp_cross_log_text <- function(v, where) {
+  if (!length(v)) return(NULL)
+  v <- v[!duplicated(names(v))]
+  nn <- sort(unique(as.integer(v)))
+  sprintf(paste0("%s: %d per-patient summary-table row(s) (%s) were tested by an independence GEE on one row per ",
+                 "patient, clustered by patient, because %s %s eyes in more than one group; the Test column says so."),
+          where, length(v), paste0("'", names(v), "'", collapse = ", "),
+          if (length(nn) == 1) as.character(nn) else paste0(min(nn), " to ", max(nn)),
+          if (length(nn) == 1 && nn == 1) "patient has" else "patients have")
+}
 
 # ------------------------------------------------------------
 # N-group summary table.
@@ -349,7 +382,11 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
 # cohort, whose clustered tests use an independence working correlation
 # (decision D18); with unit matching weights its per-patient rows get the
 # independence GEE on the patient rows too (finding S2-1), the model of their
-# GEE column, so a row prints one P value.
+# GEE column, so a row prints one P value. On an unmatched cohort a
+# per-patient row in which a patient has a row in each of two groups gets
+# that independence GEE as well, clustered by patient (the rows are not
+# independent; .clustered_test cross), its Test label giving the reason;
+# without such a patient the row keeps its classical test.
 # Cells (decision D24): means, SDs and medians with two decimals, percentages
 # with one. va_cols: the visual-acuity columns analysed in logMAR (export.R
 # va_info()$in_logmar); their continuous cells read "20/20 (0.00 ± 0.05
@@ -403,6 +440,18 @@ create_summary_table <- function(df, params_clean, type_map,
   # GEE column (.per_patient_model) - so the row gives one P value (with
   # unequal weights the weighted test of the same rows runs)
   matched_pp <- function(unit_tag) cl_tests && isTRUE(matched) && nzchar(unit_tag)
+  # a per-patient row of an UNMATCHED cohort in which a patient has a row in
+  # each of two groups (its eyes fall in both): those rows are not
+  # independent, so the row gets the independence GEE on the patient rows,
+  # clustered by patient - the model of its GEE column (.per_patient_model) -
+  # instead of a classical test. The number of such patients among the rows
+  # the test uses (0: the classical test, as before); counted for the run log.
+  cross_pp <- function(use, ids, unit_tag, pn) {
+    if (!cl_tests || isTRUE(matched) || !nzchar(unit_tag)) return(0L)
+    n <- sum(table(as.character(ids[use])) > 1)
+    if (n > 0) .pp_cross_rows$vars <- c(.pp_cross_rows$vars, stats::setNames(n, dn(pn)))
+    as.integer(n)
+  }
 
   in_grp <- function(gvec, g) !is.na(gvec) & gvec == g
   n_eye <- vapply(glev, function(g) sum(in_grp(gv, g)), integer(1))
@@ -530,6 +579,8 @@ create_summary_table <- function(df, params_clean, type_map,
               .clustered_test(v_num, gvec, ids, var_type, matched = matched)
             else if (matched_pp(unit_tag))
               .clustered_test(v_num, gvec, ids, var_type, matched = TRUE, per_patient = TRUE)
+            else if ((n_x <- cross_pp(fin & !is.na(gvec), ids, unit_tag, pn)) > 0)
+              .clustered_test(v_num, gvec, ids, var_type, per_patient = TRUE, cross = n_x)
             else group_test(v_num, gvec, var_type)
       return(mk_row(cells, tt$p, tt$test, note = tt$note))
     }
@@ -556,6 +607,8 @@ create_summary_table <- function(df, params_clean, type_map,
               .clustered_test(y, gvec, ids, "dichotomous", matched = matched)
             else if (matched_pp(unit_tag))
               .clustered_test(y, gvec, ids, "dichotomous", matched = TRUE, per_patient = TRUE)
+            else if ((n_x <- cross_pp(present & !is.na(gvec), ids, unit_tag, pn)) > 0)
+              .clustered_test(y, gvec, ids, "dichotomous", per_patient = TRUE, cross = n_x)
             else group_test(y, gvec, "dichotomous")
       return(mk_row(cells, tt$p, tt$test, param_label = paste0(pl, " (", lev, ")"), note = tt$note))
     }
@@ -575,6 +628,8 @@ create_summary_table <- function(df, params_clean, type_map,
               .clustered_test(vv, gvec, ids, "categorical", matched = matched)
             else if (!weighted && matched_pp(unit_tag))
               .clustered_test(vv, gvec, ids, "categorical", matched = TRUE, per_patient = TRUE)
+            else if (!weighted && (n_x <- cross_pp(!is.na(vv) & !is.na(gvec), ids, unit_tag, pn)) > 0)
+              .clustered_test(vv, gvec, ids, "categorical", per_patient = TRUE, cross = n_x)
             else if (!weighted) group_test(vv, gvec, "categorical")
             else if (nzchar(why_w)) list(p = NA_real_, test = p_guard_label(why_w), note = why_w)
             else if (length(levs) == 2)
@@ -624,8 +679,11 @@ table_tests_of <- function(cfg) {
   tt <- tolower(trimws(as.character(unlist(cfg$table_tests %||% "auto"))[1]))
   if (identical(tt, "classical")) "classical" else "auto"
 }
-# The same in words, for the run log and the Manifest.
-table_tests_text <- function(cfg, has_pid = TRUE) {
+# The same in words, for the run log and the Manifest. cross = TRUE: the
+# cohort has per-patient variables and a patient with eyes in more than one
+# group, whose per-patient rows are then tested clustered (create_summary_table)
+# - said in a clause of its own, so the text of any other cohort is unchanged.
+table_tests_text <- function(cfg, has_pid = TRUE, cross = FALSE) {
   classical <- "Welch t-test / Welch ANOVA, Wilcoxon / Kruskal-Wallis, chi-squared / Fisher's exact"
   if (table_tests_of(cfg) == "classical")
     return(paste0("classical (", classical, ") for every unweighted row",
@@ -640,7 +698,21 @@ table_tests_text <- function(cfg, has_pid = TRUE) {
          "eyes, a permutation test over patients where that GEE cannot be fitted; classical (", classical,
          ") for one eye per patient and for per-patient rows (on a matched cohort the per-patient rows get ",
          "the independence GEE on one row per patient, weighted when the matching weights are unequal); ",
+         if (isTRUE(cross)) paste0("per-patient rows of an unmatched cohort in which a patient has eyes in more ",
+                                   "than one group: the independence GEE on one row per patient, clustered by ",
+                                   "patient (those rows are not independent); "),
          "a matched cohort with unequal weights: weighted Wald tests (GEE) on every row")
+}
+
+# The patients with analyzed eyes in more than one group (fill_missing_ids:
+# a row without an ID is its own patient); 0 without a patient ID column.
+patients_in_two_groups <- function(df, patient_id_clean, group_var = "GroupLabel") {
+  if (!.has_col(df, patient_id_clean) || !(group_var %in% names(df))) return(0L)
+  ids <- fill_missing_ids(df[[patient_id_clean]])
+  g <- as.character(df[[group_var]])
+  ok <- !is.na(g)
+  if (!any(ok)) return(0L)
+  as.integer(sum(tapply(g[ok], ids[ok], function(z) length(unique(z))) > 1))
 }
 
 # ------------------------------------------------------------

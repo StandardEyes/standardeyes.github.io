@@ -68,6 +68,10 @@ const NON_PS_DISTANCES = ["mahalanobis","robust_mahalanobis","euclidean","scaled
 // must equal APP_VERSION in server/app.py — mismatch means the running server
 // process is older than the page and needs a restart
 const UI_VERSION = "2026-11-11-se.11";
+// an output folder whose full path is longer than this many characters gets a
+// warning in the pre-run summary (R/pipeline.R PL_LONG_OUTPUT_FOLDER, the run
+// log's warning): some figure files inside it may pass the Windows limit
+const LONG_OUTPUT_FOLDER = 100;
 // manuscript group colors (mEYEstro-like); index = group order
 const DEFAULT_GROUP_COLORS = ["#5B2C86","#F26522","#1B9E4B","#2166AC","#00838F","#C2185B"];
 
@@ -611,6 +615,7 @@ function builder(){
     loadingFile:false,
     serverVersion:null,     // build id (APP_VERSION), compared with UI_VERSION
     publicVersion:null,     // release number the website and citation use
+    appRoot:null,           // the app folder (a relative output folder is read from it)
     versionMismatch:false,
     UI_VERSION,
     // An unreachable server is not an outdated one: say so, and keep checking
@@ -626,6 +631,7 @@ function builder(){
         this.serverDown=false;
         this.serverVersion=j.version||"(old)";
         this.publicVersion=j.public_version||null;
+        this.appRoot=j.app_root||null;
         this.versionMismatch = (j.version!==UI_VERSION);
         this.rInfo.rscript = j.rscript;
         // a run started before this page was (re)loaded is still going
@@ -2097,6 +2103,14 @@ function builder(){
       else if(ev.type==="done"){ this._exitCode=ev.returncode; }
       this.$nextTick(()=>{ const el=document.getElementById("logbox"); if(el) el.scrollTop=el.scrollHeight; });
     },
+    // the output folder as the server resolves it: a relative folder is read
+    // from the app folder (server/app.py _check_output_dir); "" when unset
+    outputFolderFull(){
+      let o=String(this.s.output_dir??"").trim().replace(/\//g,"\\");
+      if(!o) return "";
+      if(!/^([A-Za-z]:\\|\\\\)/.test(o) && this.appRoot) o=String(this.appRoot).replace(/[\\/]+$/,"")+"\\"+o;
+      return o.replace(/\\+$/,"");
+    },
     // ---- pre-run summary (Run & Results tab): the settings that decide how
     // the numbers are computed and printed, in words. Mirrors the engine's
     // reading of them (blank / unknown = the default the server then names).
@@ -2131,6 +2145,14 @@ function builder(){
         out.push(["Figures", (s.figure_style==="annotated" ? "annotated (v1.0.0 look)" : "journal style, legend text in <figure>_legend.txt")+
           "; "+(w ? w+" cm wide" : "each figure's own size")+"; "+s.graph_formats.map(f=>f.toUpperCase()).join(", ")+
           " at "+s.graph_dpi+" dpi"]);
+        // a long output folder (the run log warns too, R/pipeline.R
+        // long_output_folder_text, at the same length): the figure files'
+        // names add about 150 characters inside it
+        const of=this.outputFolderFull();
+        if(of.length>LONG_OUTPUT_FOLDER)
+          out.push(["Output folder", "Warning: its path is "+of.length+" characters long, so some figure files may "+
+            "pass the 260-character limit Windows sets on a full path and not be written. Choose an output folder "+
+            "near the drive root, for example C:\\StandardEyes Output.", "warnline"]);
       } else out.push(["Figures", "off"]);
       const reg={polygon:"95% depth-based convex polygon (as in the WHWK functions)", normal:"95% normal ellipse",
                  both:"depth-based convex polygon and normal ellipse"}[s.astig_region] || s.astig_region;

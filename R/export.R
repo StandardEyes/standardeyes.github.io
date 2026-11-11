@@ -2688,7 +2688,13 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
                "matched cohorts; variables marked per patient are modeled on one row per patient by an ordinary ",
                "linear or logistic model (on matched cohorts, and when a patient has eyes in more than one group, ",
                "by an independence GEE with the robust SE clustered by patient), never by an eye-level GEE")),
-      c("Table tests",          table_tests_text(cfg, has_pid = !is.na(pid[1]) && pid[1] %in% names(dat))),
+      # (the per-patient rows of an unmatched cohort with a patient in two
+      # groups are tested clustered: said only for such a cohort - never in
+      # the matched-only workbook, whose tables are all matched)
+      c("Table tests",          table_tests_text(cfg, has_pid = !is.na(pid[1]) && pid[1] %in% names(dat),
+                                                 cross = !stacked && length(res$patient_level_params_clean) > 0 &&
+                                                   identical(table_tests_of(cfg), "auto") &&
+                                                   patients_in_two_groups(dat, pid[1]) > 0)),
       c("Multiplicity",         paste0("Holm within each variable across the comparisons of each group with ",
                                        "the reference (summary-table GEE and adjusted columns, tagged [Holm]; ",
                                        "regression 'P (Holm)' and 'Crude P (Holm), same eyes'; figure 'vs ",

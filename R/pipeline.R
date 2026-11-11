@@ -363,6 +363,21 @@ run_stems <- function(runs, max_chars = 40) {
 # longer than 259 characters, even inside a folder that could be created.
 .pl_max_path <- 259L
 
+# An output folder whose full path is longer than this many characters gets
+# the run-log warning below (the interface's pre-run summary uses the same
+# number): the figure folder, a matched pairing's figure names and their
+# legend files add about 150 characters inside it.
+PL_LONG_OUTPUT_FOLDER <- 100L
+# The warning for a long output folder, or NULL when the path is short enough.
+long_output_folder_text <- function(path) {
+  n <- nchar(as.character(path %||% "")[1])
+  if (is.na(n) || n <= PL_LONG_OUTPUT_FOLDER) return(NULL)
+  sprintf(paste0("WARNING: The output folder's path is %d characters long. Some figure files may then pass the ",
+                 "%d-character limit Windows sets on a full path and not be written (the run log names any that ",
+                 "are not). Choose an output folder near the drive root, for example C:\\StandardEyes Output."),
+          n, .pl_max_path + 1L)
+}
+
 # A workbook that was not written must never be reported: stop, naming the
 # path, and say so when the path is over the Windows limit.
 .pl_check_written <- function(path, why = "", what = "workbook") {
@@ -1169,6 +1184,11 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
   # absolute from here on: the reported file paths must not depend on the
   # working directory (sanitize_xlsx, the GUI and a CLI caller all reuse them)
   output_dir <- .pl_os_path(output_dir)
+  # a long output folder: the figure files, whose names add up to about 150
+  # characters inside it, may pass the Windows limit on a full path - said
+  # before anything is written (nothing else changes)
+  long_txt <- if (isTRUE(cfg$make_graphs %||% TRUE)) long_output_folder_text(output_dir) else NULL
+  if (!is.null(long_txt)) logger(long_txt)
   stamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
   prefix <- safe_filename(cfg$output_prefix %||% "StandardEyes")
 
@@ -1274,8 +1294,11 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
     }
 
     # the run (label + subset values) is recorded in the workbook's Manifest
-    invisible(gee_refit_take()); invisible(.gee_fallback_take())
+    invisible(gee_refit_take()); invisible(.gee_fallback_take()); invisible(.pp_cross_take())
     built <- build_workbook_for_data(dat_run, cfg, res, logger, loveplot_dir = output_dir, run = run)
+    # per-patient table rows tested clustered (a patient has eyes in two groups)
+    pp_x <- pp_cross_log_text(.pp_cross_take(), paste0("Workbook of run '", run$label, "'"))
+    if (!is.null(pp_x)) logger(pp_x)
     # the clustered table tests whose exchangeable GEE was not accepted (R3-4)
     refits <- gee_refit_take()
     n_refit <- length(refits)

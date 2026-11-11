@@ -40,16 +40,31 @@ before, and it matches eyes.
   why: "the exchangeable fit was not accepted: working correlation 0.984", "... did not converge" or "...
   unstable step". The outcome is called constant within patients only when it is; the figure legends point to
   the run log, which counts the reasons by kind. The models do not change.
-- **Per-patient models when a patient has eyes in two groups.** A variable marked "per patient" is modeled on
+- **Per-patient rows when a patient has eyes in two groups.** A variable marked "per patient" is modeled on
   one row per patient per group; when a patient has a row in each of two groups those rows are not independent,
   so on an unmatched cohort they are now fitted by an independence GEE clustered by patient (the matched
   cohort's model) instead of an ordinary linear or logistic model, and the Model column says so and counts rows
-  and patients ("294 rows from 275 patients"). Data without such patients give the 1.1.0 numbers.
+  and patients ("294 rows from 275 patients"). The summary tables test such a row with the same clustered model
+  instead of a Welch t-test or chi-squared test on the duplicated patient rows, so the row's P value and its GEE
+  column agree; the Test column gives the reason ("clustered: 19 patients have eyes in more than one group"), and
+  the Manifest and the run log say so. Data without such patients give the 1.1.0 numbers, and the matched tables
+  do not change.
 - **GEE fits converge more tightly.** Every GEE now iterates until no coefficient changes by more than 1e-8
   (geepack's default, used up to 1.1.0, stops at 1e-4, which left one model of example dataset E about 1.4e-4 of a
   standard error short of its solution in the independent validation). Full-precision GEE values on the sheets
-  can change in about the fifth significant digit; in the 14 example runs of the release gate no printed value
-  changed.
+  can change by up to about 5e-5 (about the fifth significant digit); in the 14 example runs of the release gate
+  no printed value changed.
+- **The run log counts the converted cylinders.** For every sphere / cylinder / axis set it counts the plus
+  cylinders transposed to minus cylinder (and those already minus, zero or blank), beside its count, per acuity
+  column, of the off-chart entries (CF, HM, LP, NLP) set to missing. The love plot's key reads "Before matching" /
+  "After matching".
+- **A warning for a long output folder.** When the output folder's full path is longer than 100 characters, the
+  pre-run summary (Run & Results tab) and the run log warn, before a run with figures, that some figure files may
+  pass the 260-character limit Windows sets on a full path, and suggest a folder near the drive root. Nothing
+  else changes.
+- **A review build for blinded peer review.** The release can also be built as `StandardEyes-review.zip`: the
+  same program with the author names and every link to the website and repository withheld (the program name
+  stays); every workbook's Manifest then records "review build".
 - **Five demonstration datasets** replace the single example dataset in `Example Data` - simulated (no real
   patients; patients and eyes carry codes only), each with a README sheet (the generating model with every true
   effect, this file's own estimates, the seed and a column dictionary) and its settings files, also included in the app as the seven

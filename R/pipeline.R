@@ -928,6 +928,7 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
                        stability_include_preop = TRUE, make_meyestro = TRUE, make_alpins = TRUE,
                        make_pub_table = TRUE, make_graphs = TRUE, astig_panels = TRUE, double_angle_figs = TRUE,
                        semicircle_figs = TRUE, astig_sheet = TRUE, astig_whwk_files = TRUE,
+                       astig_centroid_panels = TRUE,
                        astig_jcrs_standard = TRUE, cluster_by_patient = TRUE, do_regression = TRUE,
                        export_filtered_csv = TRUE)
   for (k in names(switch_defaults)) {

@@ -130,6 +130,22 @@ and it matches eyes.
   the stability graph are solid black (dark gray when a
   group is drawn close to black); the legends name it.
 
+* An enlarged centroid panel beside every double-angle
+  plot. At print size the 95% confidence region of a
+  centroid is often smaller than its marker, so each
+  double-angle plot (preoperative astigmatism, SIA,
+  prediction error and postoperative astigmatism) now has
+  a small panel with each cohort's centroid and the dashed
+  95% confidence region of the centroid, enlarged on the
+  plot's own axes (x and y in diopters) at a scale set by
+  the regions. It is drawn at the right of the plot, or
+  under it when the figure is too narrow (a combined
+  figure 12.69 cm wide); the legend file says which. The centroid markers of the plot are
+  smaller, so a larger region shows around them there
+  too. No number changes. Special outputs tab, untick
+  "Enlarged centroid panels" (settings file key
+  astig_centroid_panels = false) to leave the panels out.
+
 * Matched tables without the weights (option). Matching
   tab, "Matched tables" = unweighted; settings file key
   matched_table_weights = "none" (the default "weights"

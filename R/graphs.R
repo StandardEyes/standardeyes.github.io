@@ -249,7 +249,8 @@ GR_ABBREV <- c(
   "WHWK" = "Wilcox-Holladay-Wang-Koch R functions (the reference tool of the JCRS 2025 standard)",
   "x, y" = "doubled-angle components of the centroid, M cos 2θ and M sin 2θ (M = magnitude, θ = plus axis)")
 GR_ABBREV_RE <- c("d" = "\\(d = |\\bd = -?[0-9]", "B" = "\\bB = [0-9]",
-                  "x, y" = "\\(x -?[0-9.]+; y |centroid x -?[0-9.]+, y ",
+                  # (also the axis titles of the enlarged centroid panel, g_centroid_panel)
+                  "x, y" = "\\(x -?[0-9.]+; y |centroid x -?[0-9.]+, y |(?m)^[xy] \\(D\\)$",
                   "|AoE|" = "\\|AoE\\|",
                   "N, n" = "(?<![A-Za-z])N( UDVA| CDVA)? ?= ?[0-9]|(?<![A-Za-z])n ?= ?[0-9]|\\bn per group",
                   "mo" = "[0-9] mo\\b",
@@ -1493,13 +1494,28 @@ gr_with_measure_device <- function(w, h, fun, out_dpi = .gr_opts$out_dpi) {
 # (gr_with_measure_device, out_dpi; finding astig2-1). A line may run past the
 # panel by the usual 4 pt, never past the plot's right margin (gr_sp(8), 3.4
 # pt in a 12.69-cm cell), so it never reaches the gap between two cells.
+#  5. side (the double-angle plots: their enlarged centroid panel, a ggplot of
+#     g_centroid_panel): drawn at the RIGHT of the diagram - the header runs
+#     across both - when the width beside the diagram holds a panel of
+#     DA_CP_MIN_IN (DA_CP_MIN_CELL_IN at a reduced text scale): as wide as
+#     that width (at most the diagram's own width), or - when that is less
+#     than DA_CP_FRAC of the diagram's width - that much, the diagram drawn
+#     smaller for it, to no less than DA_CP_MIN_DIAGRAM of its size nor its
+#     least size (4. above; its vertical range then widened, so it stays
+#     round and centred in its row). Else the panel goes UNDER the diagram,
+#     and the figure is made taller by it. Where it went is returned as attr
+#     "side_at" ("right", "below" or "none"), the height it added (inches) as
+#     attr "side_h".
 GR_POLAR_MIN_PLOT_IN <- 3.0     # the least width (inches) of the drawn diagram
 GR_POLAR_MIN_CELL_IN <- 1.75    # ... and in a cell of a combined figure at a journal width
-gr_polar_finish <- function(p, hs, xlim, ylim, fig_w, fig_h) {
-  build <- function(spec, xl) p +
-    ggplot2::coord_fixed(xlim = xl, ylim = ylim, clip = "off") +
+gr_polar_finish <- function(p, hs, xlim, ylim, fig_w, fig_h, side = NULL) {
+  build <- function(spec, xl, yl = ylim) p +
+    ggplot2::coord_fixed(xlim = xl, ylim = yl, clip = "off") +
     ggplot2::theme(plot.margin = ggplot2::margin(t = gr_sp(10) + hdr_ls() * hdr_nlines(spec),
                                                  r = gr_sp(8), b = gr_sp(6), l = gr_sp(8)))
+  has_side <- !is.null(side)
+  side_min <- 72.27 * (if (gr_ts() < 1) max(DA_CP_MIN_CELL_IN, DA_CP_MIN_IN * gr_ts()) else DA_CP_MIN_IN)
+  side_gap <- gr_sp(DA_CP_GAP_PT)
   fixed_pt <- function(u, conv) {
     nn <- grid::unitType(u) != "null"
     if (!any(nn)) 0 else sum(conv(u[nn], "pt", valueOnly = TRUE))
@@ -1524,13 +1540,68 @@ gr_polar_finish <- function(p, hs, xlim, ylim, fig_w, fig_h) {
                     72.27) * diff(ylim) / diff(xlim)
     h_out <- fig_h
     if (pw > 0 && ph < min_ph) { ph <- min_ph; h_out <- (fh + min_ph) / 72.27 }
-    xl <- xlim
-    if (ph > 0 && pw / ph > diff(xlim) / diff(ylim))
-      xl <- mean(xlim) + c(-0.5, 0.5) * diff(ylim) * pw / ph
-    list(hs = hs2, xlim = xl, fig_h = h_out)
-  }, out_dpi = .gr_opts$out_dpi), error = function(e) list(hs = hs, xlim = xlim, fig_h = fig_h))
-  out <- attach_header(build(fitted$hs, fitted$xlim), fitted$hs, fit = TRUE, slack = slack)
+    # the centroid panel (5): beside the diagram - as wide as the room it
+    # leaves, at most the diagram's own width, or the diagram a little
+    # smaller for it - or under it
+    side_at <- "none"; side_pt <- 0; pw_main <- pw
+    if (has_side) {
+      dw <- ph * diff(xlim) / diff(ylim)
+      free <- pw - dw - side_gap
+      want <- max(side_min, DA_CP_FRAC * dw)
+      room <- pw - side_gap - max(DA_CP_MIN_DIAGRAM * dw, min_ph * diff(xlim) / diff(ylim))
+      if (pw > 0 && ph > 0 && max(free, room) >= side_min) {
+        side_at <- "right"
+        side_pt <- if (free >= want) min(free, dw) else max(free, min(want, room))
+        pw_main <- pw - side_pt - side_gap
+      } else {
+        # (farther from the diagram's axis title than that title is from the
+        # diagram, so the title reads as the diagram's, not the panel's)
+        side_gap <- max(DA_CP_BELOW_GAP_PT, gr_sp(2 * DA_CP_BELOW_GAP_PT))
+        side_at <- "below"; side_pt <- max(side_min, min(0.62 * dw, pw))
+        h_out <- h_out + (side_pt + side_gap) / 72.27
+      }
+    }
+    xl <- xlim; yl <- ylim
+    if (ph > 0 && pw_main / ph > diff(xlim) / diff(ylim))
+      xl <- mean(xlim) + c(-0.5, 0.5) * diff(ylim) * pw_main / ph
+    else if (has_side && ph > 0 && pw_main > 0 && pw_main / ph < diff(xlim) / diff(ylim))
+      yl <- mean(ylim) + c(-0.5, 0.5) * diff(xlim) * ph / pw_main
+    list(hs = hs2, xlim = xl, ylim = yl, fig_h = h_out, side_at = side_at, side_pt = side_pt, side_gap = side_gap)
+  }, out_dpi = .gr_opts$out_dpi), error = function(e) {
+    g0 <- max(DA_CP_BELOW_GAP_PT, gr_sp(2 * DA_CP_BELOW_GAP_PT))
+    list(hs = hs, xlim = xlim, ylim = ylim, fig_h = fig_h + if (has_side) (side_min + g0) / 72.27 else 0,
+         side_at = if (has_side) "below" else "none", side_pt = side_min, side_gap = g0)
+  })
+  if (!has_side) {
+    out <- attach_header(build(fitted$hs, fitted$xlim), fitted$hs, fit = TRUE, slack = slack)
+    attr(out, "fig_h") <- fitted$fig_h
+    return(out)
+  }
+  # the diagram, its centroid panel in a column at its right (the header
+  # across both) or in a row under its axis title, then the header
+  gt <- ggplot2::ggplotGrob(build(fitted$hs, fitted$xlim, fitted$ylim))
+  pan <- gt$layout[gt$layout$name == "panel", ]
+  sg <- ggplot2::ggplotGrob(side)
+  r_hdr <- max(pan$r)
+  side_u <- grid::unit(c(fitted$side_gap, fitted$side_pt), "pt")
+  if (identical(fitted$side_at, "right")) {
+    gt <- gtable::gtable_add_cols(gt, side_u, pos = max(pan$r))
+    gt <- gtable::gtable_add_grob(gt, sg, t = min(pan$t), b = max(pan$b), l = max(pan$r) + 2L,
+                                  clip = "off", name = "centroid-panel")
+    r_hdr <- max(pan$r) + 2L
+  } else {
+    xb <- gt$layout$b[gt$layout$name == "xlab-b"]
+    xb <- if (length(xb)) max(xb) else max(pan$b)
+    gt <- gtable::gtable_add_rows(gt, side_u, pos = xb)
+    gt <- gtable::gtable_add_grob(gt, sg, t = xb + 2L, l = min(pan$l), r = max(pan$r),
+                                  clip = "off", name = "centroid-panel")
+  }
+  out <- gr_widen_legend(gtable::gtable_add_grob(gt, build_header_grob(fitted$hs, fit = TRUE, slack = slack),
+                                                 t = 1, b = min(pan$t) - 1, l = min(pan$l), r = r_hdr,
+                                                 clip = "off", name = "mheader", z = Inf))
   attr(out, "fig_h") <- fitted$fig_h
+  attr(out, "side_at") <- fitted$side_at
+  attr(out, "side_h") <- if (identical(fitted$side_at, "below")) (fitted$side_pt + fitted$side_gap) / 72.27 else 0
   out
 }
 hdr_nlines <- function(spec) if (is.null(spec)) 0 else
@@ -5486,6 +5557,109 @@ DA_W <- 6.8; DA_H <- 6.6
 SC_W <- 7.2; SC_H <- 5.4
 POLAR_GAP_IN <- 0.14      # white space between the framed panels of their composites
 
+# The enlarged centroid panel of every double-angle plot (build se.12, change
+# set B; review finding F05, which asked for an enlarged centroid view): at
+# print size the 95% confidence region of a centroid is often smaller than
+# its marker in the plot, so each plot gets a
+# companion panel with each cohort's centroid and that region, on the plot's
+# own doubled-angle axes, at a scale set by the regions. Setting
+# astig_centroid_panels (default on). Sizes: the panel's least size (inches;
+# at a reduced text scale, a cell of a combined figure at a journal width),
+# its space from the plot (pt), the centroid markers (ggplot size, times the
+# text scale, not below 0.7 of it) of the plot - smaller than the 3.0 of
+# 1.2.0 builds before se.12, so a region larger than the marker shows around
+# it - and of the panel, and the panel's dashed region lines (the plot's: 0.8).
+DA_CP_MIN_IN <- 1.15
+DA_CP_MIN_CELL_IN <- 0.95
+DA_CP_GAP_PT <- 6
+DA_CP_BELOW_GAP_PT <- 12   # ... and under the plot: from its axis title (pt, at least)
+DA_CP_FRAC <- 0.4          # beside the plot, the panel's width wanted: 0.4 of the diagram's ...
+DA_CP_MIN_DIAGRAM <- 0.85  # ... for which the diagram may be drawn down to 0.85 of its size
+DA_CD_SIZE <- 2.0
+DA_CP_MARK <- 1.3
+DA_CP_LW <- 1.0
+DA_CP_MIN_SPAN <- 0.05     # the panel never shows less than 0.05 D across
+DA_CP_TITLE <- "Centroids enlarged"   # its title in the annotated style (the journal style: the legend)
+
+# The enlarged centroid panel (see DA_CP_MIN_IN): each cohort's centroid (a
+# small pch-23 diamond, under the lines) and its 95% confidence region (the
+# region the plot and the sheet use, st$regions[[g]]$centroid; heavier dashed
+# lines), x = M cos 2θ and y = M sin 2θ in D as in the plot (with-the-rule to
+# the left), equal scales; the view is the regions and centroids with a
+# margin, square, at least DA_CP_MIN_SPAN across, and takes in the origin
+# (gray lines x = 0, y = 0) when it lies within half the regions' extent of
+# them. cd: the centroids drawn (x, y, grp). Returns list(p = the ggplot,
+# origin = TRUE when the origin lines are drawn, groups = the cohorts whose
+# region it draws), or NULL when no cohort has a region.
+g_centroid_panel <- function(st, present, pal, cd, title = NULL) {
+  regs <- list()
+  for (g in present) {
+    e <- st$regions[[g]]$centroid
+    if (!is.null(e) && nrow(e) >= 3 && all(is.finite(c(e$x, e$y)))) regs[[g]] <- e
+  }
+  if (!length(regs)) return(NULL)
+  cd <- cd[cd$grp %in% present & is.finite(cd$x) & is.finite(cd$y), , drop = FALSE]
+  xs <- c(cd$x, unlist(lapply(regs, `[[`, "x"))); ys <- c(cd$y, unlist(lapply(regs, `[[`, "y")))
+  rx <- range(xs); ry <- range(ys)
+  ext <- max(diff(rx), diff(ry), DA_CP_MIN_SPAN)
+  origin <- sqrt(max(0, rx[1], -rx[2])^2 + max(0, ry[1], -ry[2])^2) <= 0.5 * ext
+  if (origin) { rx <- range(rx, 0); ry <- range(ry, 0) }
+  span <- max(diff(rx), diff(ry), DA_CP_MIN_SPAN) * 1.18
+  xlim <- mean(rx) + c(-0.5, 0.5) * span
+  ylim <- mean(ry) + c(-0.5, 0.5) * span
+  # round ticks (steps of 1, 2, 2.5 or 5 x 10^k D), the finest step that puts
+  # at most 4 in the view; labeled with the fewest decimals that show them
+  ticks <- function(lim) {
+    steps <- sort(as.vector(outer(c(1, 2, 2.5, 5), 10^(-3:2))))
+    for (s in steps) {
+      b <- seq(ceiling(lim[1] / s - 1e-9) * s, lim[2] + 1e-12, by = s)
+      if (length(b) <= 4) return(b)
+    }
+    pretty(lim, n = 3)
+  }
+  tick_lab <- function(b) {
+    d <- 0
+    while (d < 4 && any(abs(round(b, d) - b) > 1e-9)) d <- d + 1
+    v <- round(b, d); v[abs(v) < 0.5 * 10^-d] <- 0
+    sprintf("%.*f", d, v)
+  }
+  bx <- ticks(xlim); by <- ticks(ylim)
+  ts <- max(0.7, gr_ts())
+  q <- ggplot2::ggplot()
+  if (origin)
+    q <- q + ggplot2::geom_hline(yintercept = 0, colour = "grey55", linewidth = .3) +
+      ggplot2::geom_vline(xintercept = 0, colour = "grey55", linewidth = .3)
+  q <- q + ggplot2::geom_point(data = cd, ggplot2::aes(x, y, fill = grp), shape = 23,
+                               size = DA_CP_MARK * ts, stroke = .35, colour = "grey10")
+  for (g in names(regs))
+    q <- q + ggplot2::annotate("path", x = regs[[g]]$x, y = regs[[g]]$y, colour = unname(pal[g]),
+                               linewidth = DA_CP_LW, linetype = "42")
+  q <- q +
+    ggplot2::scale_fill_manual(values = pal[present], drop = FALSE) +
+    ggplot2::scale_x_continuous(breaks = bx, labels = tick_lab(bx)) +
+    ggplot2::scale_y_continuous(breaks = by, labels = tick_lab(by)) +
+    ggplot2::coord_fixed(xlim = xlim, ylim = ylim, expand = FALSE, clip = "on") +
+    ggplot2::labs(x = "x (D)", y = "y (D)", title = title) +
+    ggplot2::theme_void(base_size = gr_pt(8)) +
+    ggplot2::theme(legend.position = "none",
+                   panel.grid.major = ggplot2::element_line(colour = "grey88", linewidth = .25),
+                   axis.text.x = ggplot2::element_text(size = gr_pt(7), colour = "grey15",
+                                                       margin = ggplot2::margin(t = gr_sp(1.5))),
+                   axis.text.y = ggplot2::element_text(size = gr_pt(7), colour = "grey15", hjust = 1,
+                                                       margin = ggplot2::margin(r = gr_sp(1.5))),
+                   axis.ticks = ggplot2::element_line(colour = "grey40", linewidth = .25),
+                   axis.ticks.length = grid::unit(gr_sp(2), "pt"),
+                   axis.title.x = ggplot2::element_text(face = "bold", size = gr_pt(8),
+                                                        margin = ggplot2::margin(t = gr_sp(2))),
+                   axis.title.y = ggplot2::element_text(face = "bold", size = gr_pt(8), angle = 90,
+                                                        margin = ggplot2::margin(r = gr_sp(2))),
+                   plot.title = ggplot2::element_text(face = "bold", size = gr_pt(8), hjust = 0.5,
+                                                      margin = ggplot2::margin(b = gr_sp(3))),
+                   plot.background = ggplot2::element_rect(fill = "white", colour = NA),
+                   plot.margin = ggplot2::margin(gr_sp(2), gr_sp(2), gr_sp(2), gr_sp(2)))
+  list(p = q, origin = origin, groups = names(regs))
+}
+
 # The statistics of astig_vector_stats with every cohort name mapped through
 # `lab` (original group name -> the label drawn; cfg$group_labels), so the
 # figures print their labels while the computation - and its cache entry -
@@ -5521,12 +5695,14 @@ g_astig_tlab <- function(test, B = NA, clustered = FALSE) {
 # st: the vector's statistics (astig_vector_stats, cohorts named as `lab`
 # maps them; computed here when NULL). ellipse: the data region ("polygon" =
 # the depth-based convex polygon, "normal", "both"); centroid_region: "bootstrap" or
-# "hotelling" (D6).
+# "hotelling" (D6). centroid_panel: the enlarged centroid panel beside (or
+# under) the plot (g_centroid_panel; setting astig_centroid_panels).
 g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
                                 unit_lab = "Diopters", ellipse = "polygon",
                                 show_centroid_ellipse = TRUE, jcrs = TRUE,
                                 test_method = "robust", fig_w = DA_W, fig_h = DA_H,
-                                st = NULL, centroid_region = "bootstrap", lab = NULL) {
+                                st = NULL, centroid_region = "bootstrap", lab = NULL,
+                                centroid_panel = TRUE) {
   m <- abs(gr_num(mag)); a <- gr_num(axisdeg) %% 180
   ok <- is.finite(m) & is.finite(a) & !is.na(gl) & gl %in% glv
   if (sum(ok) < 3) stop("too few eyes")
@@ -5588,8 +5764,9 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
   # centroids and their confidence regions, which it must never hide - laid
   # out when it is drawn, where the diagram's size is known, so it moves off a
   # centroid that would hide a label (finding F4). cd_size: the centroid
-  # markers' size (below).
-  cd_size <- 3.0 * max(0.7, gr_ts())
+  # markers' size (below; DA_CD_SIZE, small, so a confidence region larger
+  # than the marker shows around it - the enlarged centroid panel shows them all).
+  cd_size <- DA_CD_SIZE * max(0.7, gr_ts())
   cxy <- sm[sm$group %in% present & is.finite(sm$cx) & is.finite(sm$cy), c("cx", "cy"), drop = FALSE]
   ring_labels <- ggplot2::annotation_custom(
     ring_scale_grob(rings, rmax, cxy$cx, cxy$cy, mark_size = cd_size, spoke_fs = gr_pt(2.9 * GR_PT_PER_MM),
@@ -5625,7 +5802,7 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
   cd <- cd[cd$grp %in% present, , drop = FALSE]
   p <- p + ring_labels +
     ggplot2::geom_point(data = cd, ggplot2::aes(x, y, fill = grp), shape = 23,
-                        size = cd_size, stroke = .7, colour = "grey10")
+                        size = cd_size, stroke = .5, colour = "grey10")
   # the 95% confidence region OF THE CENTROID goes on last: at large n it is
   # smaller than the marker (the centroid is precisely estimated), and it must
   # not be buried. Clustered by patient exactly when the printed tests are, so
@@ -5644,6 +5821,11 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
                                  colour = unname(pal[g]), linewidth = .8, linetype = "42")
     }
   }
+  # the enlarged centroid panel: every region the statistics have, also one
+  # too wide for the plot (placed by gr_polar_finish, below)
+  cp <- if (isTRUE(centroid_panel) && isTRUE(show_centroid_ellipse))
+          g_centroid_panel(st, present, pal, cd, title = if (isTRUE(.gr_opts$journal)) NULL else DA_CP_TITLE)
+        else NULL
   p <- p +
     ggplot2::scale_colour_manual(values = pal[present], drop = FALSE) +
     ggplot2::scale_fill_manual(values = pal[present], drop = FALSE) +
@@ -5825,7 +6007,7 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
   # diamond), resampled as the run's tests are (patients when clustered)
   keys <- c(if ("solid" %in% drawn_lt) paste0("solid line, ", solid_txt),
             if ("22" %in% drawn_lt) paste0("dotted line, 95% ", ASTIG_REGION_LABEL, " of the eyes"),
-            if (isTRUE(show_centroid_ellipse) && length(ci_basis))
+            if (isTRUE(show_centroid_ellipse) && (length(ci_basis) || !is.null(cp)))
               paste0("dashed line, 95% confidence region of the centroid: ",
                      if (identical(st$centroid_region, "hotelling")) "Hotelling T² ellipse" else
                        sprintf("%s, %d resamples", ASTIG_CENTROID_LABEL, ASTIG_BOOT_B),
@@ -5850,10 +6032,15 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
   skip_lines <- if (length(reg_skip))
     vapply(unique(reg_skip), function(w) paste0(w, " (", paste(names(reg_skip)[reg_skip == w], collapse = ", "), ")."),
            character(1)) else character(0)
-  # each group left out, with its own reason
+  # each group left out, with its own reason (with the centroid panel: a
+  # region too wide for the plot is drawn there; one that does not exist is
+  # in neither)
+  ci_why <- if (is.null(cp)) ci_skip
+            else ifelse(names(ci_skip) %in% cp$groups, paste0(ci_skip, "; drawn in the centroid panel"),
+                        paste0(ci_skip, "; nor in the centroid panel"))
   ci_note <- if (isTRUE(show_centroid_ellipse) && length(ci_skip))
-    paste0("Centroid confidence region not drawn: ",
-           paste(sprintf("%s (%s)", names(ci_skip), ci_skip), collapse = ", "))
+    paste0("Centroid confidence region not drawn", if (is.null(cp)) "" else " in the double-angle plot", ": ",
+           paste(sprintf("%s (%s)", names(ci_skip), ci_why), collapse = ", "))
     else character(0)
   orient <- paste0("Plus-cylinder format: each spoke is labeled with the plus axis; with-the-rule ",
                    "astigmatism to the left, against-the-rule to the right; ◆ = centroid (mean vector).")
@@ -5917,7 +6104,17 @@ g_double_angle_plot <- function(mag, axisdeg, gl, glv, pal, title,
   # lines, as wrapped to the frame), so the bottom-anchored block never pushes
   # the title off the canvas; fig_w / fig_h are the size the plot is saved at
   out <- gr_polar_finish(p, hs, xlim = c(-rmax * 1.24, rmax * 1.24),
-                         ylim = c(-rmax * 1.24, rmax * 1.24), fig_w = fig_w, fig_h = fig_h)
+                         ylim = c(-rmax * 1.24, rmax * 1.24), fig_w = fig_w, fig_h = fig_h,
+                         side = if (is.null(cp)) NULL else cp$p)
+  # the centroid panel in the legend, where it was placed, after the line key
+  side_at <- attr(out, "side_at") %||% "none"
+  side_lines <- if (!is.null(cp) && side_at %in% c("right", "below"))
+    c(paste0("Centroid panel (", if (identical(side_at, "right")) "at the right of" else "under",
+             " the double-angle plot): each cohort's centroid (◆) and its 95% confidence region (dashed line), ",
+             "enlarged, on the plot's doubled-angle axes x and y in D (with-the-rule to the left), at a scale ",
+             "set by the regions."),
+      if (isTRUE(cp$origin)) "Gray lines in the centroid panel: x = 0 and y = 0 (zero astigmatism).")
+  method <- append(method, side_lines, after = 1L + length(reg_key) + length(ci_note))
   method <- c(method, dropped_line)
   attr(out, "legend") <- list(title = title, lines = method[!is.na(method) & nzchar(method)])
   out
@@ -7005,6 +7202,9 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
     # their own size, or laid out at the chosen width (aspect kept)
     da_w <- if (is.finite(width_in)) width_in else DA_W
     da_h <- DA_H * da_w / DA_W
+    # the enlarged centroid panel of each double-angle plot (setting
+    # astig_centroid_panels, default on; g_centroid_panel)
+    cp_on <- isTRUE(cfg$astig_centroid_panels %||% TRUE)
     sc_w <- if (is.finite(width_in)) width_in else SC_W
     sc_h <- SC_H * sc_w / SC_W
     # journal style: the plot's title and method text in <figure>_legend.txt
@@ -7042,7 +7242,8 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
                       paste0(v$title, " - double-angle"), unit_lab = "Diopters",
                       ellipse = ell, jcrs = jcrs_astig,
                       test_method = astig_meth, fig_w = w, fig_h = h,
-                      st = st, centroid_region = ast$centroid_region, lab = lab_map) })
+                      st = st, centroid_region = ast$centroid_region, lab = lab_map,
+                      centroid_panel = cp_on) })
       p <- tryCatch(mk(da_w, da_h),
                     error = function(e) { logger(paste0("StandardEyes double-angle '",
                       v$key, "' failed", run_lab, ": ", conditionMessage(e))); NULL })
@@ -7091,9 +7292,13 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
       lay <- NULL; moved <- rep(list(character(0)), length(plots))
       if (is.finite(width_in)) {
         lay <- gr_journal_layout(length(plots), width_in, POLAR_GAP_IN)
+        # (a centroid panel placed under its plot makes the cell taller by
+        # design: its height is not a reason for the short statistics lines)
+        side_h <- function(q) { v <- suppressWarnings(as.numeric(attr(q, "side_h"))[1])
+          if (length(v) && is.finite(v)) v else 0 }
         plots <- lapply(seq_along(plots), function(i) {
           cb <- gr_build_cell(function() mks[[i]](lay$pw, lay$ph), lay, short_ok = fs$journal,
-                              need = function(q) fig_h_of(q, 0))
+                              need = function(q) fig_h_of(q, 0) - side_h(q))
           if (is.null(cb$p)) {
             logger(sprintf("StandardEyes polar plot %d%s: its cell of the combined figure could not be built at the journal width (%s) - the combined figure shows its own file's layout.",
                            i, run_lab, cb$why %||% "unknown error"))
@@ -7106,6 +7311,17 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
       list(plots = plots, need_h = vapply(plots, function(p) fig_h_of(p, 0), numeric(1)),
            lay = lay, moved = moved)
     }
+    # the legend lines of a combined figure's panels: their own files' lines,
+    # with the centroid panel placed as in the cell (at a journal width a cell
+    # can have it under a plot whose own file has it at the right)
+    cell_legs <- function(legs, cells) lapply(seq_along(legs), function(i) {
+      l <- legs[[i]]
+      cl <- attr(cells$plots[[i]], "legend")$lines
+      k <- which(grepl("^Centroid panel \\(", l$lines %||% character(0)))
+      ck <- grep("^Centroid panel \\(", cl %||% character(0), value = TRUE)
+      if (length(k) && length(ck)) l$lines[k[1]] <- ck[1]
+      l
+    })
     # a composite's legend: its panels by letter, then the method text of each;
     # a composite written as pages (compose_panels attr "pages") gets one per
     # page, the letters continuing from page to page (R2-2)
@@ -7140,7 +7356,7 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
         preview_dir = preview_dir(), logger = logger, width_in = width_in, min_pw = GR_POLAR_MIN_PW,
         need_h = cells$need_h, journal = cells$lay)
       written <- c(written, got)
-      if (length(got)) composite_legend(dap, da_leg, base, "Double-angle plots", got, cells$moved)
+      if (length(got)) composite_legend(dap, cell_legs(da_leg, cells), base, "Double-angle plots", got, cells$moved)
     } else if (length(dap) == 1) {
       preview_single(dap[[1]], paste0("StandardEyes_DoubleAngle_", dac[1], tg), da_w, fig_h_of(dap[[1]], da_h))
     }

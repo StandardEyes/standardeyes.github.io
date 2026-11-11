@@ -168,6 +168,9 @@ DEFAULTS: dict[str, Any] = {
     # with the double-angle figures, tab-delimited input files for the WHWK
     # functions in the figures' "WHWK input" folder (decision R3-3)
     "astig_whwk_files": True,
+    # beside (or under) each double-angle plot, an enlarged panel of the
+    # cohorts' centroids with their 95% confidence regions (build se.12)
+    "astig_centroid_panels": True,
     # follow the JCRS 2025 astigmatism working group: total SD, a bivariate
     # centroid test and Holm-adjusted group comparisons. Off = the older
     # behaviour (two separate univariate tests, no adjustment).
@@ -268,6 +271,7 @@ SWITCHES = {
     "semicircle_figs": "Semicircle plots",
     "astig_sheet": "Astigmatism sheet",
     "astig_whwk_files": "WHWK input files",
+    "astig_centroid_panels": "Enlarged centroid panels",
     "astig_jcrs_standard": "JCRS 2025 astigmatism standard",
     "cluster_by_patient": "Cluster p-values by patient",
     "do_regression": "Adjusted regression",

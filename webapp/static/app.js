@@ -274,6 +274,8 @@ function defaultState(){
       // the WHWK input files beside the double-angle figures (R3-3)
       astig_sheet:true, astig_region:"polygon", astig_centroid_region:"bootstrap",
       astig_whwk_files:true,
+      // the enlarged centroid panel beside (or under) each double-angle plot
+      astig_centroid_panels:true,
       astig_jcrs_standard:true, cluster_by_patient:true, astig_test_method:"robust",
       astig_vector_cols:{}, astig_target:{},
       do_regression:true, regression_stage:"unmatched", regression_covariates_raw:[],
@@ -1012,7 +1014,8 @@ function builder(){
         names.push('double-angle');
         want.push('double-angle plots of preoperative astigmatism, SIA and the prediction error (PE)'+
           (tgt ? ', plus postoperative astigmatism if any target is not plano'
-               : ' - with no target mapped, PE is the postoperative astigmatism'));
+               : ' - with no target mapped, PE is the postoperative astigmatism')+
+          (s.astig_centroid_panels ? ', each with its centroids enlarged' : ''));
       }
       if(s.semicircle_figs){ names.push('semicircle'); want.push('semicircle plots of TIA, SIA and DV'); }
       if(!want.length) return '';
@@ -1658,6 +1661,7 @@ function builder(){
         astig_region:s.astig_region,
         astig_centroid_region:s.astig_centroid_region,
         astig_whwk_files:s.astig_whwk_files,
+        astig_centroid_panels:s.astig_centroid_panels,
         astig_jcrs_standard:s.astig_jcrs_standard,
         cluster_by_patient:s.cluster_by_patient,
         astig_test_method:s.astig_test_method,
@@ -1694,7 +1698,7 @@ function builder(){
        "figure_style","p_style",
        "stability_figs",
        "astig_panels","double_angle_figs","semicircle_figs","astig_sheet",
-       "astig_region","astig_centroid_region","astig_whwk_files","astig_jcrs_standard",
+       "astig_region","astig_centroid_region","astig_whwk_files","astig_centroid_panels","astig_jcrs_standard",
        "cluster_by_patient","astig_test_method",
        "stability_include_preop","stability_change_threshold",
        "do_regression","regression_stage","regression_covariates_raw",
@@ -1723,8 +1727,8 @@ function builder(){
                         "use_matching_weights_in_gee","add_gee_columns","do_standardize_minus_cyl","do_logmar",
                         "make_meyestro","make_alpins","make_pub_table","export_filtered_csv","make_graphs",
                         "stability_figs","stability_include_preop","astig_panels","double_angle_figs",
-                        "semicircle_figs","astig_sheet","astig_whwk_files","astig_jcrs_standard",
-                        "cluster_by_patient","do_regression"]){
+                        "semicircle_figs","astig_sheet","astig_whwk_files","astig_centroid_panels",
+                        "astig_jcrs_standard","cluster_by_patient","do_regression"]){
           const sw=s[k];
           if(typeof sw==="string"){
             const v=sw.trim().toLowerCase();
@@ -2169,7 +2173,8 @@ function builder(){
                 gee:"clustered GEE Wald", classic:"classic (eyes independent)"}[s.astig_test_method] || s.astig_test_method;
       out.push(["Astigmatism", "region of the eyes: "+reg+"; centroid CI: "+cr+"; tests: "+tm+
         "; JCRS 2025 sheet "+(s.astig_sheet ? "on" : "off")+
-        "; WHWK input files "+((s.make_graphs && s.double_angle_figs && s.astig_whwk_files) ? "on" : "off")]);
+        "; WHWK input files "+((s.make_graphs && s.double_angle_figs && s.astig_whwk_files) ? "on" : "off")+
+        "; enlarged centroid panels "+((s.make_graphs && s.double_angle_figs && s.astig_centroid_panels) ? "on" : "off")]);
       return out;
     },
     // the run's notes (server checks before R starts) and the engine's

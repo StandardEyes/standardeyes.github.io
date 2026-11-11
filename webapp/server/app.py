@@ -938,12 +938,24 @@ def match_preview(req: MatchPreviewReq):
             r_runs.append({"label": key, "csv": csv_path, "text_covs": cat,
                            "excluded_covs": dropped,
                            "per_patient_covs": [c for c in enc.columns if c in pp_cols]})
-        # per-covariate missingness by group (explains complete-case loss)
+        # per-covariate missingness by group (explains complete-case loss).
+        # Patients matched (V12-1): counted per (patient, group) unit, which
+        # lacks a covariate only when every one of its eyes lacks it - an eye
+        # missing a value stays in matching through its fellow eye, as in
+        # analysis.R psm_unit_table
+        by_unit = unit_used == "patient" and pid is not None
         mi = {}
         for gname in groups:
             gmask = (frame["__grp"] == gname).values
-            per_cov = {c: int(preview._is_missing(frame.loc[gmask, c]).sum()) for c in covs}
-            mi[gname] = {"n": int(gmask.sum()),
+            if by_unit:
+                keys = pid[gmask].values
+                per_cov = {c: int(preview._is_missing(frame.loc[gmask, c]).groupby(keys).all().sum())
+                           for c in covs}
+                n_g = int(pd.Series(keys).nunique())
+            else:
+                per_cov = {c: int(preview._is_missing(frame.loc[gmask, c]).sum()) for c in covs}
+                n_g = int(gmask.sum())
+            mi[gname] = {"n": n_g,
                          "missing": {k: v for k, v in per_cov.items() if v > 0}}
         missing_info[label_r] = mi
 

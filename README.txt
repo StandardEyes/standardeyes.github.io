@@ -32,7 +32,9 @@ and it matches eyes.
   one matching unit: eye-level covariates are averaged over
   those eyes, per-patient covariates are taken once, and
   the propensity model, caliper, ratio and order work on
-  these units. Every eye of a matched patient enters the
+  these units (exact and coarsened exact matching form
+  their strata, subclassification its subclasses, on the
+  units). Every eye of a matched patient enters the
   matched cohort with the patient's matching weight, so
   both eyes enter or leave together; balance (love plot,
   PSM sheet) is computed on the patients. The outcome
@@ -47,7 +49,19 @@ and it matches eyes.
   correlation 0.984", "... did not converge" or "...
   unstable step". The outcome is called constant within
   patients only when it is; the figure legends point to
-  the run log. The models do not change.
+  the run log, which counts the reasons by kind. The
+  models do not change.
+
+* Per-patient models when a patient has eyes in two
+  groups. A variable marked "per patient" is modeled on
+  one row per patient per group; a patient with a row in
+  each of two groups makes those rows dependent, so on an
+  unmatched cohort they are now fitted by an independence
+  GEE clustered by patient (the matched cohort's model)
+  instead of an ordinary linear or logistic model. The
+  Model column says so and counts rows and patients ("294
+  rows from 275 patients"). Data without such patients
+  give the 1.1.0 numbers.
 
 * GEE fits converge more tightly. Every GEE now iterates
   until no coefficient changes by more than 1e-8
@@ -187,7 +201,9 @@ What changed, and how to get the 1.0.0 behavior back:
   model on the GEE and Regression sheets (on a matched
   cohort by a GEE with an independence working
   correlation and robust SE clustered by patient, like
-  every matched model), never by an eye-level GEE. Any
+  every matched model; since 1.2.0 also when a patient has
+  eyes in more than one group), never by an eye-level
+  GEE. Any
   other exchangeable GEE is kept only
   if it converged, its working correlation is below 0.95
   and one further scoring step moves no coefficient by
@@ -577,7 +593,13 @@ or patients (both eyes together). With patients, each
 patient's analyzed eyes in a group form one matching unit:
 eye-level covariates are averaged over those eyes,
 per-patient covariates are taken once, and the propensity
-model, caliper, ratio and order work on these units. Every
+model, caliper, ratio and order work on these units (exact
+and coarsened exact matching form their strata,
+subclassification its subclasses, on the units). A
+covariate an eye lacks is taken from the patient's other
+eye in the group (the run log counts these patients), so a
+patient is left out of matching only when all of its eyes
+in the group lack a covariate. Every
 eye of a matched patient enters the matched cohort with
 the patient's matching weight, so both eyes enter or leave
 together; balance (love plot, PSM sheet) is computed on

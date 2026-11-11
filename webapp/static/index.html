@@ -880,7 +880,7 @@
                 </template>
                 <template x-for="p in run.pairings" :key="'m'+p.treated">
                   <p class="small muted" x-show="missingList(run.label,p.treated).length" style="margin:4px 0 0">
-                    <b x-text="p.treated"></b> rows lost to missing covariates —
+                    <b x-text="p.treated"></b> <span x-text="mpByPatient() ? 'patients lost to missing covariates' : 'rows lost to missing covariates'"></span> —
                     <template x-for="[cov,n] in missingList(run.label,p.treated)" :key="cov">
                       <span style="margin-right:10px"><span x-text="cov"></span>: <strong x-text="n"></strong></span>
                     </template>
@@ -904,7 +904,7 @@
                 </template>
               </div>
             </template>
-            <p class="muted small">A row needs <b>every</b> matching covariate present to enter matching; "no match in caliper" = no reference row close enough in propensity score. Loosen by removing sparse covariates, widening the caliper, or disabling the caliper (empty = none). Unmatched patient IDs are listed above (capped at 300 per side).</p>
+            <p class="muted small"><span x-show="!mpByPatient()">A row needs <b>every</b> matching covariate present to enter matching; </span>"no match in caliper" = no reference <span x-text="mpByPatient() ? 'patient' : 'row'"></span> close enough in propensity score. Loosen by removing sparse covariates, widening the caliper, or disabling the caliper (empty = none). Unmatched patient IDs are listed above (capped at 300 per side).</p>
             <p class="muted small" x-show="mpByPatient()">Patients matched (both eyes kept together): the counts are patients, with their eyes in brackets; a patient needs a value of every covariate in at least one eye.</p>
             <p class="small warnline" role="alert" x-show="matchprev.data.unit_note" x-text="matchprev.data.unit_note"></p>
           </div>

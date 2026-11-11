@@ -399,9 +399,11 @@ gr_gee_legend_lines <- function(texts, polar = FALSE) {
     # an independence refit named in a test label (decision R3-4)
     if (any(grepl("independence working correlation", t, fixed = TRUE)))
       # (decision V12-2: the reason is stated, never assumed)
+      # (the figure's short test name leaves the reason out, gr_short_test;
+      # the run log counts the reasons of the figures' refits by kind)
       out <- c(out, paste0("Independence working correlation: the exchangeable GEE of that test was not accepted ",
                            "(working correlation ", GEE_EXCH_ALPHA_MAX, " or more, no convergence, or an unstable ",
-                           "scoring step - the run log gives the reason of each test); the robust SE stay ",
+                           "scoring step - the run log counts the reasons); the robust SE stay ",
                            "clustered by patient."))
   }
   # a standard panel's "(GEE not fitted)": the permutation test over patients
@@ -556,8 +558,9 @@ GR_PERM_TEST <- "Permutation test over patients (GEE not fitted)"
 # The test name as printed in a two-group header, short enough for one line
 gr_short_test <- function(lab) {
   lab <- as.character(lab)
-  # an independence refit (R3-4) keeps its name, shortened
-  # (its reason, decision V12-2, is in the full label and the run log)
+  # an independence refit (R3-4) keeps its name, shortened: its reason
+  # (decision V12-2) is left out here - the run log counts the reasons, and the
+  # summary table's test label of the same variable gives it
   if (grepl(GEE_INDEP_REFIT_HEAD, lab, fixed = TRUE))
     return(sub("clustered by patient; independence working correlation \\(the exchangeable fit was not accepted[^()]*\\)",
                "clustered; independence working correlation", lab))

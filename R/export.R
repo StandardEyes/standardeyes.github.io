@@ -1003,8 +1003,8 @@ gee_skip_note <- function(g, corstr = NULL) {
                                 "GEE - see the 'Model' column."),
            if (n_pp_gee > 0) paste0(n_pp_gee, " outcome(s) are per-patient variables: modeled on one row per patient ",
                                     "by a GEE with an independence working correlation and the robust SE clustered by ",
-                                    "patient (", gee_se_label(1), "; matched cohort), never by an eye-level GEE - see ",
-                                    "the 'Model' column."),
+                                    "patient (", gee_se_label(1), "; a matched cohort, or patients with eyes in more ",
+                                    "than one group), never by an eye-level GEE - see the 'Model' column."),
            if (n_ind > 0) paste0(n_ind, " outcome(s) were refitted with an independence working correlation: the ",
                                  "exchangeable fit was not accepted (working correlation 0.95 or more, no ",
                                  "convergence, or an unstable scoring step - the 'Model' column gives the reason of ",
@@ -1379,6 +1379,11 @@ weights_summary <- function(w) {
     subclass = c("ratio", "replace", "caliper", "std_caliper", "m_order"),
     character(0))
 }
+# A psm_unit the engine did not know (pipeline.R keeps it as
+# cfg$psm_unit_rejected; the eyes were matched): "eyes (matching unit 'pair'
+# is not known)", for the PSM sheet and the Manifest
+psm_unit_rejected_text <- function(v)
+  sprintf("eyes (matching unit '%s' is not known)", as.character(unlist(v))[1])
 .psm_setting_labels <- c(distance = "distance", ratio = "ratio", replace = "replacement",
                          caliper = "caliper", std_caliper = "standardized caliper",
                          m_order = "matching order")
@@ -1496,11 +1501,16 @@ psm_settings_table <- function(psm, reference_group, patient_id_raw = NULL, pair
                                   paste(.psm_setting_labels[intersect(names(.psm_setting_labels), nu)],
                                         collapse = ", "))
   by_patient <- identical(psm$unit, "patient")
+  # what works on the units follows the settings this method uses (the rows
+  # above), so the unit row never names one listed as not used
   if (by_patient && exists("psm_unit_rows", mode = "function"))
-    rows <- c(rows, psm_unit_rows(units, treated %||% "treated group", reference_group))
+    rows <- c(rows, psm_unit_rows(units, treated %||% "treated group", reference_group, not_used = nu,
+                                  method = method, distance = psm$distance, caliper = !is.null(psm$caliper)))
   else if (isTRUE(psm$unit_fallback))
     rows[[length(rows) + 1]] <- c("Matching unit", paste0("eyes (patient-level matching was requested, but no ",
                                                           "patient ID column is mapped)"))
+  else if (length(psm$unit_rejected))
+    rows[[length(rows) + 1]] <- c("Matching unit", psm_unit_rejected_text(psm$unit_rejected))
   rows <- c(rows, list(
     c("Random seed (matching)", fmt_setting(psm$seed)),
     c("Reference group", fmt_setting(reference_group)),
@@ -1544,7 +1554,8 @@ psm_settings_text <- function(psm) {
     if (!is.null(psm$seed))    paste("seed", one(psm$seed, "")),
     # the matching unit (decision V12-1); an eye-level match reads as in 1.1.0
     if (identical(psm$unit, "patient")) paste0("unit: ", get0("PSM_PATIENT_UNIT_TEXT", ifnotfound = "patients"))
-    else if (isTRUE(psm$unit_fallback)) "unit: eyes (patient-level matching requested, but no patient ID column is mapped)")
+    else if (isTRUE(psm$unit_fallback)) "unit: eyes (patient-level matching requested, but no patient ID column is mapped)"
+    else if (length(psm$unit_rejected)) paste0("unit: ", psm_unit_rejected_text(psm$unit_rejected)))
   txt <- paste(parts, collapse = ", ")
   if (length(nu))
     txt <- paste0(txt, " (", paste(.psm_setting_labels[intersect(names(.psm_setting_labels), nu)], collapse = ", "),
@@ -1926,7 +1937,8 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
     psm <- list(method = cfg$psm_method, distance = cfg$psm_distance, ratio = cfg$psm_ratio,
                 replace = cfg$psm_replace, caliper = cfg$psm_caliper,
                 std_caliper = cfg$psm_std_caliper, m_order = cfg$psm_m_order,
-                seed = cfg$psm_seed, unit = cfg$psm_unit, unit_fallback = cfg$psm_unit_fallback)
+                seed = cfg$psm_seed, unit = cfg$psm_unit, unit_fallback = cfg$psm_unit_fallback,
+                unit_rejected = cfg$psm_unit_rejected)
 
     # .se_eye: the row of `dat` each matched row is, so the matched-only
     # workbook can count a reference eye matched in several pairings once
@@ -2285,7 +2297,7 @@ describe_sheet <- function(nm) {
     c("^Astigmatism vectors$", paste0("Per eye: the astigmatism vectors PE, SIA, PRE, POST and the Alpins TIA and DV - ",
                                       "magnitude, plus axis and doubled-angle x, y - input for external tools.")),
     c("^Astig_M_",            paste("Astigmatism per the JCRS 2025 standard for the matched cohort of one pairing (matched rows),", jcrs)),
-    c("^GEE_Main_",           "Clustered GEE with the group as the only predictor; per-patient variables by an ordinary model on one row per patient."),
+    c("^GEE_Main_",           "Clustered GEE with the group as the only predictor; per-patient variables by an ordinary model on one row per patient (an independence GEE clustered by patient when a patient has eyes in more than one group)."),
     c("^GEE_Adj_M_",          "Adjusted clustered GEE on the matched cohort (covariates listed per row and in the Manifest)."),
     c("^GEE_Adj_",            "Clustered GEE adjusted for the covariates listed per row and in the Manifest (a variable is never adjusted for itself)."),
     c("^GEE_M_",              "Clustered GEE on the matched cohort (independence working correlation); per-patient variables by an independence GEE on one row per patient."),
@@ -2497,7 +2509,8 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
       ps <- list(method = cfg$psm_method, distance = cfg$psm_distance, ratio = cfg$psm_ratio,
                  replace = cfg$psm_replace, caliper = cfg$psm_caliper,
                  std_caliper = cfg$psm_std_caliper, m_order = cfg$psm_m_order, seed = cfg$psm_seed,
-                 unit = cfg$psm_unit, unit_fallback = cfg$psm_unit_fallback)
+                 unit = cfg$psm_unit, unit_fallback = cfg$psm_unit_fallback,
+                 unit_rejected = cfg$psm_unit_rejected)
       if (exists(".psm_settings", mode = "function"))
         ps <- tryCatch(.psm_settings(ps), error = function(e) ps)
       if (length(match_methods)) ps$method_used <- match_methods
@@ -2664,8 +2677,8 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
                "by more than ", get0("GEE_EXCH_STEP_MAX", ifnotfound = 0.01), " SE - otherwise refitted with an ",
                "independence working correlation and labeled so (sheets, tables, figures, run log); independence on ",
                "matched cohorts; variables marked per patient are modeled on one row per patient by an ordinary ",
-               "linear or logistic model (on matched cohorts by an independence GEE with the robust SE clustered ",
-               "by patient), never by an eye-level GEE")),
+               "linear or logistic model (on matched cohorts, and when a patient has eyes in more than one group, ",
+               "by an independence GEE with the robust SE clustered by patient), never by an eye-level GEE")),
       c("Table tests",          table_tests_text(cfg, has_pid = !is.na(pid[1]) && pid[1] %in% names(dat))),
       c("Multiplicity",         paste0("Holm within each variable across the comparisons of each group with ",
                                        "the reference (summary-table GEE and adjusted columns, tagged [Holm]; ",

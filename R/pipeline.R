@@ -961,6 +961,9 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
   # "eye" used; patients need a patient-ID column - without one the eyes are
   # matched, said in the log and the Manifest (no silent fallback)
   if (isTRUE(cfg$do_matching)) {
+    # an unknown value is kept for the PSM sheet and the Manifest ("unit: eyes
+    # (matching unit 'pair' is not known)")
+    cfg$psm_unit_rejected <- psm_unit_rejected(cfg$psm_unit)
     cfg$psm_unit <- psm_unit_of(cfg$psm_unit, logger)
     if (identical(cfg$psm_unit, "patient") &&
         !(length(res$patient_id_clean) && !is.na(res$patient_id_clean[1]))) {

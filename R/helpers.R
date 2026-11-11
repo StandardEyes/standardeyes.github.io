@@ -737,14 +737,28 @@ gee_fit_checked <- function(fit_fun, corstr = "exchangeable") {
 # refit here; the pipeline and the figure pass log how many (and reset).
 gee_refit_note <- function(what) .gee_inf$refits <- c(.gee_inf$refits, what)
 gee_refit_take <- function() { r <- .gee_inf$refits %||% character(0); .gee_inf$refits <- character(0); r }
+# The kind of a refit's reason, for counting: "the outcome is constant within
+# patients" when it is (its working correlation of about 1 follows from it),
+# else "working correlation 0.95 or more", "did not converge", "unstable step"
+# or another short reason as gee_refit_reason_short words it - never the
+# value itself, so tests with one cause count together.
+gee_refit_reason_kind <- function(why) {
+  s <- gee_refit_reason_short(why)
+  if (grepl(GEE_CONSTANT_WITHIN, s, fixed = TRUE)) return(GEE_CONSTANT_WITHIN)
+  if (grepl("^working correlation [-+0-9.]", s)) return(sprintf("working correlation %.2f or more", GEE_EXCH_ALPHA_MAX))
+  if (!nzchar(s)) "reason not recorded" else s
+}
 # reasons: the refits' reasons (gee_refit_take), counted in the line by their
-# short words (decision V12-2)
+# kind (decision V12-2), e.g. "(working correlation 0.95 or more: 1, the
+# outcome is constant within patients: 2)", the kinds joined by ", " (a
+# reason's own "; " stays inside its kind)
 gee_refit_log_text <- function(n, where, reasons = NULL) {
-  rs <- if (length(reasons)) table(vapply(reasons, gee_refit_reason_short, character(1), USE.NAMES = FALSE)) else NULL
+  kd <- vapply(as.character(reasons), gee_refit_reason_kind, character(1), USE.NAMES = FALSE)
+  rs <- if (length(kd)) table(factor(kd, levels = unique(kd))) else NULL
   sprintf(paste0("%s: in %d clustered test(s) the exchangeable GEE was not accepted (%s) - refitted with an ",
                  "independence working correlation; the test name says so."),
           where, n,
-          if (length(rs)) paste(sprintf("%s: %d", names(rs), as.integer(rs)), collapse = "; ")
+          if (length(rs)) paste(sprintf("%s: %d", names(rs), as.integer(rs)), collapse = ", ")
           else sprintf("working correlation %.2f or more, no convergence, or an unstable step", GEE_EXCH_ALPHA_MAX))
 }
 

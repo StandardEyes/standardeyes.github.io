@@ -398,9 +398,10 @@ gr_gee_legend_lines <- function(texts, polar = FALSE) {
                            "P values of this figure."))
     # an independence refit named in a test label (decision R3-4)
     if (any(grepl("independence working correlation", t, fixed = TRUE)))
+      # (decision V12-2: the reason is stated, never assumed)
       out <- c(out, paste0("Independence working correlation: the exchangeable GEE of that test was not accepted ",
-                           "(working correlation ", GEE_EXCH_ALPHA_MAX, " or more, no convergence, or not at its ",
-                           "solution - the outcome is almost constant within patients); the robust SE stay ",
+                           "(working correlation ", GEE_EXCH_ALPHA_MAX, " or more, no convergence, or an unstable ",
+                           "scoring step - the run log gives the reason of each test); the robust SE stay ",
                            "clustered by patient."))
   }
   # a standard panel's "(GEE not fitted)": the permutation test over patients
@@ -556,9 +557,10 @@ GR_PERM_TEST <- "Permutation test over patients (GEE not fitted)"
 gr_short_test <- function(lab) {
   lab <- as.character(lab)
   # an independence refit (R3-4) keeps its name, shortened
-  if (grepl(GEE_INDEP_REFIT, lab, fixed = TRUE))
-    return(sub(paste0("clustered by patient; ", GEE_INDEP_REFIT), "clustered; independence working correlation",
-               lab, fixed = TRUE))
+  # (its reason, decision V12-2, is in the full label and the run log)
+  if (grepl(GEE_INDEP_REFIT_HEAD, lab, fixed = TRUE))
+    return(sub("clustered by patient; independence working correlation \\(the exchangeable fit was not accepted[^()]*\\)",
+               "clustered; independence working correlation", lab))
   switch(lab,
     "GEE (clustered by patient)"          = "GEE (clustered)",
     "GEE on ranks (clustered by patient)" = "GEE on ranks (clustered)",
@@ -817,7 +819,7 @@ gr_test_y <- function(x, kind, event = NULL) {
 # "GEE (clustered by patient; independence working correlation ...)".
 gr_refit_label <- function(lab, p) {
   if (!nzchar(as.character(attr(p, "refit") %||% "")[1])) return(lab)
-  sub("\\)$", paste0("; ", GEE_INDEP_REFIT, ")"), lab)
+  sub("\\)$", paste0("; ", gee_refit_label(attr(p, "refit")), ")"), lab)
 }
 
 # out$reason says why no P was computed (empty when one was), see p_not_tested()
@@ -4197,7 +4199,7 @@ astig_bivariate_p <- function(x, y, g, id = NULL, w = NULL, matched = isTRUE(.gr
         if (nzchar(fc$refit)) gee_refit_note(fc$refit)
         pg <- gr_wald_p(f2, grep("(^g)|(:g)", names(stats::coef(f2))))
         if (is.finite(pg))
-          return(structure(as.numeric(pg), test = if (nzchar(fc$refit)) paste0(gtest, ", ", GEE_INDEP_REFIT) else gtest,
+          return(structure(as.numeric(pg), test = if (nzchar(fc$refit)) paste0(gtest, ", ", gee_refit_label(fc$refit)) else gtest,
                            few = few_patient_groups(idk, g[ok], unit)))
       }
     }
@@ -7114,8 +7116,9 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
   # every test whose clustered GEE was fitted but failed - the univariate panel
   # tests (p_omnibus) and the double-angle centroid tests (astig_bivariate_p) -
   # and whose P therefore comes from the unclustered test
-  n_refit <- length(gee_refit_take())
-  if (n_refit > 0) logger(gee_refit_log_text(n_refit, paste0("StandardEyes figures", run_lab)))
+  refits <- gee_refit_take()
+  n_refit <- length(refits)
+  if (n_refit > 0) logger(gee_refit_log_text(n_refit, paste0("StandardEyes figures", run_lab), refits))
   if ((.gr_opts$n_gee_fallback %||% 0L) > 0)
     logger(sprintf("StandardEyes figures%s: in %d test(s) the clustered GEE could not be fitted (no convergence, a numerically singular covariance, or a group of a 0/1 outcome without events); those P values come from a permutation test over patients (%d permutations, %s; a double-angle centroid comparison: the unclustered Hotelling / Pillai test) and are labeled \"GEE not fitted\" on the figure.",
                    run_lab, .gr_opts$n_gee_fallback, CLUSTER_PERM_B, CLUSTER_PERM_UNITS))

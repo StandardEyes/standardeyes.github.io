@@ -803,7 +803,8 @@ def match_preview(req: MatchPreviewReq):
     if not cfg.get("do_matching"):
         raise HTTPException(400, "Matching is disabled.")
     why = config_schema.psm_method_problem(cfg) or \
-        config_schema.psm_distance_problem({**config_schema.DEFAULTS, **cfg})
+        config_schema.psm_distance_problem({**config_schema.DEFAULTS, **cfg}) or \
+        config_schema.psm_unit_problem(cfg)
     if why:
         raise HTTPException(400, why)
     if config_schema.psm_method(cfg) != "nearest":
@@ -850,6 +851,14 @@ def match_preview(req: MatchPreviewReq):
         runs.append(("All", work))
 
     pid_col = preview.resolve(cfg.get("patient_id_raw"), resolver)
+    # patient-level matching (decision V12-1): the R side forms the same
+    # (patient, group) units as the run from the PatientID column; the
+    # per-patient covariates are taken once there. Without a patient ID the
+    # eyes are matched, as in the run, and the answer says so
+    unit = config_schema.psm_unit(cfg)
+    unit_used = "patient" if unit == "patient" and pid_col is not None else "eye"
+    pp_cols = {c for c in (preview.resolve(x, resolver) for x in (cfg.get("patient_level_params_raw") or []))
+               if c is not None}
     # covariates readxl reads as text are judged on the whole sheet column,
     # typed as the run types it before matching: after the plus-to-minus
     # cylinder standardisation (its sphere / cylinder / axis columns become
@@ -927,7 +936,8 @@ def match_preview(req: MatchPreviewReq):
             # 'NA' (not an empty field) so read.csv sees missing text as missing
             slim.to_csv(csv_path, index=False, encoding="utf-8-sig", na_rep="NA")
             r_runs.append({"label": key, "csv": csv_path, "text_covs": cat,
-                           "excluded_covs": dropped})
+                           "excluded_covs": dropped,
+                           "per_patient_covs": [c for c in enc.columns if c in pp_cols]})
         # per-covariate missingness by group (explains complete-case loss)
         mi = {}
         for gname in groups:
@@ -948,7 +958,7 @@ def match_preview(req: MatchPreviewReq):
                     "caliper": psm["psm_caliper"],
                     "std_caliper": bool(cfg.get("psm_std_caliper", D["psm_std_caliper"])),
                     "m_order": cfg.get("psm_m_order", D["psm_m_order"]),
-                    "seed": psm["psm_seed"]},
+                    "seed": psm["psm_seed"], "unit": unit_used},
             "runs": r_runs}
     pcfg_path = os.path.join(prev_dir, f"mp_{stamp}.json")
     with open(pcfg_path, "w", encoding="utf-8") as fh:
@@ -1007,7 +1017,10 @@ def match_preview(req: MatchPreviewReq):
             entry["note"] = (f"The reference group '{reference}' has no rows in run '{label_r}' - "
                              f"'{run_ref}' is the reference there, as in the run.")
         out_runs.append(entry)
-    result = {"runs": out_runs, "missing_info": missing_info}
+    result = {"runs": out_runs, "missing_info": missing_info, "unit": unit_used}
+    if unit == "patient" and unit_used != "patient":
+        result["unit_note"] = ("Matching by patient needs a patient ID column, and none is mapped - "
+                               "the eyes are matched (map the patient ID under Column roles).")
 
     # live matched-data preview: map R's matched RowIDs back onto the run frames
     matched_preview = {}

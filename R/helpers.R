@@ -573,9 +573,56 @@ gee_inference_text <- function(mode = gee_small_sample(), unit = "patient") {
 # ------------------------------------------------------------
 GEE_EXCH_ALPHA_MAX <- 0.95
 GEE_EXCH_STEP_MAX <- 0.01
-GEE_INDEP_REFIT <- "independence working correlation (the outcome is almost constant within patients)"
+# The label of an independence refit states the actual reason (decision
+# V12-2): "independence working correlation (the exchangeable fit was not
+# accepted: working correlation 0.973)", "(...: did not converge)", "(...:
+# unstable step)"; "the outcome is constant within patients" is added only when
+# it is (within-patient SD 0 in every patient with two or more of the model's
+# eyes). GEE_INDEP_REFIT_HEAD is the part every such label starts with (the
+# readers that recognize a refit look for it); GEE_INDEP_REFIT keeps its 1.1.0
+# name for the same start, so grepl(GEE_INDEP_REFIT, label) still finds every
+# refit - it is never printed on its own.
+GEE_INDEP_REFIT_HEAD <- "independence working correlation (the exchangeable fit was not accepted"
+GEE_INDEP_REFIT <- GEE_INDEP_REFIT_HEAD
+GEE_CONSTANT_WITHIN <- "the outcome is constant within patients"
 GEE_PER_PATIENT <- "per patient (one row per patient)"
 .gee_inf$refits <- character(0)
+
+# The reason of a rejected exchangeable fit (gee_exch_reject, with the
+# constancy gee_fit_checked adds) in the label's short words.
+gee_refit_reason_short <- function(why) {
+  w <- as.character(why %||% "")[1]
+  if (is.na(w)) w <- ""
+  const <- grepl(GEE_CONSTANT_WITHIN, w, fixed = TRUE)
+  base <- trimws(sub(paste0(";? ?", GEE_CONSTANT_WITHIN), "", w))
+  s <- if (grepl("^estimated working correlation", base))
+         sub("^estimated working correlation ([-+0-9.eEInfNa]+).*$", "working correlation \\1", base)
+       else if (grepl("did not converge", base, fixed = TRUE)) "did not converge"
+       else if (grepl("^not at its solution", base)) "unstable step"
+       else if (grepl("fit failed", base, fixed = TRUE)) "the fit failed"
+       else if (grepl("could not be estimated", base, fixed = TRUE)) "working correlation not estimable"
+       else if (grepl("scoring check", base, fixed = TRUE)) "scoring check not computable"
+       else gsub("[()]", "", base)
+  paste(c(if (nzchar(s)) s, if (const) GEE_CONSTANT_WITHIN), collapse = "; ")
+}
+gee_refit_label <- function(why) {
+  s <- gee_refit_reason_short(why)
+  if (!nzchar(s)) paste0(GEE_INDEP_REFIT_HEAD, ")") else paste0(GEE_INDEP_REFIT_HEAD, ": ", s, ")")
+}
+
+# TRUE when the outcome of a fitted geeglm does not vary within any patient
+# (cluster) that has two or more of its rows - its within-patient SD is 0 -
+# and at least one patient has two rows (decision V12-2).
+gee_outcome_constant_within <- function(fit) {
+  if (is.null(fit)) return(FALSE)
+  y <- tryCatch(as.numeric(fit$y), error = function(e) NULL)
+  id <- tryCatch(fit$id, error = function(e) NULL)
+  if (!length(y) || length(id) != length(y)) return(FALSE)
+  sp <- split(y, factor(id, levels = unique(id)))
+  multi <- lengths(sp) > 1
+  if (!any(multi)) return(FALSE)
+  all(vapply(sp[multi], function(z) isTRUE(max(z) - min(z) <= 1e-12 * max(1, abs(z))), logical(1)))
+}
 
 # The move of each coefficient of a fitted geeglm (Gaussian identity or
 # binomial logit; exchangeable or independence; prior weights as geepack) that
@@ -664,6 +711,10 @@ gee_fit_checked <- function(fit_fun, corstr = "exchangeable") {
   why <- gee_exch_reject(f1)
   if (!nzchar(why)) return(list(fit = f1, corstr = "exchangeable", refit = "", why = ""))
   f2 <- fit_fun("independence")
+  # the reason names a constant outcome only when it is constant within every
+  # patient (decision V12-2)
+  if (gee_outcome_constant_within(if (!is.null(f2)) f2 else f1))
+    why <- paste0(why, "; ", GEE_CONSTANT_WITHIN)
   if (!gee_converged(f2))
     return(list(fit = NULL, corstr = "independence", refit = why,
                 why = paste0("the exchangeable fit was not accepted (", why, ") and the independence refit ",
@@ -675,10 +726,16 @@ gee_fit_checked <- function(fit_fun, corstr = "exchangeable") {
 # refit here; the pipeline and the figure pass log how many (and reset).
 gee_refit_note <- function(what) .gee_inf$refits <- c(.gee_inf$refits, what)
 gee_refit_take <- function() { r <- .gee_inf$refits %||% character(0); .gee_inf$refits <- character(0); r }
-gee_refit_log_text <- function(n, where)
-  sprintf(paste0("%s: in %d clustered test(s) the exchangeable GEE was not accepted (working correlation %.2f or more, ",
-                 "no convergence, or not at its solution) - refitted with an %s; the test name says so."),
-          where, n, GEE_EXCH_ALPHA_MAX, GEE_INDEP_REFIT)
+# reasons: the refits' reasons (gee_refit_take), counted in the line by their
+# short words (decision V12-2)
+gee_refit_log_text <- function(n, where, reasons = NULL) {
+  rs <- if (length(reasons)) table(vapply(reasons, gee_refit_reason_short, character(1), USE.NAMES = FALSE)) else NULL
+  sprintf(paste0("%s: in %d clustered test(s) the exchangeable GEE was not accepted (%s) - refitted with an ",
+                 "independence working correlation; the test name says so."),
+          where, n,
+          if (length(rs)) paste(sprintf("%s: %d", names(rs), as.integer(rs)), collapse = "; ")
+          else sprintf("working correlation %.2f or more, no convergence, or an unstable step", GEE_EXCH_ALPHA_MAX))
+}
 
 # TRUE when at least one patient contributes more than one of these eyes (the
 # usable eyes of one variable). Only then is a patient-clustered test run in

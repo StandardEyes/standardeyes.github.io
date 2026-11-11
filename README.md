@@ -4,8 +4,8 @@
 
 StandardEyes takes a spreadsheet with **one row per eye per surgery** and produces publication-ready
 comparative outcomes for any number of groups: group tables with automatic test selection,
-propensity-score matching with balance reporting (matching weights carried into the matched tables
-and figures), GEE clustered on the patient, covariate-adjusted regression, Excel workbooks, and the
+propensity-score matching of eyes or of patients (both eyes kept together; `psm_unit`) with balance
+reporting (matching weights carried into the matched tables and figures), GEE clustered on the patient, covariate-adjusted regression, Excel workbooks, and the
 StandardEyes figures — the published standardized-graph metrics with every cohort superimposed on one
 chart, plus JCRS-2025 double-angle astigmatism plots. Visual acuity is read in the notation the file
 uses — decimal, logMAR, Snellen (20/x or 6/x) or ETDRS letters — and is analyzed in logMAR by default

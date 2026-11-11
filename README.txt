@@ -330,8 +330,9 @@ every feature of the app has something to act on.
                        first treatment...) + PRK/LASIK subsets
  4. Matching ......... nearest-neighbor, exact, coarsened
                        exact (cem) or subclassification
-                       matching, with a live matched-count
-                       preview (nearest)
+                       matching of eyes or of patients
+                       (both eyes together), with a live
+                       matched-count preview (nearest)
  5. Regression ....... covariate-adjusted GEE
  6. GEE .............. clustered comparison (both eyes safe)
  7. Special outputs .. the StandardEyes figures and the
@@ -507,6 +508,22 @@ exchangeable correlation, refitted with an independence
 working correlation when the exchangeable fit is not
 accepted; per-patient variables are modeled on one row
 per patient.
+
+Matching unit (Matching tab, "Match"): eyes (the default)
+or patients (both eyes together). With patients, each
+patient's analyzed eyes in a group form one matching unit:
+eye-level covariates are averaged over those eyes,
+per-patient covariates are taken once, and the propensity
+model, caliper, ratio and order work on these units. Every
+eye of a matched patient enters the matched cohort with
+the patient's matching weight, so both eyes enter or leave
+together; balance (love plot, PSM sheet) is computed on
+the patients. A patient with eyes in two groups forms one
+unit in each group (the run log and the PSM sheet count
+them). Patients need a patient ID column. The PSM sheet,
+the Manifest, the figure legends and the run log say
+"patients matched (both eyes kept together)". Settings
+file key: psm_unit = "eye" or "patient".
 
 Small groups: a clustered model (GEE, adjusted regression,
 the figures' clustered P values) needs at least 6 usable

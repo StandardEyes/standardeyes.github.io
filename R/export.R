@@ -79,6 +79,10 @@ standardeyes_version <- function() {
       if (length(hit)) hit[[1]][2] else NA_character_
     }
     v <- list(public = get1("PUBLIC_VERSION"), build = get1("APP_VERSION"))
+    # the blinded build for peer review (decision V12-3, make_release.py
+    # --review) carries the file REVIEW_BUILD in the app folder; the Manifest
+    # then records "review build"
+    v$review <- file.exists(file.path(dirname(dirname(dirname(fp))), "REVIEW_BUILD"))
   }
   .version_cache$v <- v
   v
@@ -991,7 +995,9 @@ gee_skip_note <- function(g, corstr = NULL) {
   # on a matched cohort they are independence GEEs on the patient rows (D18,
   # finding S1): "GEE Gaussian, per patient (one row per patient), ..."
   n_pp_gee <- n_of(paste0("GEE Gaussian, ", pp_txt)) + n_of(paste0("GEE Binomial, ", pp_txt))
-  n_ind <- n_of(get0("GEE_INDEP_REFIT", ifnotfound = "independence working correlation (the outcome is almost constant"))
+  # an independence refit's label states its reason (decision V12-2); every
+  # such label starts with GEE_INDEP_REFIT_HEAD
+  n_ind <- n_of(get0("GEE_INDEP_REFIT_HEAD", ifnotfound = "independence working correlation (the exchangeable fit was not accepted"))
   r34 <- c(if (n_pp > n_pp_gee) paste0(n_pp - n_pp_gee, " outcome(s) are per-patient variables: modeled on one row per patient ",
                                 "by an ordinary linear or logistic model (model-based SE), never by an eye-level ",
                                 "GEE - see the 'Model' column."),
@@ -1001,8 +1007,8 @@ gee_skip_note <- function(g, corstr = NULL) {
                                     "the 'Model' column."),
            if (n_ind > 0) paste0(n_ind, " outcome(s) were refitted with an independence working correlation: the ",
                                  "exchangeable fit was not accepted (working correlation 0.95 or more, no ",
-                                 "convergence, or not at its solution - the outcome is almost constant within ",
-                                 "patients); the robust SE stay clustered by patient - see the 'Model' column."))
+                                 "convergence, or an unstable scoring step - the 'Model' column gives the reason of ",
+                                 "each); the robust SE stay clustered by patient."))
   if (bad == 0 && !few && !length(wtxt) && !length(r34)) return(NULL)
   # without a patient ID each eye is its own cluster and the cautions count eyes
   unit <- if (few && all(grepl("with few eyes$", cau))) "eyes" else "patients"
@@ -1448,8 +1454,12 @@ psm_balance_words <- function(d) {
   d
 }
 
+# units / treated: a patient-level match's counts (analysis.R psm_unit_counts)
+# and its treated group (decision V12-1): the sheet then names the unit and
+# gives the patients and eyes per group; an eye-level match lists what it did
+# in 1.1.0.
 psm_settings_table <- function(psm, reference_group, patient_id_raw = NULL, pairing = NULL,
-                               caliper_raw = NULL) {
+                               caliper_raw = NULL, units = NULL, treated = NULL) {
   # NULL-safe: c() silently drops NULLs (e.g. an empty caliper box = no
   # caliper), which would misalign the two columns
   fmt_setting <- function(x) if (is.null(x) || length(x) == 0 || is.na(x[[1]])) "(none)" else as.character(x)[1]
@@ -1485,10 +1495,17 @@ psm_settings_table <- function(psm, reference_group, patient_id_raw = NULL, pair
     rows[[length(rows) + 1]] <- c(paste0("Not used by method '", method, "'"),
                                   paste(.psm_setting_labels[intersect(names(.psm_setting_labels), nu)],
                                         collapse = ", "))
+  by_patient <- identical(psm$unit, "patient")
+  if (by_patient && exists("psm_unit_rows", mode = "function"))
+    rows <- c(rows, psm_unit_rows(units, treated %||% "treated group", reference_group))
+  else if (isTRUE(psm$unit_fallback))
+    rows[[length(rows) + 1]] <- c("Matching unit", paste0("eyes (patient-level matching was requested, but no ",
+                                                          "patient ID column is mapped)"))
   rows <- c(rows, list(
     c("Random seed (matching)", fmt_setting(psm$seed)),
     c("Reference group", fmt_setting(reference_group)),
-    c("Patient ID (clustering for GEE only; not used in matching)", fmt_setting(patient_id_raw)),
+    if (by_patient) c("Patient ID (the matching units and the GEE clusters)", fmt_setting(patient_id_raw))
+    else c("Patient ID (clustering for GEE only; not used in matching)", fmt_setting(patient_id_raw)),
     c("Matched analyses", matched_analysis_note())))
   data.frame(Setting = vapply(rows, `[`, character(1), 1),
              Value   = vapply(rows, `[`, character(1), 2),
@@ -1524,7 +1541,10 @@ psm_settings_text <- function(psm) {
     if (!("replace" %in% nu))  paste("replacement", if (isTRUE(as.logical(one(psm$replace, "FALSE")))) "on" else "off"),
     if (!("caliper" %in% nu))  paste0("caliper ", cal_txt),
     if (!("m_order" %in% nu))  paste("order", one(psm$m_order, "default")),
-    if (!is.null(psm$seed))    paste("seed", one(psm$seed, "")))
+    if (!is.null(psm$seed))    paste("seed", one(psm$seed, "")),
+    # the matching unit (decision V12-1); an eye-level match reads as in 1.1.0
+    if (identical(psm$unit, "patient")) paste0("unit: ", get0("PSM_PATIENT_UNIT_TEXT", ifnotfound = "patients"))
+    else if (isTRUE(psm$unit_fallback)) "unit: eyes (patient-level matching requested, but no patient ID column is mapped)")
   txt <- paste(parts, collapse = ", ")
   if (length(nu))
     txt <- paste0(txt, " (", paste(.psm_setting_labels[intersect(names(.psm_setting_labels), nu)], collapse = ", "),
@@ -1906,20 +1926,27 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
     psm <- list(method = cfg$psm_method, distance = cfg$psm_distance, ratio = cfg$psm_ratio,
                 replace = cfg$psm_replace, caliper = cfg$psm_caliper,
                 std_caliper = cfg$psm_std_caliper, m_order = cfg$psm_m_order,
-                seed = cfg$psm_seed)
+                seed = cfg$psm_seed, unit = cfg$psm_unit, unit_fallback = cfg$psm_unit_fallback)
 
     # .se_eye: the row of `dat` each matched row is, so the matched-only
     # workbook can count a reference eye matched in several pairings once
     dat_m <- dat
     dat_m$.se_eye <- seq_len(nrow(dat_m))
+    # patient-level matching (decision V12-1) forms its units from the patient
+    # ID and takes the per-patient covariates once
     pairings <- run_reference_pairwise_matching(dat_m, glevels, reference_group,
                                                 res$psm_covariates_clean, psm, logger,
-                                                display_names = dmap)
+                                                display_names = dmap,
+                                                patient_id = res$patient_id_clean,
+                                                per_patient = res$patient_level_params_clean)
     rm(dat_m)
     # the settings matchit() actually received (blank ratio -> 1, default seed ...)
     if (!is.null(attr(pairings, "settings"))) psm <- attr(pairings, "settings")
     match_failed <- attr(pairings, "failed")
     match_methods <- psm$method_used
+    # patients matched with both eyes kept together (decision V12-1): the PSM
+    # sheet, the balance plot's legend and the score listing say so
+    by_patient <- identical(psm$unit, "patient")
 
     # the covariates that resolved and were used, by their headers; the
     # configured ones not in the file in a section of their own (R4-5)
@@ -1999,9 +2026,14 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
                             paste0("Covariate balance before and after matching, ", gsub("_", " ", lab),
                                    # the subset of a subset run (finding F8): figures moved out of
                                    # their folder can still be told apart
-                                   if (!is.null(run) && length(run$values)) paste0(", subset: ", run$label) else ""),
+                                   if (!is.null(run) && length(run$values)) paste0(", subset: ", run$label) else "",
+                                   if (by_patient) paste0(", ", PSM_PATIENT_UNIT_TEXT) else ""),
                             c(paste0("Standardized mean differences of the matching covariates before ",
-                                     "(Unadjusted) and after matching (Adjusted), computed by cobalt; the ",
+                                     "(Unadjusted) and after matching (Adjusted), computed by cobalt",
+                                     if (by_patient) paste0(" on the patient units (one per patient per group; ",
+                                                            "eye-level covariates averaged over the patient's ",
+                                                            "analyzed eyes in the group)"),
+                                     "; the ",
                                      "dashed lines mark -0.1 and 0.1; gray circles, before matching; black ",
                                      "triangles, after matching."),
                               "* (where shown): the raw (unstandardized) difference in means.",
@@ -2037,18 +2069,26 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
       ps_scale <- if (exists("psm_score_scale", mode = "function")) psm_score_scale(psm$distance) else NA
       names(ps_sections) <- if (has_ps) paste0("Propensity-score distribution (",
                                                if (!is.na(ps_scale)) paste0(ps_scale, "; ") else "",
-                                               "matched rows)")
+                                               if (by_patient) "matched eyes, each with its patient's score)"
+                                               else "matched rows)")
+                            else if (by_patient)
+                              "Matching weights (matched eyes, each with its patient's weight; no propensity score with this method)"
                             else "Matching weights (matched rows; no propensity score with this method)"
 
       # One merged PSM sheet per pairing: settings (with the method this pairing
       # actually ran) + covariates + balance + PS dist
-      write_stacked_tables(wb, paste0("PSM_", lab), c(list(
+      bal_title <- if (by_patient)
+        "Covariate balance on the patient units (cobalt; standardized differences for every covariate)"
+        else "Covariate balance (cobalt; standardized differences for every covariate)"
+      psm_secs <- list(
         `PSM settings` = psm_settings_table(psm, reference_group, pid_shown, pairing = lab,
-                                            caliper_raw = tryCatch(pr$m.out$caliper, error = function(e) NULL)),
+                                            caliper_raw = tryCatch(pr$m.out$caliper, error = function(e) NULL),
+                                            units = pr$units, treated = pr$treated),
         `Matching covariates` = psm_covs_df,
         `Matching covariates not found in the file (ignored)` = psm_unres_df,
-        `Covariate balance (cobalt; standardized differences for every covariate)` = bal_df),
-        ps_sections))
+        bal_df)
+      names(psm_secs)[4] <- bal_title
+      write_stacked_tables(wb, paste0("PSM_", lab), c(psm_secs, ps_sections))
 
       # Matched summary tables (2 groups: reference + treated). MatchIt gives a
       # re-used or k:1-matched row a weight != 1: the tables then use the same
@@ -2456,15 +2496,20 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
     if (matching_on) {
       ps <- list(method = cfg$psm_method, distance = cfg$psm_distance, ratio = cfg$psm_ratio,
                  replace = cfg$psm_replace, caliper = cfg$psm_caliper,
-                 std_caliper = cfg$psm_std_caliper, m_order = cfg$psm_m_order, seed = cfg$psm_seed)
+                 std_caliper = cfg$psm_std_caliper, m_order = cfg$psm_m_order, seed = cfg$psm_seed,
+                 unit = cfg$psm_unit, unit_fallback = cfg$psm_unit_fallback)
       if (exists(".psm_settings", mode = "function"))
         ps <- tryCatch(.psm_settings(ps), error = function(e) ps)
       if (length(match_methods)) ps$method_used <- match_methods
       psm_txt <- psm_settings_text(ps)
     }
-    # the method actually run, in words (R4-5)
+    # the method actually run, in words (R4-5); patients matched with both
+    # eyes kept together are named (decision V12-1)
     match_txt <- if (!is.null(match_skip_txt)) match_skip_txt
-                 else if (matching_on) psm_method_label(ps) else "off"
+                 else if (matching_on) paste0(psm_method_label(ps),
+                                              if (identical(ps$unit, "patient"))
+                                                paste0("; ", get0("PSM_PATIENT_UNIT_TEXT", ifnotfound = "patients")))
+                 else "off"
     if (is.null(match_weights) && "weights" %in% names(dat)) match_weights <- dat$weights
     # the matched GEE / regression are named only when one of them runs
     m_stage <- one(cfg$run_gee_stage, "none")
@@ -2569,6 +2614,8 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
     rows <- list(
       c("StandardEyes version", if (!is.na(ver$public)) ver$public else one(cfg$public_version, "not recorded")),
       c("Build",                if (!is.na(ver$build)) ver$build else one(cfg$app_version, "not recorded")),
+      if (isTRUE(ver$review))
+        c("Release",            "review build (author names and public links withheld for peer review)"),
       c("Run duration (s)",     dur_txt),
       c("R version",            R.version.string),
       c("MatchIt",              pkg_v("MatchIt")),

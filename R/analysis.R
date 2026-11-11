@@ -266,7 +266,7 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
   }
   # an exchangeable fit that was not accepted: the independence refit is named
   # instead (R3-4)
-  if (nzchar(as.character(attr(p, "refit") %||% "")[1])) wc <- GEE_INDEP_REFIT
+  if (nzchar(as.character(attr(p, "refit") %||% "")[1])) wc <- gee_refit_label(attr(p, "refit"))
   lab <- paste0(base, if (isTRUE(per_patient)) paste0(", ", GEE_PER_PATIENT), ", ", wc, ", clustered by ",
                 if (identical(unit, "eye")) "eye" else "patient", " (", gee_se_label(q), ")")
   # a single group, a constant variable, "B has n = 1", a group of one
@@ -935,11 +935,19 @@ gee_corstr_label <- function(df, use_weights = FALSE, matched = FALSE) {
 # (set_matched_note_pid); the notes, sheets and legends read it.
 .matched_note <- new.env(parent = emptyenv())
 .matched_note$has_pid <- TRUE
+.matched_note$unit <- "eye"
 set_matched_note_pid <- function(has_pid) .matched_note$has_pid <- isTRUE(has_pid)
+# the run's matching unit (decision V12-1): with "patient" the note adds that
+# the patients were matched with both eyes kept together; with "eye" it is the
+# 1.1.0 sentence, unchanged
+set_matched_note_unit <- function(unit) .matched_note$unit <- if (identical(unit, "patient")) "patient" else "eye"
 matched_analysis_note <- function(clustered = .matched_note$has_pid) paste0(
   "Matched analyses use an independence working correlation with robust standard errors",
   if (isTRUE(clustered)) " clustered by patient" else ", each eye its own cluster (no patient ID mapped)",
-  "; matched sets (pairs) are not used as clusters.")
+  "; matched sets (pairs) are not used as clusters.",
+  if (identical(.matched_note$unit, "patient"))
+    paste0(" Matching unit: ", PSM_PATIENT_UNIT_TEXT, " - every analyzed eye of a matched patient carries ",
+           "the patient's matching weight."))
 MATCHED_ANALYSIS_NOTE <- matched_analysis_note(TRUE)
 
 # The reference (baseline) level the model of a group factor uses.
@@ -1294,7 +1302,8 @@ GEE_LONE_NOTE <- "SE not estimable - this level is held by 1 patient"
 # independence GEE with the robust SE, decision D18), labeled GEE_PER_PATIENT; an
 # exchangeable fit is kept only when helpers.R gee_exch_reject() accepts it,
 # otherwise the model is refitted with an independence working correlation and
-# labeled GEE_INDEP_REFIT (logged with the reason), or reported as not
+# labeled with its reason (gee_refit_label, decision V12-2; logged with the
+# reason), or reported as not
 # estimable when that fails too.
 run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clean,
                            patient_id_clean, dicho_pref_clean = list(),
@@ -1521,7 +1530,7 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
       if (nzchar(fc$refit))
         logger(sprintf("GEE '%s' (covariates: %s): exchangeable fit not accepted - %s; refitted with an %s.",
                        dn(outc), if (length(setdiff(preds, "GroupLabel"))) paste(dn(setdiff(preds, "GroupLabel")), collapse = ", ")
-                                 else "none", fc$refit, GEE_INDEP_REFIT))
+                                 else "none", fc$refit, "independence working correlation"))
       t <- extract_gee_tidy(fit, fam, dn(outc), cs$unit)
       # no corrected covariance or no t reference (too few patients for the
       # coefficients): no comparison of this outcome is estimated, and every
@@ -1537,7 +1546,7 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
                    else if (ind) paste0(if (bin) "GEE Binomial" else "GEE Gaussian",
                                         ", working correlation: independence (matched cohort)")
                    else if (nzchar(fc$refit)) paste0(if (bin) "GEE Binomial" else "GEE Gaussian", ", ",
-                                                     GEE_INDEP_REFIT, " - exchangeable fit not accepted: ", fc$refit)
+                                                     gee_refit_label(fc$refit))
                    else if (bin) "GEE Binomial (exchangeable)" else "GEE Gaussian (exchangeable)"
     }
     # covariate levels held by one patient: estimate only (extract_gee_tidy)
@@ -1672,7 +1681,7 @@ build_gee_lookup <- function(gee_df, group_term) {
     grepl(paste0("GEE Binomial, ", GEE_PER_PATIENT), mdl, fixed = TRUE)
   tag <- ifelse(pp_gee, " [one row per patient]",
                 ifelse(pp_row, " [one row per patient, ordinary model]",
-                       ifelse(grepl(GEE_INDEP_REFIT, mdl, fixed = TRUE), " [independence working correlation]", "")))
+                       ifelse(grepl(GEE_INDEP_REFIT_HEAD, mdl, fixed = TRUE), " [independence working correlation]", "")))
   # the few-patients caution of a reported comparison (the GEE sheets' Note,
   # .pair_caution), for the summary row (merge_gee_into_summary_table; finding
   # S2-3)
@@ -2016,7 +2025,8 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
       fit <- fc$fit
       if (nzchar(fc$refit))
         logger(sprintf("Regression '%s': exchangeable fit not accepted - %s; %s.", dn(outc), fc$refit,
-                       if (is.null(fit)) paste0("not estimable (", fc$why, ")") else paste0("refitted with an ", GEE_INDEP_REFIT)))
+                       if (is.null(fit)) paste0("not estimable (", fc$why, ")")
+                       else "refitted with an independence working correlation"))
     }
     # one count per model, whether it carries a caution, failed, or both
     if (nzchar(caution) || is.null(fit)) n_flagged <- n_flagged + 1
@@ -2029,7 +2039,7 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
       next
     }
     m_note <- if (!is.null(pp)) .per_patient_label(pp, dich, display_names)
-              else if (nzchar(fc$refit)) paste0(GEE_INDEP_REFIT, " - exchangeable fit not accepted: ", fc$refit)
+              else if (nzchar(fc$refit)) gee_refit_label(fc$refit)
               else ""
     note <- .join_note(note, m_note)
     td <- if (!is.null(pp)) pp$tidy else extract_gee_tidy(fit, fam_r, dn(outc), cs$unit)
@@ -2067,7 +2077,7 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
                              if (nzchar(fc$refit)) "independence" else cstr)
       fit_c <- fcc$fit
       if (nzchar(fcc$refit) && !is.null(fit_c))
-        note <- .join_note(note, paste0("crude model: ", GEE_INDEP_REFIT))
+        note <- .join_note(note, paste0("crude model: ", gee_refit_label(fcc$refit)))
       if (!is.null(fit_c)) {
         tcr <- extract_gee_tidy(fit_c, fam_r, dn(outc), cs$unit)
         if (nzchar(attr(tcr, "why") %||% "")) tcr <- NULL
@@ -2365,7 +2375,153 @@ psm_caliper_text <- function(caliper, std_caliper = TRUE, distance = NULL, raw =
   out$not_used <- not_used
   sd <- if (blank(psm$seed)) NA_integer_ else suppressWarnings(as.integer(num1(psm$seed)))
   out$seed <- if (is.na(sd)) PSM_DEFAULT_SEED else sd
+  # the matching unit (decision V12-1): "eye" (the default, the 1.1.0
+  # behavior) or "patient"
+  out$unit <- psm_unit_of(psm$unit, logger)
   out
+}
+
+# ---- matching unit (decision V12-1) ---------------------------
+# psm_unit = "eye" (default): every analyzed eye is a matching unit, as in
+# 1.1.0. psm_unit = "patient": the units are (patient, group) pairs - one row
+# per patient per group. Eye-level covariates are averaged over that patient's
+# analyzed eyes in that group (missing values left out); per-patient
+# covariates, and categorical ones, are taken once (the value most of the
+# patient's eyes in the group hold, the first eye's on a tie). The propensity
+# model, distance, caliper, ratio, replacement and order work on these units
+# exactly as on eyes; every analyzed eye of a matched unit enters the matched
+# cohort with its unit's distance, matching weight and subclass, and balance is
+# computed on the units. A patient whose eyes fall in two groups forms one unit
+# in each group. The outcome models do not change (GEE clustered by patient).
+PSM_UNITS <- c("eye", "patient")
+PSM_PATIENT_UNIT_TEXT <- "patients matched (both eyes kept together)"
+PSM_NO_PID_TEXT <- paste0("WARNING: Patient-level matching needs a patient ID column, and none is mapped - ",
+                          "the eyes are matched instead (each eye its own unit).")
+# psm_unit as the engine reads it: trimmed, lower case, "eyes" / "patients"
+# accepted; blank = "eye"; an unknown value is logged once and "eye" used (no
+# silent fallback, decision R2-7)
+psm_unit_of <- function(x, logger = NULL) {
+  v <- tolower(trimws(as.character(unlist(x))[1]))
+  if (!length(v) || is.na(v) || !nzchar(v)) return("eye")
+  v <- switch(v, eyes = "eye", patients = "patient", v)
+  if (v %in% PSM_UNITS) return(v)
+  log_once(logger, sprintf("Matching unit '%s' is not known (use eye or patient) - eye is used.",
+                           as.character(unlist(x))[1]))
+  "eye"
+}
+
+# The (patient, group) units of one pairing's eyes. sub: the pairing's eyes
+# with .treat (1 = treated group) and the covariates as the propensity model
+# takes them (after coerce_numeric_covs); covs: the matching covariates; ids:
+# the patient of each eye (blank ids: each eye its own patient,
+# fill_missing_ids); per_patient: the covariates flagged per patient.
+# Returns list(units = data.frame(.unit, .treat, .pid, <covs>) in the order the
+# units first appear, eye_unit = the unit of each eye of sub, n_eyes = eyes
+# per unit, both = patients with eyes in both groups, disagree = per covariate
+# the number of units whose eyes hold different values of a covariate taken
+# once, averaged = per covariate the units whose mean left out a missing eye).
+psm_unit_table <- function(sub, covs, ids, per_patient = character(0)) {
+  ids <- fill_missing_ids(ids)
+  key <- paste(ids, sub$.treat, sep = "\r")
+  ukeys <- unique(key)
+  eye_unit <- match(key, ukeys)
+  idx <- split(seq_len(nrow(sub)), factor(eye_unit, levels = seq_along(ukeys)))
+  first <- match(seq_along(ukeys), eye_unit)
+  units <- data.frame(.unit = seq_along(ukeys), .treat = sub$.treat[first], .pid = ids[first],
+                      stringsAsFactors = FALSE)
+  disagree <- averaged <- stats::setNames(integer(length(covs)), covs)
+  for (cv in covs) {
+    v <- sub[[cv]]
+    avg <- (is.numeric(v) || inherits(v, c("Date", "POSIXt"))) && !(cv %in% per_patient)
+    if (avg) {
+      x <- as.numeric(v)
+      units[[cv]] <- vapply(idx, function(i) {
+        z <- x[i][is.finite(x[i])]
+        if (length(z)) mean(z) else NA_real_
+      }, numeric(1), USE.NAMES = FALSE)
+      averaged[[cv]] <- sum(vapply(idx, function(i) any(!is.finite(x[i])) && any(is.finite(x[i])),
+                                   logical(1)))
+    } else {
+      # taken once: the value most of the unit's eyes hold (first eye on a tie)
+      vk <- as.character(v)
+      pick <- vapply(idx, function(i) {
+        ok <- i[!is.na(vk[i])]
+        if (!length(ok)) return(i[1])
+        tb <- table(factor(vk[ok], levels = unique(vk[ok])))
+        ok[match(names(tb)[which.max(tb)], vk[ok])]
+      }, integer(1), USE.NAMES = FALSE)
+      units[[cv]] <- v[pick]
+      disagree[[cv]] <- sum(vapply(idx, function(i) length(unique(stats::na.omit(vk[i]))) > 1, logical(1)))
+    }
+  }
+  both <- length(intersect(units$.pid[units$.treat == 1], units$.pid[units$.treat == 0]))
+  list(units = units, eye_unit = eye_unit, n_eyes = lengths(idx, use.names = FALSE), both = both,
+       disagree = disagree, averaged = averaged)
+}
+
+# The counts of a patient-level match, for the run log and the PSM sheet: per
+# group (t = treated, r = reference) the units and their eyes, the units
+# complete on the covariates, the matched units and their eyes. ut:
+# psm_unit_table(); cc: the complete-case flag of each unit; m.out: matchit().
+psm_unit_counts <- function(ut, cc, m.out) {
+  u <- ut$units
+  mdu <- MatchIt::match.data(m.out)
+  m <- u$.unit %in% mdu$.unit
+  ne <- ut$n_eyes
+  t <- u$.treat == 1
+  list(t_units = sum(t), r_units = sum(!t), t_eyes = sum(ne[t]), r_eyes = sum(ne[!t]),
+       t_cc = sum(cc & t), r_cc = sum(cc & !t), t_cc_eyes = sum(ne[cc & t]), r_cc_eyes = sum(ne[cc & !t]),
+       t_matched = sum(m & t), r_matched = sum(m & !t),
+       t_matched_eyes = sum(ne[m & t]), r_matched_eyes = sum(ne[m & !t]),
+       both = ut$both, disagree = ut$disagree, averaged = ut$averaged)
+}
+
+# "120 patients (163 eyes)"
+.pu_n <- function(units, eyes)
+  sprintf("%d %s (%d %s)", units, if (units == 1) "patient" else "patients", eyes, if (eyes == 1) "eye" else "eyes")
+
+# The run-log line of a patient-level match (decision V12-1).
+psm_unit_log_text <- function(uc, treated, reference, ut = NULL, display_names = NULL) {
+  dn <- function(x) disp_name(x, display_names)
+  txt <- paste0("Matching ", treated, " vs ", reference, ": ", PSM_PATIENT_UNIT_TEXT, " - ",
+                treated, " ", .pu_n(uc$t_units, uc$t_eyes), ", ", reference, " ", .pu_n(uc$r_units, uc$r_eyes),
+                ", one unit per patient per group",
+                if (uc$both > 0) sprintf("; %d %s eyes in both groups and form%s one unit in each", uc$both,
+                                         if (uc$both == 1) "patient has" else "patients have",
+                                         if (uc$both == 1) "s" else ""),
+                "; matched: ", treated, " ", .pu_n(uc$t_matched, uc$t_matched_eyes), ", ", reference, " ",
+                .pu_n(uc$r_matched, uc$r_matched_eyes), ".")
+  av <- uc$averaged[uc$averaged > 0]
+  if (length(av))
+    txt <- paste0(txt, " Averaged over the eyes that have a value (another eye of the patient is missing it): ",
+                  paste(sprintf("'%s' %d %s", dn(names(av)), as.integer(av), ifelse(av == 1, "patient", "patients")),
+                        collapse = ", "), ".")
+  dg <- uc$disagree[uc$disagree > 0]
+  if (length(dg))
+    txt <- paste0(txt, " Taken once although the patient's eyes differ (the value most of the eyes hold, the ",
+                  "first eye's on a tie): ",
+                  paste(sprintf("'%s' %d %s", dn(names(dg)), as.integer(dg), ifelse(dg == 1, "patient", "patients")),
+                        collapse = ", "), ".")
+  txt
+}
+
+# The PSM sheet's rows of a patient-level match (Setting, Value).
+psm_unit_rows <- function(uc, treated, reference) {
+  rows <- list(c("Matching unit", paste0(
+    PSM_PATIENT_UNIT_TEXT, ": one unit per patient per group; eye-level covariates averaged over the ",
+    "patient's analyzed eyes in the group (a missing value left out), per-patient and categorical covariates ",
+    "taken once; the propensity model, caliper, ratio and order work on the units; every analyzed eye of a ",
+    "matched patient enters the matched cohort with the patient's matching weight; balance is computed on the units")))
+  if (is.null(uc)) return(rows)
+  c(rows, list(
+    c("Patient units (eyes)", paste0(reference, ": ", .pu_n(uc$r_units, uc$r_eyes), "; ",
+                                    treated, ": ", .pu_n(uc$t_units, uc$t_eyes))),
+    c("Complete on the matching covariates", paste0(reference, ": ", .pu_n(uc$r_cc, uc$r_cc_eyes), "; ",
+                                                   treated, ": ", .pu_n(uc$t_cc, uc$t_cc_eyes))),
+    c("Matched patients (eyes)", paste0(reference, ": ", .pu_n(uc$r_matched, uc$r_matched_eyes), "; ",
+                                       treated, ": ", .pu_n(uc$t_matched, uc$t_matched_eyes))),
+    c("Patients with eyes in both groups", if (uc$both > 0)
+      sprintf("%d (one unit in each group)", uc$both) else "none")))
 }
 
 # The method matchit() is given for the covariates `covs` of `data`. Coarsened
@@ -2385,10 +2541,25 @@ PSM_CEM_AS_EXACT <- paste0(
 
 # display_names: optional clean key -> original header map (R4-3) for the log
 # lines that name a covariate.
+# patient_id: the patient-ID column of `dat` and per_patient: the covariates
+# flagged per patient - used only when psm$unit is "patient" (decision V12-1).
+# Without a patient-ID column the eyes are matched, and the log says so. Each
+# pairing of a patient-level match also carries $units: the counts of units
+# and eyes the PSM sheet reports (psm_unit_counts).
 run_reference_pairwise_matching <- function(dat, glevels, reference_group,
                                             psm_covariates_clean, psm,
-                                            logger = message, display_names = NULL) {
+                                            logger = message, display_names = NULL,
+                                            patient_id = NULL, per_patient = NULL) {
   psm <- .psm_settings(psm, logger)
+  by_patient <- identical(psm$unit, "patient")
+  pid_col <- as.character(unlist(patient_id))[1]
+  if (by_patient && (!length(pid_col) || is.na(pid_col) || !(pid_col %in% names(dat)))) {
+    log_once(logger, PSM_NO_PID_TEXT)
+    by_patient <- FALSE
+    psm$unit <- "eye"
+    psm$unit_fallback <- TRUE
+  }
+  per_patient <- intersect(as.character(unlist(per_patient)), psm_covariates_clean)
   treated_groups <- setdiff(glevels, reference_group)
   results <- list()
   failed <- character(0)
@@ -2417,6 +2588,13 @@ run_reference_pairwise_matching <- function(dat, glevels, reference_group,
     if (length(covs) == 0) {
       fail(tg, "no usable matching covariate."); next
     }
+    ut <- NULL
+    if (by_patient) {
+      # the (patient, group) units: the propensity model, the matching and the
+      # balance work on them (decision V12-1)
+      ut <- psm_unit_table(sub, covs, sub[[pid_col]], per_patient)
+      sub <- ut$units
+    }
     ps_df <- sub %>% dplyr::select(.treat, dplyr::all_of(covs)) %>% as.data.frame()
     cc <- complete.cases(ps_df)
     sub_ps <- sub[cc, , drop = FALSE]
@@ -2444,13 +2622,25 @@ run_reference_pairwise_matching <- function(dat, glevels, reference_group,
     }
     md <- MatchIt::match.data(m.out)
     if (nrow(md) == 0 || length(unique(md$.treat)) < 2) {
-      fail(tg, "no eye could be matched with these settings (e.g. the caliper is too narrow)."); next
+      fail(tg, paste0("no ", if (by_patient) "patient" else "eye",
+                      " could be matched with these settings (e.g. the caliper is too narrow).")); next
     }
-    # matched rows as recorded, plus what matching added (distance, weights,
-    # subclass), in match.data()'s row order
-    added <- setdiff(names(md), names(sub_raw))
-    md <- cbind(sub_raw[match(md$.psm_row, sub_raw$.psm_row), , drop = FALSE],
-                md[, added, drop = FALSE])
+    if (by_patient) {
+      # every analyzed eye of a matched unit, as recorded, in the order of the
+      # rows, with its unit's distance, matching weight and subclass
+      added <- setdiff(names(md), names(ut$units))
+      e_in <- which(ut$eye_unit %in% md$.unit)
+      md <- cbind(sub_raw[e_in, , drop = FALSE],
+                  md[match(ut$eye_unit[e_in], md$.unit), added, drop = FALSE])
+      uc <- psm_unit_counts(ut, cc, m.out)
+      logger(psm_unit_log_text(uc, tg, reference_group, ut, display_names))
+    } else {
+      # matched rows as recorded, plus what matching added (distance, weights,
+      # subclass), in match.data()'s row order
+      added <- setdiff(names(md), names(sub_raw))
+      md <- cbind(sub_raw[match(md$.psm_row, sub_raw$.psm_row), , drop = FALSE],
+                  md[, added, drop = FALSE])
+    }
     md$.psm_row <- NULL
     rownames(md) <- NULL
     md$GroupLabel <- droplevels(factor(as.character(md$GroupLabel),
@@ -2467,6 +2657,7 @@ run_reference_pairwise_matching <- function(dat, glevels, reference_group,
     results[[tg]] <- list(label = paste0(tg, "_vs_", reference_group),
                           treated = tg, reference = reference_group,
                           matched = md, m.out = m.out, bal = bal, method = meth)
+    if (by_patient) results[[tg]]$units <- uc
     methods_used[[results[[tg]]$label]] <- meth
   }
   # the method each matched pairing actually ran (it differs from psm$method

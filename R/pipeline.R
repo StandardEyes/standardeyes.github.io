@@ -957,6 +957,19 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
   # the matched-analysis note says "clustered by patient" only with a mapped
   # patient ID (decision R2-7)
   set_matched_note_pid(length(res$patient_id_clean) && !is.na(res$patient_id_clean[1]))
+  # the matching unit (decision V12-1), read once: an unknown value is named and
+  # "eye" used; patients need a patient-ID column - without one the eyes are
+  # matched, said in the log and the Manifest (no silent fallback)
+  if (isTRUE(cfg$do_matching)) {
+    cfg$psm_unit <- psm_unit_of(cfg$psm_unit, logger)
+    if (identical(cfg$psm_unit, "patient") &&
+        !(length(res$patient_id_clean) && !is.na(res$patient_id_clean[1]))) {
+      log_once(logger, PSM_NO_PID_TEXT)
+      cfg$psm_unit <- "eye"
+      cfg$psm_unit_fallback <- TRUE
+    }
+  }
+  set_matched_note_unit(cfg$psm_unit)
   logger(paste0("P values: ", p_style_text(), "."))
 
   # GEE small-sample inference of every model, table test and figure P value
@@ -1261,8 +1274,9 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
     invisible(gee_refit_take()); invisible(.gee_fallback_take())
     built <- build_workbook_for_data(dat_run, cfg, res, logger, loveplot_dir = output_dir, run = run)
     # the clustered table tests whose exchangeable GEE was not accepted (R3-4)
-    n_refit <- length(gee_refit_take())
-    if (n_refit > 0) logger(gee_refit_log_text(n_refit, paste0("Workbook of run '", run$label, "'")))
+    refits <- gee_refit_take()
+    n_refit <- length(refits)
+    if (n_refit > 0) logger(gee_refit_log_text(n_refit, paste0("Workbook of run '", run$label, "'"), refits))
     # the table rows whose clustered GEE could not be fitted (findings S2, T1-02)
     n_fb <- .gee_fallback_take()
     if (n_fb > 0)

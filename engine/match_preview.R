@@ -54,6 +54,10 @@ cfg <- jsonlite::fromJSON(args[1], simplifyVector = TRUE,
                           simplifyDataFrame = FALSE, simplifyMatrix = FALSE)
 psm <- .psm_settings(if (is.null(cfg$psm)) list() else cfg$psm)
 ref <- as.character(cfg$reference_group)
+# patient-level matching (decision V12-1): the same (patient, group) units as
+# the run (analysis.R psm_unit_table), built from the PatientID column of the
+# slim CSVs; without one the eyes are matched, as in the run
+by_patient <- identical(psm$unit, "patient")
 
 out_runs <- list()
 CAP <- 300  # max unmatched IDs to return per side
@@ -62,6 +66,58 @@ pids <- function(sub, rn) {
   if (!("PatientID" %in% names(sub)) || length(rn) == 0) return(character(0))
   ids <- unique(as.character(sub[rn, "PatientID"]))
   ids[!is.na(ids)]
+}
+
+# One pairing matched on (patient, group) units (decision V12-1). The counts
+# are units (patients) with their eyes beside them (*_eyes); the unmatched
+# lists name patients; the matched rows are every eye of a matched unit, with
+# the unit's weight and score.
+preview_units <- function(sub, covs, per_patient, tg) {
+  ut <- psm_unit_table(sub, covs, sub$PatientID, per_patient)
+  u <- ut$units
+  ne <- ut$n_eyes
+  t1 <- u$.treat == 1
+  cc <- stats::complete.cases(u[, covs, drop = FALSE])
+  res <- list(treated = tg, reference = ref, unit = "patient",
+              treated_total = sum(t1), treated_cc = sum(t1 & cc),
+              ref_total = sum(!t1), ref_cc = sum(!t1 & cc),
+              treated_total_eyes = sum(ne[t1]), treated_cc_eyes = sum(ne[t1 & cc]),
+              ref_total_eyes = sum(ne[!t1]), ref_cc_eyes = sum(ne[!t1 & cc]),
+              both_groups = ut$both,
+              matched_treated = NA, controls_used = NA, matched_treated_eyes = NA, controls_used_eyes = NA,
+              error = NULL, unmatched_treated_n = NA, unmatched_control_n = NA,
+              unmatched_treated_ids = character(0), unmatched_control_ids = character(0),
+              unmatched_treated_ids_total = NA, unmatched_control_ids_total = NA)
+  if (res$treated_cc == 0 || res$ref_cc == 0) return(res)
+  ucc <- u[cc, , drop = FALSE]
+  for (cv in covs) if (is.character(ucc[[cv]])) ucc[[cv]] <- factor(ucc[[cv]])
+  f <- stats::as.formula(paste(".treat ~", paste(sprintf("`%s`", covs), collapse = " + ")))
+  da <- .psm_distance_args(psm$distance)
+  m <- with_local_seed(psm$seed, tryCatch(
+    MatchIt::matchit(f, data = ucc, method = .psm_method_for(psm$method, ucc, covs),
+                     distance = da$distance, link = da$link,
+                     ratio = psm$ratio, replace = psm$replace, caliper = psm$caliper,
+                     std.caliper = psm$std_caliper, m.order = psm$m_order),
+    error = function(e) e))
+  if (inherits(m, "error")) { res$error <- conditionMessage(m); return(res) }
+  md <- MatchIt::match.data(m)
+  mt <- u$.unit %in% md$.unit
+  res$matched_treated <- sum(mt & t1); res$controls_used <- sum(mt & !t1)
+  res$matched_treated_eyes <- sum(ne[mt & t1]); res$controls_used_eyes <- sum(ne[mt & !t1])
+  t_un <- u$.pid[cc & t1 & !mt]; c_un <- u$.pid[cc & !t1 & !mt]
+  res$unmatched_treated_n <- length(t_un); res$unmatched_control_n <- length(c_un)
+  res$unmatched_treated_ids_total <- length(t_un); res$unmatched_control_ids_total <- length(c_un)
+  res$unmatched_treated_ids <- I(utils::head(t_un, CAP))
+  res$unmatched_control_ids <- I(utils::head(c_un, CAP))
+  if ("RowID" %in% names(sub)) {
+    ROWCAP <- 1000
+    e_in <- utils::head(which(ut$eye_unit %in% md$.unit), ROWCAP)
+    j <- match(ut$eye_unit[e_in], md$.unit)
+    res$matched_rows <- I(as.integer(sub$RowID[e_in]))
+    res$matched_w    <- I(if ("weights" %in% names(md)) as.numeric(md$weights[j]) else rep(1, length(e_in)))
+    res$matched_ps   <- I(if ("distance" %in% names(md)) round(as.numeric(md$distance[j]), 5) else rep(NA_real_, length(e_in)))
+  }
+  res
 }
 
 for (run in cfg$runs) {
@@ -77,11 +133,18 @@ for (run in cfg$runs) {
   covs <- setdiff(names(d), c("GroupLabel", "PatientID", "RowID"))
   for (cv in intersect(text_covs, covs)) d[[cv]] <- as.character(d[[cv]])
   pairings <- list()
+  per_patient <- intersect(as.character(unlist(run$per_patient_covs)), covs)
+  unit_run <- by_patient && "PatientID" %in% names(d)
 
   for (tg in setdiff(unique(d$GroupLabel), ref)) {
     sub <- d[d$GroupLabel %in% c(ref, tg), , drop = FALSE]
     rownames(sub) <- as.character(seq_len(nrow(sub)))
     sub$.treat <- as.integer(sub$GroupLabel == tg)
+    if (unit_run) {
+      res <- preview_units(sub, covs, per_patient, tg)
+      pairings[[length(pairings) + 1]] <- res
+      next
+    }
     cc <- stats::complete.cases(sub[, covs, drop = FALSE])
     res <- list(treated = tg, reference = ref,
                 treated_total = sum(sub$.treat == 1),
@@ -138,7 +201,8 @@ for (run in cfg$runs) {
     }
     pairings[[length(pairings) + 1]] <- res
   }
-  out_runs[[length(out_runs) + 1]] <- list(label = run$label, pairings = pairings)
+  out_runs[[length(out_runs) + 1]] <- c(list(label = run$label, pairings = pairings),
+    if (by_patient && !unit_run) list(unit_note = PSM_NO_PID_TEXT))
 }
 
 emit("RESULT ", jsonlite::toJSON(list(runs = out_runs), auto_unbox = TRUE, null = "null"))

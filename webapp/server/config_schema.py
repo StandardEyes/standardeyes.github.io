@@ -54,6 +54,11 @@ DEFAULTS: dict[str, Any] = {
     # fixed seed for MatchIt (m.order = "random" and ties), so identical
     # settings give identical matched cohorts in the run and the live preview
     "psm_seed": 20250601,
+    # the matching unit (decision V12-1): "eye" = every analyzed eye is a unit
+    # (the 1.1.0 behavior); "patient" = one unit per patient per group, both
+    # eyes kept together (eye-level covariates averaged, per-patient ones taken
+    # once; every eye of a matched patient carries the patient's weight)
+    "psm_unit": "eye",
     "run_gee_stage": "matched",
     # small-sample inference of every GEE test and interval (decision D11):
     # "md" = Mancl-DeRouen bias-corrected robust SE with a t reference (F for
@@ -390,6 +395,33 @@ def psm_distance(cfg: dict) -> str:
 # R/analysis.R table_tests_of)
 GEE_SMALL_SAMPLE = ("md", "none")
 TABLE_TESTS = ("auto", "classical")
+# the matching unit (decision V12-1; R/analysis.R psm_unit_of reads the same
+# words, "eyes" / "patients" included)
+PSM_UNITS = ("eye", "patient")
+_PSM_UNIT_ALIASES = {"eyes": "eye", "patients": "patient"}
+
+
+def psm_unit(cfg: dict) -> str:
+    """The matching unit as R reads it: trimmed, lower case, "eyes" /
+    "patients" accepted; blank / missing = "eye" (settings files of 1.1.0)."""
+    v = (cfg or {}).get("psm_unit")
+    if _blank(v):
+        return DEFAULTS["psm_unit"]
+    v = str(v).strip().lower()
+    return _PSM_UNIT_ALIASES.get(v, v)
+
+
+def psm_unit_problem(cfg: dict, has_patient_id: bool | None = None) -> str | None:
+    """Why the matching unit cannot run (None = it can): an unknown value, or
+    patients without a patient-ID column (the engine would match eyes)."""
+    u = psm_unit(cfg)
+    if u not in PSM_UNITS:
+        return (f"Matching unit '{(cfg or {}).get('psm_unit')}' is not supported - use eye or patient "
+                "(both eyes of a patient kept together).")
+    if u == "patient" and has_patient_id is False:
+        return ("Matching by patient (both eyes together) needs a patient ID column - map one under "
+                "Column roles, or match eyes.")
+    return None
 
 
 def _choice(cfg: dict, key: str) -> str:
@@ -478,6 +510,8 @@ def normalize_cfg(cfg: dict, file_path: str, sheet: Any = None) -> dict:
     out.update(normalize_psm(out))
     out["psm_method"] = psm_method(out)
     out["psm_distance"] = psm_distance(out)
+    # a settings file of 1.1.0 has no matching unit: eyes (decision V12-1)
+    out["psm_unit"] = psm_unit(out)
     # a settings file of v1.0.0 has neither key: the v1.1.0 defaults apply
     out["gee_small_sample"] = _choice(out, "gee_small_sample")
     out["table_tests"] = _choice(out, "table_tests")
@@ -688,7 +722,8 @@ def validate_cfg(cfg: dict, columns: list | None = None, data: Any = None) -> li
     if cfg.get("do_matching") and not (cfg.get("psm_covariates_raw") or []):
         errs.append("Matching is enabled but no matching covariates are selected.")
     if cfg.get("do_matching"):
-        why = psm_method_problem(cfg) or psm_distance_problem(cfg)
+        why = psm_method_problem(cfg) or psm_distance_problem(cfg) or \
+            psm_unit_problem(cfg, has_patient_id=not _blank(cfg.get("patient_id_raw")))
         if why:
             errs.append(why)
     for r in cfg.get("filter_rules") or []:

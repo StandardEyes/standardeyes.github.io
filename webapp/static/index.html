@@ -802,6 +802,10 @@
             <label class="ms-item"><input type="checkbox" :checked="has(s.psm_covariates_raw,c)" @change="toggle(s.psm_covariates_raw,c)"><span x-text="c"></span></label>
           </template></div>
         </div>
+        <div class="grid3" style="margin-top:12px">
+          <div><label class="field" for="psm-unit">Match</label><select id="psm-unit" x-model="s.psm_unit"><template x-for="o in PSM_UNITS.concat(PSM_UNITS.some(u=>u[0]===s.psm_unit) ? [] : [[s.psm_unit, s.psm_unit+' (from the loaded settings)']])" :key="o[0]"><option :value="o[0]" x-text="o[1]"></option></template></select></div>
+        </div>
+        <p class="hint">Patients: a patient's eyes in a group are matched as one unit (eye-level covariates averaged, per-patient ones taken once), so both eyes enter or leave the matched cohort together and carry the patient's weight; needs a patient ID.</p>
         <div class="grid4" style="margin-top:12px">
           <div><label class="field" for="psm-method">Method</label><select id="psm-method" x-model="s.psm_method" @change="psmMethodNote=fitPsmToDistance()"><template x-for="o in PSM_METHODS" :key="o[0]"><option :value="o[0]" x-text="o[1]"></option></template></select></div>
           <div><label class="field" for="psm-distance">Distance <span class="muted small">(propensity-score scale)</span></label><select id="psm-distance" x-model="s.psm_distance" :disabled="!psmUses('distance')" @change="psmMethodNote=fitPsmToDistance()"><template x-for="o in [['linear.logit','logit of the propensity score (default)'],['logit','propensity score, probability scale'],['glm','propensity score, probability scale (glm)'],['mahalanobis','mahalanobis'],['robust_mahalanobis','robust_mahalanobis']].concat(['linear.logit','logit','glm','mahalanobis','robust_mahalanobis'].includes(s.psm_distance) ? [] : [[s.psm_distance, s.psm_distance+' (from the loaded settings)']])" :key="o[0]"><option :value="o[0]" x-text="o[1]" :disabled="!psmDistanceOk(o[0])"></option></template></select></div>
@@ -841,16 +845,16 @@
                 <strong x-text="run.label"></strong>
                 <table class="data" style="margin-top:4px">
                   <thead><tr>
-                    <th>Pairing</th><th>Group rows</th><th>Complete covariates</th>
+                    <th>Pairing</th><th x-text="mpByPatient() ? 'Group patients (eyes)' : 'Group rows'"></th><th>Complete covariates</th>
                     <th>Matched</th><th>Reference pool (complete)</th><th>Controls used</th>
                   </tr></thead>
                   <tbody>
                     <template x-for="p in run.pairings" :key="p.treated">
                       <tr>
                         <td x-text="p.treated+' vs '+p.reference"></td>
-                        <td x-text="p.treated_total.toLocaleString()"></td>
+                        <td x-text="mpN(p,'treated_total')"></td>
                         <td>
-                          <span x-text="p.treated_cc.toLocaleString()"></span>
+                          <span x-text="mpN(p,'treated_cc')"></span>
                           <span class="badge warn" x-show="p.treated_cc<p.treated_total"
                                 x-text="'-'+(p.treated_total-p.treated_cc)+' missing data'"></span>
                         </td>
@@ -858,18 +862,22 @@
                           <template x-if="p.error"><span class="badge warn" :title="p.error">failed</span></template>
                           <template x-if="!p.error">
                             <span>
-                              <strong x-text="p.matched_treated===null?'—':p.matched_treated.toLocaleString()"></strong>
+                              <strong x-text="mpN(p,'matched_treated')"></strong>
                               <span class="badge warn" x-show="p.matched_treated!==null && p.matched_treated<p.treated_cc"
                                     x-text="'-'+(p.treated_cc-p.matched_treated)+' no match in caliper'"></span>
                             </span>
                           </template>
                         </td>
-                        <td x-text="p.ref_cc.toLocaleString()+' / '+p.ref_total.toLocaleString()"></td>
-                        <td x-text="p.controls_used===null?'—':p.controls_used.toLocaleString()"></td>
+                        <td x-text="mpN(p,'ref_cc')+' / '+mpN(p,'ref_total')"></td>
+                        <td x-text="mpN(p,'controls_used')"></td>
                       </tr>
                     </template>
                   </tbody>
                 </table>
+                <template x-for="p in run.pairings" :key="'b'+p.treated">
+                  <p class="small muted" x-show="mpByPatient() && p.both_groups>0" style="margin:4px 0 0"
+                     x-text="p.treated+' vs '+p.reference+': '+p.both_groups+' patient(s) have eyes in both groups and form one unit in each.'"></p>
+                </template>
                 <template x-for="p in run.pairings" :key="'m'+p.treated">
                   <p class="small muted" x-show="missingList(run.label,p.treated).length" style="margin:4px 0 0">
                     <b x-text="p.treated"></b> rows lost to missing covariates —
@@ -883,12 +891,12 @@
                     <div class="grid2">
                       <div x-show="p.unmatched_treated_n>0">
                         <div class="small"><span class="badge warn" x-text="p.treated+' (test)'"></span>
-                          <strong x-text="p.unmatched_treated_n.toLocaleString()"></strong> unmatched eye(s)<span x-show="p.unmatched_treated_ids_total"> — <span x-text="p.unmatched_treated_ids_total.toLocaleString()"></span> distinct patient(s)</span></div>
+                          <strong x-text="p.unmatched_treated_n.toLocaleString()"></strong> <span x-text="mpByPatient() ? 'unmatched patient(s)' : 'unmatched eye(s)'"></span><span x-show="p.unmatched_treated_ids_total && !mpByPatient()"> — <span x-text="p.unmatched_treated_ids_total.toLocaleString()"></span> distinct patient(s)</span></div>
                         <div class="idlist" x-text="p.unmatched_treated_ids.join(', ') + (p.unmatched_treated_ids_total>p.unmatched_treated_ids.length ? (' … +'+(p.unmatched_treated_ids_total-p.unmatched_treated_ids.length)+' more') : '')"></div>
                       </div>
                       <div x-show="p.unmatched_control_n>0">
                         <div class="small"><span class="badge" x-text="p.reference+' (control)'"></span>
-                          <strong x-text="p.unmatched_control_n.toLocaleString()"></strong> unused eye(s)<span x-show="p.unmatched_control_ids_total"> — <span x-text="p.unmatched_control_ids_total.toLocaleString()"></span> distinct patient(s)</span></div>
+                          <strong x-text="p.unmatched_control_n.toLocaleString()"></strong> <span x-text="mpByPatient() ? 'unused patient(s)' : 'unused eye(s)'"></span><span x-show="p.unmatched_control_ids_total && !mpByPatient()"> — <span x-text="p.unmatched_control_ids_total.toLocaleString()"></span> distinct patient(s)</span></div>
                         <div class="idlist" x-text="p.unmatched_control_ids.join(', ') + (p.unmatched_control_ids_total>p.unmatched_control_ids.length ? (' … +'+(p.unmatched_control_ids_total-p.unmatched_control_ids.length)+' more') : '')"></div>
                       </div>
                     </div>
@@ -897,6 +905,8 @@
               </div>
             </template>
             <p class="muted small">A row needs <b>every</b> matching covariate present to enter matching; "no match in caliper" = no reference row close enough in propensity score. Loosen by removing sparse covariates, widening the caliper, or disabling the caliper (empty = none). Unmatched patient IDs are listed above (capped at 300 per side).</p>
+            <p class="muted small" x-show="mpByPatient()">Patients matched (both eyes kept together): the counts are patients, with their eyes in brackets; a patient needs a value of every covariate in at least one eye.</p>
+            <p class="small warnline" role="alert" x-show="matchprev.data.unit_note" x-text="matchprev.data.unit_note"></p>
           </div>
         </template>
         <template x-if="!matchprev.data && !matchprev.busy && !matchprev.error">

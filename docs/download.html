@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Download for Windows — StandardEyes</title>
-<meta name="description" content="Download StandardEyes for Windows 10 and 11. One ZIP, no installer. What is new in 1.1.0, install steps, requirements, checksum and troubleshooting.">
+<meta name="description" content="Download StandardEyes for Windows 10 and 11. One ZIP, no installer. What is new in 1.2.0, install steps, requirements, checksum and troubleshooting.">
 <link rel="canonical" href="https://standardeyes.github.io/download.html">
 <meta property="og:title" content="Download for Windows — StandardEyes">
-<meta property="og:description" content="Download StandardEyes for Windows 10 and 11. One ZIP, no installer. What is new in 1.1.0, install steps, requirements, checksum and troubleshooting.">
+<meta property="og:description" content="Download StandardEyes for Windows 10 and 11. One ZIP, no installer. What is new in 1.2.0, install steps, requirements, checksum and troubleshooting.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://standardeyes.github.io/download.html">
 <meta property="og:site_name" content="StandardEyes">
@@ -64,7 +64,7 @@
   <div class="wrap">
     <div class="dl">
       <div class="main">
-        <h2>StandardEyes 1.1.0 for Windows</h2>
+        <h2>StandardEyes 1.2.0 for Windows</h2>
         <p>The complete app: the interface, the statistical engine, the example data and the user manual.</p>
         <div class="cta" style="margin-top:22px">
           <a class="btn lg light" href="https://github.com/StandardEyes/standardeyes.github.io/releases/latest/download/StandardEyes-windows.zip">
@@ -76,13 +76,13 @@
       </div>
       <div class="side">
         <dl class="kv">
-          <dt>Version</dt><dd>1.1.0 <span class="fine" style="font-weight:400">(build 2026-10-04-se.10)</span></dd>
+          <dt>Version</dt><dd>1.2.0 <span class="fine" style="font-weight:400">(build 2026-11-11-se.11)</span></dd>
           <dt>System</dt><dd>Windows 10 or 11, 64-bit</dd>
           <dt>Also needs</dt><dd><a href="https://cran.r-project.org/bin/windows/base/old/4.5.2/">R 4.5.2 for Windows</a></dd>
           <dt>Disk space</dt><dd>About 250 MB after extracting</dd>
-          <dt>SHA-256</dt><dd><span class="hash" id="sha">763f95528f3a41bbcdb770ebfa9691dd4d086f932e7569e5e8e80e507e4bcb9d</span><br><button class="btn sm ghost" data-copy="#sha" style="margin-top:8px">Copy checksum</button></dd>
+          <dt>SHA-256</dt><dd><span class="hash" id="sha">fd2e6e53cac7dfc27bfe4b4ce122baa43f43c06cd686db259725e26cd9998e22</span><br><button class="btn sm ghost" data-copy="#sha" style="margin-top:8px">Copy checksum</button></dd>
         </dl>
-        <p class="fine" style="margin:16px 0 0"><a href="#new">What is new in 1.1.0</a> · <a href="https://github.com/StandardEyes/standardeyes.github.io/releases">All releases and release notes</a> · <a href="https://github.com/StandardEyes/standardeyes.github.io">Source code</a></p>
+        <p class="fine" style="margin:16px 0 0"><a href="#new">What is new in 1.2.0</a> · <a href="https://github.com/StandardEyes/standardeyes.github.io/releases">All releases and release notes</a> · <a href="https://github.com/StandardEyes/standardeyes.github.io">Source code</a></p>
       </div>
     </div>
   </div>
@@ -90,8 +90,22 @@
 
 <section class="block alt" id="new">
   <div class="wrap narrow prose">
-    <h2>What is new in 1.1.0</h2>
-    <p>Version 1.1.0 brings the tables, figures and astigmatism analysis in line with the reporting rules of the <i>Journal of Cataract &amp; Refractive Surgery</i>, including the JCRS 2025 astigmatism standard. It changes several defaults, so the same data and settings can give different numbers than 1.0.0. A preset or settings file saved by 1.0.0 still loads and runs: a setting it does not contain takes the 1.1.0 default, and every workbook's Manifest sheet records the settings used. Each change, and how to get the 1.0.0 behavior back (interface tab, then the settings-file key):</p>
+    <h2>What is new in 1.2.0</h2>
+    <p>Version 1.2.0 changes no default. A preset or settings file saved by 1.1.0 or 1.0.0 loads and runs as before, and it still matches eyes. Every workbook's Manifest sheet records the settings used.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>What is new in 1.2.0</th><th>Where to find it</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Patient-level matching (option).</strong> The analyzed eyes of a patient in a group form one matching unit: eye-level covariates are averaged over those eyes, per-patient covariates are taken once, and the propensity model, caliper, ratio and order work on the patients. Both eyes enter or leave the matched cohort together, each with the patient's matching weight, and balance (love plot, PSM sheet) is computed on the patients. The live preview counts patients, with their eyes. Exact, coarsened exact and subclassification matching work on the patients too. A patient with eyes in two groups forms one unit in each group; the run log and the PSM sheet count them. The outcome models do not change.</td><td>Matching tab, <b>Match</b> = patients (both eyes together) (<code>psm_unit: "patient"</code>; the default <code>"eye"</code> matches eyes, as in 1.1.0). It needs a patient ID column.</td></tr>
+        <tr><td><strong>Five demonstration datasets</strong> replace the single example dataset: two techniques (A), notation harmonization (B), four platforms (C), astigmatism (D) and confounded cohorts (E), with seven settings files, also in the app as the seven <b>Example - …</b> presets. Each has a README sheet with the generating model, every true effect, the seed and a column dictionary.</td><td><code>Example Data</code> folder; their generators are in <code>validation</code>. See the <a href="examples.html">examples</a>.</td></tr>
+        <tr><td><strong>The independence-refit label states its reason.</strong> When an exchangeable GEE is not accepted and is refitted with an independence working correlation, the tables, the GEE sheets and the run log say why, for example “the exchangeable fit was not accepted: working correlation 0.984”, “did not converge” or “unstable step”.</td><td>No switch; the models do not change.</td></tr>
+        <tr><td><strong>Per-patient rows when a patient has eyes in two groups.</strong> A variable marked “per patient” is then fitted and tested clustered by patient, on the GEE sheets and in the summary tables, so the row's P value and its GEE column agree. The Test column gives the reason, for example “clustered: 19 patients have eyes in more than one group”. Data without such patients give the 1.1.0 numbers.</td><td>No switch.</td></tr>
+        <tr><td><strong>GEE fits converge more tightly</strong> (until no coefficient changes by more than 1e-8). Full-precision values on the GEE sheets can move by up to about 5e-5; in the example runs of the release tests no printed value changed.</td><td>No switch.</td></tr>
+        <tr><td><strong>The run log counts the converted cylinders</strong>: for each refraction, the plus cylinders transposed to minus cylinder, beside its count of the off-chart acuities (CF, HM, LP, NLP) set to missing. The love plot's key reads “Before matching” and “After matching”.</td><td>The run log of every run.</td></tr>
+        <tr><td><strong>A warning for a long output folder.</strong> When the output folder's full path is longer than 100 characters, the app warns before a run with figures that some figure files may pass the 260-character limit Windows sets on a full path.</td><td>Run &amp; Results tab, <b>Before you run</b>, and the run log.</td></tr>
+      </tbody>
+    </table></div>
+    <details class="qa"><summary>What changed in 1.1.0</summary><div class="a">
+    <p>Version 1.1.0 brought the tables, figures and astigmatism analysis in line with the reporting rules of the <i>Journal of Cataract &amp; Refractive Surgery</i>, including the JCRS 2025 astigmatism standard. It changes several defaults, so the same data and settings can give different numbers than 1.0.0. A preset or settings file saved by 1.0.0 still loads and runs: a setting it does not contain takes the 1.1.0 default, and every workbook's Manifest sheet records the settings used. Each change, and how to get the 1.0.0 behavior back (interface tab, then the settings-file key):</p>
     <div class="tablewrap"><table>
       <thead><tr><th>What changed in 1.1.0</th><th>To get the 1.0.0 behavior</th></tr></thead>
       <tbody>
@@ -108,7 +122,8 @@
       </tbody>
     </table></div>
     <p>Also new: EPS figure files, up to 1200 dpi, and a figure width in cm (8.76, 12.69 and 17.77 cm are the journal column widths; tall combined figures are split into pages). Without a switch: comparisons with the reference in the tables are Holm-adjusted; tables use fixed decimals and one effect style; every model of a matched cohort uses an independence working correlation; the Regression sheet also gives the crude estimate on the same eyes; the Run &amp; Results tab lists how the numbers will be computed before you run; workbooks name “StandardEyes” as their author.</p>
-    <p>The <a href="examples.html">example data</a> are new as well: a simulated dataset with the cohorts Reference, Cohort A and Cohort B, generated from a documented model with a fixed seed and described in its own README sheet, and a new astigmatism validation dataset. The generators ship in the <code>validation</code> folder of the download.</p>
+    <p>Version 1.1.0 also brought a simulated example dataset with the cohorts Reference, Cohort A and Cohort B and a new astigmatism validation dataset. In 1.2.0 the five demonstration datasets replace that example dataset; the astigmatism validation dataset is in the <code>validation</code> folder.</p>
+    </div></details>
   </div>
 </section>
 
@@ -133,7 +148,7 @@
       </div>
     </div>
     <div class="callout" style="margin-top:26px" id="first-run">
-      <p><strong>First run.</strong> Click <b>Browse &amp; load Excel</b> and open <code>Example Data\Example_Refractive_Dataset.xlsx</code>. In the sidebar, click the preset <b>Example - 02_Two_cohorts_full</b>. Tick <b>Preview only</b> and press <b>Run</b>. The <a href="tutorials.html">tutorials</a> walk through the same steps.</p>
+      <p><strong>First run.</strong> Click <b>Browse &amp; load Excel</b> and open <code>Example Data\Dataset_A_two_techniques.xlsx</code>. In the sidebar, click the preset <b>Example - A Two techniques</b>. Tick <b>Preview only</b> and press <b>Run</b>. The <a href="tutorials.html">tutorials</a> walk through the same steps.</p>
     </div>
     <div class="callout warn">
       <p><strong>Do not</strong> run the app from inside the ZIP, and do not put it under <code>C:\Program Files</code> or on a read-only network share. It needs to write inside its own folder.</p>
@@ -246,7 +261,7 @@
       <div class="brand small"><span class="wm">Standard<b>Eyes</b></span></div>
       <p>Standardized comparative analysis and outcomes reporting for refractive surgery. Free, local, reproducible.</p>
       <p><b style="color:#fff">For Ophthalmologists, By Ophthalmologists.</b></p>
-      <p class="fine">Version 1.1.0 · MIT License · © 2026 Noyman DBE, Mimouni M, Safir M</p>
+      <p class="fine">Version 1.2.0 · MIT License · © 2026 Noyman DBE, Mimouni M, Safir M</p>
     </div>
     <div>
       <h2 class="fh">The app</h2>

@@ -1,26 +1,26 @@
 WEBVTT
 
-00:00:00.637 --> 00:00:04.970
+00:00:00.721 --> 00:00:05.054
 Tutorial two. Variables, refraction and visual acuity.
 
-00:00:09.250 --> 00:00:23.382
+00:00:09.419 --> 00:00:23.551
 Files often mix plus and minus cylinder. List each sphere, cylinder and axis set, and the tables use minus cylinder. The astigmatism vectors read the sign of each row's own cylinder, so either form gives the same vector.
 
-00:00:23.561 --> 00:00:31.981
+00:00:23.834 --> 00:00:32.254
 Next, say which notation your visual acuity uses: decimal, logMAR, Snellen, or ETDRS letters.
 
-00:00:32.201 --> 00:00:43.685
+00:00:32.481 --> 00:00:43.965
 Acuity is analyzed in logMAR by default. A table cell then shows the Snellen geometric mean, with the logMAR mean and standard deviation beside it, and the range in Snellen.
 
-00:00:43.922 --> 00:00:56.567
+00:00:44.226 --> 00:00:56.872
 Give each variable a section and a statistical type. The type decides the summary and the test. When patients have two analyzed eyes, the P value is clustered by patient, and each test is named in the output.
 
-00:00:56.744 --> 00:01:01.496
+00:00:57.112 --> 00:01:01.863
 Set the row order of your tables, so they read like the table in your manuscript.
 
-00:01:04.009 --> 00:01:11.732
+00:01:04.392 --> 00:01:12.116
 Variables recorded once per person, such as age and sex, are listed here. They are counted per patient, not per eye.
 
-00:01:12.515 --> 00:01:16.988
+00:01:12.938 --> 00:01:17.410
 StandardEyes. For ophthalmologists, by ophthalmologists.
 

@@ -56,7 +56,7 @@
   <div class="wrap">
     <div class="kicker">How it works</div>
     <h1>What StandardEyes does with your data</h1>
-    <p class="lead">A plain account of each step in version 1.1.0: what is computed, which test is used when, and what the output means. The <a href="tutorials.html#documents">statistical reference</a> gives the full detail, and the <a href="download.html#new">list of changes</a> says what is new in 1.1.0.</p>
+    <p class="lead">A plain account of each step in version 1.2.0: what is computed, which test is used when, and what the output means. The <a href="tutorials.html#documents">statistical reference</a> gives the full detail, and the <a href="download.html#new">list of changes</a> says what is new in 1.2.0.</p>
   </div>
 </section>
 
@@ -101,8 +101,8 @@
       </ul>
 
       <h2 id="groups">Groups and the reference group</h2>
-      <p>A group is a set of values of the group source column. You can define two groups or more. One group is the <strong>reference</strong>: every effect estimate, every matching pairing, every adjusted model and every versus-reference line is expressed relative to it. It is usually the control group or the standard technique. In the example dataset the groups are <code>Reference</code>, <code>Cohort A</code> and <code>Cohort B</code>.</p>
-      <p>Variables that describe the person and not the eye (age, sex, a systemic disease) can be marked <strong>per patient</strong>. They are then summarized and tested once per patient, and the table headers show both counts, for example <code>Reference (n = 226 eyes; 136 patients)</code>.</p>
+      <p>A group is a set of values of the group source column. You can define two groups or more. One group is the <strong>reference</strong>: every effect estimate, every matching pairing, every adjusted model and every versus-reference line is expressed relative to it. It is usually the control group or the standard technique. In example dataset A the groups are <code>PRK</code> (the reference) and <code>LASIK</code>.</p>
+      <p>Variables that describe the person and not the eye (age, sex, a systemic disease) can be marked <strong>per patient</strong>. They are then summarized and tested once per patient, and the table headers show both counts, for example <code>PRK (n = 204 eyes; 110 patients)</code> in dataset A.</p>
 
       <h2 id="types">Variable types and tests</h2>
       <p>Each variable you analyze is given one of four types. The type decides how it is summarized and which test compares the groups. When a patient ID is mapped and at least one patient has two analyzed eyes, the P value of every per-eye row is <strong>clustered by patient</strong>; otherwise the classical tests run.</p>
@@ -157,11 +157,12 @@
       <h2 id="matching">Matching</h2>
       <p>Matching makes the groups comparable on the baseline variables you choose. The propensity score is each eye's estimated chance of being in the compared group, given those variables. Eyes with similar scores are paired. StandardEyes uses the R package MatchIt and matches each group to the reference group. The default is 1:1 nearest-neighbor matching without replacement on the <strong>logit of the propensity score</strong>, with a caliper (the largest allowed difference) of 0.2 standard deviations of the logit of the propensity score (Austin 2011). The probability scale of version 1.0.0 stays selectable under <b>Distance</b>. Exact matching, coarsened exact matching and subclassification are also available.</p>
       <ul>
-        <li>A <strong>live preview</strong> (for nearest-neighbor matching) runs the real matching on your current settings and shows, for each pairing, how many eyes had complete covariates and how many were matched.</li>
+        <li><strong>Eyes or patients.</strong> By default each eye is a matching unit. With <b>Match</b> = patients (both eyes together), the analyzed eyes of a patient in a group form one unit: eye-level covariates are averaged over those eyes and per-patient covariates are taken once. Both eyes then enter or leave the matched cohort together, each carrying the patient's matching weight, and balance is computed on the patients. A patient with eyes in two groups forms one unit in each group. The outcome models are the same either way.</li>
+        <li>A <strong>live preview</strong> (for nearest-neighbor matching) runs the real matching on your current settings and shows, for each pairing, how many eyes or patients had complete covariates and how many were matched.</li>
         <li><strong>Balance</strong> is reported as standardized mean differences before and after matching, against the usual 0.1 threshold. A love plot shows the difference for each covariate before and after matching. The PSM sheet, the Manifest and the love plot name the scale of the propensity score.</li>
         <li>When the matching weights are not all 1 (matching with replacement, k:1 matching in which some eyes find fewer than k controls, or exact, coarsened exact or subclassification matching), the matched tables, models and figure P values use the weights, and the headers show the effective sample size.</li>
       </ul>
-      <figure class="shot" style="margin:22px 0"><img src="assets/shot_matching.jpg" alt="The live matched-count preview" loading="lazy" width="1920" height="1200"><figcaption>The live preview: eyes per group, eyes with complete covariates, eyes matched, and the eyes that found no match.</figcaption></figure>
+      <figure class="shot" style="margin:22px 0"><img src="assets/shot_matching.jpg" alt="The live matched-count preview" loading="lazy" width="1920" height="1200"><figcaption>The live preview of dataset E with patients matched: patients (and their eyes) per group, with complete covariates, matched, and those that found no match.</figcaption></figure>
       <div class="callout"><p>Matching deals with measured confounders only. It does not turn an observational comparison into a randomized one.</p></div>
 
       <h2 id="gee">Two eyes per patient</h2>
@@ -256,12 +257,12 @@
         </tbody>
       </table></div>
       <p>Optional tabs lay the data out for mEYEstro and AstigMATIC (<code>mEYEstro_&lt;group&gt;</code>, <code>AstigMATIC_&lt;group&gt;</code>; for matched pairing k <code>mEYEstro_M&lt;k&gt;_&lt;group&gt;</code>), for users who want to check the same eyes in those tools.</p>
-      <figure class="shot" style="margin:22px 0"><img src="assets/shot_pubtable.jpg" alt="The publication-style table in Excel" loading="lazy" width="1500" height="718"><figcaption>The publication-style table: baseline, preoperative and outcome blocks in one sheet.</figcaption></figure>
+      <figure class="shot" style="margin:22px 0"><img src="assets/shot_pubtable.jpg" alt="The publication-style table in Excel" loading="lazy" width="1500" height="689"><figcaption>The publication-style table: baseline, preoperative and outcome blocks in one sheet.</figcaption></figure>
       <p>You can download complete sample outputs from the <a href="examples.html#outputs">examples page</a>.</p>
 
       <h2 id="repro">Reproducibility</h2>
       <ul>
-        <li>A <strong>preset</strong> stores every setting of a study in one small JSON file. Loading it restores the analysis exactly, on your computer or a colleague's. A preset saved by version 1.0.0 still loads; a setting it does not contain takes the 1.1.0 default.</li>
+        <li>A <strong>preset</strong> stores every setting of a study in one small JSON file. Loading it restores the analysis exactly, on your computer or a colleague's. A preset saved by version 1.0.0 or 1.1.0 still loads; a setting it does not contain takes the 1.2.0 default.</li>
         <li>The <strong>Manifest</strong> sheet of every workbook records the StandardEyes version and build (also for runs started from the command line), the run duration, the R and package versions, the input file and its checksum, the settings that shape the numbers (matching scale, GEE inference, table tests, P value style, acuity, figure and astigmatism settings) and the random seeds. Workbooks name “StandardEyes” as their author, never your Windows user name.</li>
         <li>Steps that use random numbers (matching order, the bootstraps, permutation and Monte-Carlo exact tests) use fixed seeds, so the same input gives the same output.</li>
         <li>All numbers are computed by the R engine, which also runs from the command line with the same settings file.</li>
@@ -283,7 +284,7 @@
       <details class="qa"><summary>Is it free? May I use it for a commercial study?</summary><div class="a"><p>Yes to both. It is released under the MIT License.</p></div></details>
       <details class="qa"><summary>Do I need to know R?</summary><div class="a"><p>No. R must be installed, but you never open it. Everything is done in the app's interface.</p></div></details>
       <details class="qa"><summary>Does it run on a Mac?</summary><div class="a"><p>The ready-to-run download is for Windows 10 and 11. On macOS or Linux the app runs from source with Python and R 4.5. The <a href="https://github.com/StandardEyes/standardeyes.github.io#running-from-source-any-operating-system">README</a> lists the steps.</p></div></details>
-      <details class="qa"><summary>Why do I get different numbers than with version 1.0.0?</summary><div class="a"><p>Version 1.1.0 changes several defaults: clustered table tests, the small-sample correction of GEE, the logit caliper, logMAR acuity, the journal P value style and the astigmatism analysis. Each change, and the setting that gives the 1.0.0 behavior back, is listed under <a href="download.html#new">what is new in 1.1.0</a>. The Manifest sheet records the settings of every run.</p></div></details>
+      <details class="qa"><summary>Why do I get different numbers than with an earlier version?</summary><div class="a"><p>Version 1.2.0 changes no default. Its GEE fits converge more tightly, which can move full-precision GEE values in about the fifth significant digit, and a per-patient row is now tested clustered by patient when a patient has eyes in two groups. Version 1.1.0 changed several defaults: clustered table tests, the small-sample correction of GEE, the logit caliper, logMAR acuity, the journal P value style and the astigmatism analysis. Each change, and the setting that gives the 1.0.0 behavior back, is listed under <a href="download.html#new">what is new</a>. The Manifest sheet records the settings of every run.</p></div></details>
       <details class="qa"><summary>My data is in CSV or an old .xls file. Can I use it?</summary><div class="a"><p>Open it in Excel and save it as <code>.xlsx</code>. The app reads <code>.xlsx</code> and <code>.xlsm</code> files.</p></div></details>
       <details class="qa"><summary>My acuity is in Snellen or logMAR. Do I have to convert it?</summary><div class="a"><p>No. Choose the notation on the <b>Variables &amp; Types</b> tab and the app reads it as it is. See <a href="#va">visual acuity notations</a>.</p></div></details>
       <details class="qa"><summary>Can I use it for one group only?</summary><div class="a"><p>StandardEyes is built for comparisons and needs at least two groups. For a single group, the tools mEYEstro and AstigMATIC are a good fit.</p></div></details>
@@ -307,7 +308,7 @@
       <div class="brand small"><span class="wm">Standard<b>Eyes</b></span></div>
       <p>Standardized comparative analysis and outcomes reporting for refractive surgery. Free, local, reproducible.</p>
       <p><b style="color:#fff">For Ophthalmologists, By Ophthalmologists.</b></p>
-      <p class="fine">Version 1.1.0 · MIT License · © 2026 Noyman DBE, Mimouni M, Safir M</p>
+      <p class="fine">Version 1.2.0 · MIT License · © 2026 Noyman DBE, Mimouni M, Safir M</p>
     </div>
     <div>
       <h2 class="fh">The app</h2>

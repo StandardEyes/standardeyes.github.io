@@ -1,5 +1,5 @@
 {
-  "file_path": "Example Data/Example_Refractive_Dataset.xlsx",
+  "file_path": "Example Data/Dataset_E_confounded_cohorts.xlsx",
   "sheet_name": 1,
   "guess_max": 120000,
   "patient_id_raw": "PatientID",
@@ -7,10 +7,7 @@
   "group_source_var": "Cohort",
   "patient_level_params_raw": [
     "Age_Years",
-    "Sex",
-    "Smoker",
-    "Optical_Zone_mm",
-    "Surgeon"
+    "Sex"
   ],
   "exclude_params_raw": [],
   "age_var": "Age_Years",
@@ -27,27 +24,19 @@
       "Preop_Pachymetry_um",
       "Preop_Mean_K_D"
     ],
-    "ordinal": [
-      "Preop_DryEye_Grade"
-    ],
+    "ordinal": [],
     "dichotomous": [
-      "Sex",
-      "Smoker"
+      "Sex"
     ],
-    "categorical": [
-      "Surgeon"
-    ]
+    "categorical": []
   },
   "preop": {
     "continuous": [
-      "Optical_Zone_mm",
-      "Ablation_or_Lenticule_Depth_um"
+      "Ablation_Depth_um"
     ],
     "ordinal": [],
     "dichotomous": [],
-    "categorical": [
-      "Procedure"
-    ]
+    "categorical": []
   },
   "outcome": {
     "continuous": [
@@ -57,17 +46,11 @@
       "Postop_UDVA",
       "Postop_CDVA"
     ],
-    "ordinal": [
-      "Postop_Haze_Grade",
-      "Patient_Satisfaction_1to5"
-    ],
+    "ordinal": [],
     "dichotomous": [
-      "DryEye_Symptoms",
-      "Retreatment_Required"
+      "DryEye_Symptoms"
     ],
-    "categorical": [
-      "Complication_Type"
-    ]
+    "categorical": []
   },
   "within_group": {
     "continuous": [],
@@ -78,69 +61,59 @@
   "within_group_levels": {},
   "filter_rules": [
     {
-      "var": "Age_Years",
-      "op": ">=",
-      "value": [
-        18
-      ]
-    },
-    {
       "var": "FollowUp_Days",
       "op": "between",
       "value": [
         150,
         210
       ]
-    },
-    {
-      "var": "SurgeryNumber",
-      "op": "==",
-      "value": [
-        1
-      ]
-    },
-    {
-      "var": "Preop_Cylinder_D",
-      "op": "abs_le",
-      "value": [
-        5
-      ]
     }
   ],
   "groups": {
-    "Reference": [
-      "Reference"
+    "Control": [
+      "Control"
     ],
-    "Cohort A": [
-      "Cohort A"
+    "Condition": [
+      "Condition"
     ]
   },
-  "reference_group": "Reference",
+  "reference_group": "Control",
   "group_colors": {
-    "Reference": "#5B2C86",
-    "Cohort A": "#F26522",
-    "Cohort B": "#1B9E4B"
+    "Control": "#5B2C86",
+    "Condition": "#F26522"
   },
   "group_labels": {},
-  "do_matching": false,
-  "psm_covariates_raw": [],
+  "do_matching": true,
+  "psm_covariates_raw": [
+    "Age_Years",
+    "Preop_SEQ_D",
+    "Preop_Pachymetry_um"
+  ],
   "psm_method": "nearest",
   "psm_distance": "linear.logit",
-  "psm_ratio": 2,
+  "psm_ratio": 1,
   "psm_replace": false,
   "psm_caliper": 0.2,
   "psm_std_caliper": true,
   "psm_m_order": "largest",
-  "run_gee_stage": "none",
-  "run_main_gee": false,
-  "run_adjusted_gee": false,
-  "gee_adjust_covariates_raw": [],
+  "run_gee_stage": "both",
+  "run_main_gee": true,
+  "run_adjusted_gee": true,
+  "gee_adjust_covariates_raw": [
+    "Age_Years",
+    "Preop_SEQ_D",
+    "Preop_Pachymetry_um"
+  ],
   "use_matching_weights_in_gee": true,
   "add_gee_columns": true,
   "gee_source_for_tables": "main",
-  "do_regression": false,
-  "regression_stage": "unmatched",
-  "regression_covariates_raw": [],
+  "do_regression": true,
+  "regression_stage": "both",
+  "regression_covariates_raw": [
+    "Age_Years",
+    "Preop_SEQ_D",
+    "Preop_Pachymetry_um"
+  ],
   "subset_col_raw": "",
   "subsets": {},
   "subset_mode": "separate",
@@ -160,6 +133,7 @@
   "std_sph_raw": "Preop_Sphere_D",
   "std_cyl_raw": "Preop_Cylinder_D",
   "std_axis_raw": "Preop_Axis_Deg",
+  "va_format": "decimal",
   "do_logmar": true,
   "logmar_cols_raw": [
     "Preop_UDVA",
@@ -203,17 +177,17 @@
   },
   "dichotomous_preferred_level": {
     "Sex": "F",
-    "Smoker": "Yes",
-    "DryEye_Symptoms": "Yes",
-    "Retreatment_Required": "Yes"
+    "DryEye_Symptoms": "Yes"
   },
   "output_dir": "Example Output",
   "export_filtered_csv": true,
-  "output_prefix": "Ex01_Simple",
+  "output_prefix": "DS_E_pat",
+  "psm_unit": "patient",
   "num_groups": 2,
-  "num_filters": 4,
+  "num_filters": 1,
   "num_subsets": 0,
-  "_title": "Two groups, tables and figures only",
-  "_description": "Two groups compared with the standard tests (P values clustered by patient). No matching, GEE sheets or regression.",
-  "_demonstrates": "The smallest useful run: the group summary tables and the comparative figure set."
+  "_title": "Dataset E - confounded cohorts, patient-level matching",
+  "_description": "Condition versus Control with measured confounding (age, preop SEQ, pachymetry): crude tables, covariate-adjusted GEE and regression, and 1:1 propensity-score matching of patients (both eyes kept together).",
+  "_demonstrates": "Patient-clustered tests, the adjusted GEE, propensity-score matching (nearest neighbor 1:1 without replacement, caliper 0.2 SD of the logit of the score) with the love plot and the matched tables, and crude, adjusted and matched estimates side by side against the documented true effects (SEQ -0.20 D, dry-eye OR 2.0, no cylinder effect). On this file, 1:1 matching of patients with a caliper of 0.2 SD of the logit leaves preop SEQ at a standardized difference of 0.17 (patient units; beyond the love plot's 0.1 line, and the PSM sheet marks it 'no'); the covariate-adjusted matched GEE (-0.18 D for postop SEQ, true -0.20 D) removes that residual imbalance. The caliper is the default and was not tuned to balance this sample.",
+  "_notes": "psm_unit = 'patient' matches (patient, group) units with both eyes kept together; it is a StandardEyes 1.2.0 setting - StandardEyes 1.1.0 ignores it and matches eyes."
 }

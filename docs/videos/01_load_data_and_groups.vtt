@@ -1,32 +1,32 @@
 WEBVTT
 
-00:00:00.660 --> 00:00:04.389
+00:00:00.677 --> 00:00:04.406
 Tutorial one. Load your data and define the groups.
 
-00:00:05.502 --> 00:00:10.671
+00:00:05.527 --> 00:00:10.696
 Start by loading your Excel file. You can browse for it, or paste its full path.
 
-00:00:13.348 --> 00:00:19.585
+00:00:12.883 --> 00:00:19.120
 The file is read straight from your disk. Nothing is uploaded. The app runs entirely on this computer.
 
-00:00:19.746 --> 00:00:34.807
-This is the simulated example dataset that comes with the app. It has one row for each eye and each surgery, in three cohorts: Reference, Cohort A and Cohort B. Its README sheet gives the model that generated the data.
+00:00:19.322 --> 00:00:31.597
+This is simulated dataset A, one of five that come with the app. It has one row for each eye, treated by PRK or LASIK. Its README sheet gives the model that generated the data.
 
-00:00:35.007 --> 00:00:40.408
+00:00:31.843 --> 00:00:37.244
 An example study is one click away. A preset holds every setting of one study.
 
-00:00:43.146 --> 00:00:49.476
+00:00:40.004 --> 00:00:46.334
 Tell the app which columns identify the patient and the eye, and which column defines the groups you want to compare.
 
-00:00:49.653 --> 00:01:00.953
-Name each group, and tick the values that belong to it. Here the groups are Reference and Cohort A. You can define two groups or more, and every comparison is made against the reference group.
+00:00:46.498 --> 00:01:00.398
+Name each group, and tick the values that belong to it. Here the groups are PRK and LASIK, with PRK as the reference. You can define two groups or more, and every comparison is made against the reference group.
 
-00:01:01.182 --> 00:01:06.304
+00:01:00.653 --> 00:01:05.775
 Live counts update as you work: the rows in the analysis, and the rows in each group.
 
-00:01:06.514 --> 00:01:13.819
+00:01:06.005 --> 00:01:13.310
 Save your own study as a preset. Reload it later, or send it to a colleague, and the analysis is reproduced exactly.
 
-00:01:14.712 --> 00:01:19.184
+00:01:14.096 --> 00:01:18.569
 StandardEyes. For ophthalmologists, by ophthalmologists.
 

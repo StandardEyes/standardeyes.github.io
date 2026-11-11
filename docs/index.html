@@ -65,7 +65,7 @@
         </a>
         <a class="btn lg ghost" href="tutorials.html">Watch the tutorials</a>
       </div>
-      <p class="meta"><b>Free · v1.1.0 · Windows 10 / 11</b> · 73 MB ZIP, no installer · needs <a href="https://cran.r-project.org/bin/windows/base/old/4.5.2/">R 4.5.2</a> · MIT License · <a href="download.html#new">What is new in 1.1.0</a></p>
+      <p class="meta"><b>Free · v1.2.0 · Windows 10 / 11</b> · 73 MB ZIP, no installer · needs <a href="https://cran.r-project.org/bin/windows/base/old/4.5.2/">R 4.5.2</a> · MIT License · <a href="download.html#new">What is new in 1.2.0</a></p>
     </div>
     <div class="frame">
       <div class="bar"><i></i><i></i><i></i><span>127.0.0.1 — StandardEyes</span></div>
@@ -97,7 +97,7 @@
       <div class="card feature">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="12" r="5"/><circle cx="16" cy="12" r="5"/></svg></div>
         <h3>Propensity-score matching</h3>
-        <p>Matching on the logit of the propensity score, with the usual 0.2-SD caliper. A live preview shows how many eyes each group keeps before you run. Balance is shown as standardized mean differences and in a love plot, a chart of each covariate's imbalance before and after matching.</p>
+        <p>Matching on the logit of the propensity score, with the usual 0.2-SD caliper, of eyes or of patients (both eyes kept together). A live preview shows how many eyes or patients each group keeps before you run. Balance is shown as standardized mean differences and in a love plot, a chart of each covariate's imbalance before and after matching.</p>
       </div>
       <div class="card feature">
         <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.8"/></svg></div>
@@ -127,14 +127,14 @@
   <div class="wrap">
     <div class="sechead">
       <div class="kicker">Real output</div>
-      <h2>Straight from the bundled example</h2>
-      <p>Simulated groups, one run, nothing edited afterwards. Click a figure to enlarge it.</p>
+      <h2>Straight from the bundled examples</h2>
+      <p>Simulated datasets that ship with the app, one run each, nothing edited afterwards. Click a figure to enlarge it.</p>
     </div>
     <div class="gallery">
-      <figure class="fig"><button class="zoom" data-caption="The combined figure: all groups on every panel, with an overall test and each group against the reference group."><img src="assets/fig_composite.jpg" alt="StandardEyes combined figure with three groups on every panel" loading="lazy" width="1400" height="1225"></button><figcaption>The combined figure: all groups on every panel, with an overall test and each group against the reference group.</figcaption></figure>
+      <figure class="fig"><button class="zoom" data-caption="The combined figure of dataset C: four platforms on every panel, with an overall test and each platform against the reference."><img src="assets/fig_composite.jpg" alt="StandardEyes combined figure with four groups on every panel" loading="lazy" width="1400" height="1330"></button><figcaption>The combined figure: all groups on every panel, with an overall test and each group against the reference group (dataset C, four platforms).</figcaption></figure>
       <div class="col">
-        <figure class="fig"><button class="zoom" data-caption="Double-angle plot of the prediction error: each group's centroid, its 95% confidence region and the 95% region of the eyes."><img src="assets/fig_double_angle.jpg" alt="Double-angle plot of the astigmatic prediction error with a centroid and 95% regions per group" loading="lazy" width="1020" height="990"></button><figcaption>Double-angle plot of the prediction error, with each group's centroid and 95% regions.</figcaption></figure>
-        <figure class="fig"><button class="zoom" data-caption="Stability over time, with the number of eyes at every visit."><img src="assets/fig_stability.jpg" alt="Stability of spherical equivalent over time for each group" loading="lazy" width="975" height="810"></button><figcaption>Stability over time, with the number of eyes at every visit.</figcaption></figure>
+        <figure class="fig"><button class="zoom" data-caption="Double-angle plot of the prediction error: each group's centroid, its 95% confidence region and the 95% region of the eyes."><img src="assets/fig_double_angle.jpg" alt="Double-angle plot of the astigmatic prediction error with a centroid and 95% regions per group" loading="lazy" width="1020" height="990"></button><figcaption>Double-angle plot of the prediction error, with each group's centroid and 95% regions (dataset D, KLEx and LASIK).</figcaption></figure>
+        <figure class="fig"><button class="zoom" data-caption="Stability over time, with the number of eyes at every visit."><img src="assets/fig_stability.jpg" alt="Stability of spherical equivalent over time for each group" loading="lazy" width="975" height="810"></button><figcaption>Stability over time, with the number of eyes at every visit (dataset A, PRK and LASIK).</figcaption></figure>
       </div>
     </div>
     <p style="margin-top:22px"><a class="more" href="examples.html#outputs">See all sample figures and workbooks</a></p>
@@ -168,7 +168,7 @@
     </div>
     <div class="grid g4">
       <a class="card" href="download.html"><h3>The app</h3><p>Download, install in three steps, and troubleshooting.</p><span class="more">Download</span></a>
-      <a class="card" href="examples.html"><h3>Example data and settings</h3><p>Two simulated datasets and seven worked studies, with their outputs.</p><span class="more">Browse examples</span></a>
+      <a class="card" href="examples.html"><h3>Example data and settings</h3><p>Five simulated datasets and seven worked studies, with their outputs.</p><span class="more">Browse examples</span></a>
       <a class="card" href="tutorials.html"><h3>Video tutorials</h3><p>Six short videos that follow one analysis from start to finish.</p><span class="more">Watch</span></a>
       <a class="card" href="guide.html"><h3>How it works</h3><p>Which test is used when, how matching and GEE are set up, and how to read the figures.</p><span class="more">Read how it works</span></a>
     </div>
@@ -194,7 +194,7 @@
     <h2>Ready to run your first comparison?</h2>
     <p>Download the app, open one of the example studies, and press Run. It takes about five minutes.</p>
     <div class="cta">
-      <a class="btn lg light" href="download.html">Download StandardEyes 1.1.0</a>
+      <a class="btn lg light" href="download.html">Download StandardEyes 1.2.0</a>
     </div>
   </div>
 </section>
@@ -207,7 +207,7 @@
       <div class="brand small"><span class="wm">Standard<b>Eyes</b></span></div>
       <p>Standardized comparative analysis and outcomes reporting for refractive surgery. Free, local, reproducible.</p>
       <p><b style="color:#fff">For Ophthalmologists, By Ophthalmologists.</b></p>
-      <p class="fine">Version 1.1.0 · MIT License · © 2026 Noyman DBE, Mimouni M, Safir M</p>
+      <p class="fine">Version 1.2.0 · MIT License · © 2026 Noyman DBE, Mimouni M, Safir M</p>
     </div>
     <div>
       <h2 class="fh">The app</h2>

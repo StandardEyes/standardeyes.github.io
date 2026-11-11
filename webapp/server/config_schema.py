@@ -144,6 +144,12 @@ DEFAULTS: dict[str, Any] = {
     "p_style": "ama",
     "group_colors": {},
     "group_labels": {},
+    # labels for print (build se.12): column name -> label, e.g. "Age_Years":
+    # "Age (y)". The tables, model sheets, balance tables and love plots print
+    # the label; an empty or missing label prints the column name. The data
+    # sheets, the mEYEstro / AstigMATIC tabs, the filtered CSV and the WHWK
+    # files keep the column names (R/pipeline.R display_labels_of)
+    "display_labels": {},
     # astigmatism PANELS inside the standard set (refractive-astigmatism bar +
     # the vector panels). Off = a purely refractive figure set.
     "astig_panels": True,
@@ -517,6 +523,9 @@ def normalize_cfg(cfg: dict, file_path: str, sheet: Any = None) -> dict:
     out["filter_rules"] = rules
 
     out["dichotomous_preferred_level"] = _coerce_dicho_pref(out.get("dichotomous_preferred_level"))
+    # labels for print: the non-empty text labels, trimmed (validate_raw names
+    # a value that is not a column -> text map)
+    out["display_labels"] = display_labels(out)
 
     out.update(normalize_psm(out))
     out["psm_method"] = psm_method(out)
@@ -875,11 +884,42 @@ def run_notes(cfg: dict, columns: list | None = None) -> list[str]:
     return notes
 
 
+def display_labels(cfg: dict) -> dict:
+    """The labels for print (setting display_labels): column name -> label,
+    only the entries whose label is text that is not blank, trimmed. A
+    missing key or a value that is not a map is no labels ({})."""
+    dl = (cfg or {}).get("display_labels")
+    if not isinstance(dl, dict):
+        return {}
+    out = {}
+    for k, v in dl.items():
+        if isinstance(k, str) and k.strip() and isinstance(v, str) and v.strip():
+            out[k] = " ".join(v.split())
+    return out
+
+
+def display_labels_problem(cfg: dict) -> str | None:
+    """Why display_labels cannot be read (None = it can): it must map column
+    names to text labels."""
+    dl = (cfg or {}).get("display_labels")
+    if dl is None:
+        return None
+    if not isinstance(dl, dict):
+        return "Display labels must map column names to labels (e.g. \"Age_Years\": \"Age (y)\")."
+    bad = [str(k) for k, v in dl.items() if v is not None and not isinstance(v, str)]
+    if bad:
+        return "Display label(s) of " + ", ".join(f"'{b}'" for b in bad[:5]) + " must be text."
+    return None
+
+
 def validate_raw(cfg: dict) -> list[str]:
     """Problems that normalize_cfg() would otherwise paper over: typed values
     that are not numbers. Checked on the cfg AS SENT by the UI."""
     cfg = cfg or {}
     errs: list[str] = []
+    why = display_labels_problem(cfg)
+    if why:
+        errs.append(why)
     for r in cfg.get("filter_rules") or []:
         var, op = r.get("var"), str(r.get("op") or "").lower()
         if not var or op not in NUMERIC_OPS or op in ("between_any",):

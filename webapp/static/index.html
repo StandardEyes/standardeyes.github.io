@@ -31,7 +31,7 @@
 <header class="app">
   <svg class="logo" viewBox="0 0 232 168" role="img" aria-label="StandardEyes logo"><use href="#se-logo"/></svg>
   <h1>Standard<span class="wm2">Eyes</span> <span class="h1sub">· refractive surgery analysis</span></h1>
-  <span class="sub">By Noyman DBE, Mimouni M, Safir M · <span x-text="versionLabel()"></span></span>
+  <span class="sub">By Ben Ephraim Noyman D, Mimouni M, Safir M · <span x-text="versionLabel()"></span></span>
   <span class="spacer"></span>
   <button class="btn secondary" style="margin-right:10px" @click="loadRSetup(false); rSetupOpen=true">⚙ R setup</button>
   <span class="statuslight" :title="appStatus().label">
@@ -102,7 +102,7 @@
       <button class="btn secondary" @click="loadRSetup()">Re-check</button>
       <button class="btn" @click="rSetupOpen=false" x-show="rInfo.rscript">Continue to the app →</button>
     </div>
-    <p class="muted" style="margin-top:10px">StandardEyes — By Noyman DBE, Mimouni M, Safir M</p>
+    <p class="muted" style="margin-top:10px">StandardEyes — By Ben Ephraim Noyman D, Mimouni M, Safir M</p>
   </div>
 </div>
 <div class="layout">
@@ -545,14 +545,14 @@
 
       <div class="card">
         <h3>Output order <span class="muted small">— drag a row (or use the arrows); this is the row order in the output tables</span></h3>
-        <p class="hint">Laid out the way the tables will read in the manuscript — one block of rows per section.</p>
+        <p class="hint">Laid out the way the tables will read in the manuscript — one block of rows per section. <b>Label</b> (optional): the name printed for the variable in the tables, model sheets, balance tables and love plots, e.g. “Age (y)” or “Central pachymetry (µm)”; left empty, the column name is printed. The data sheets, the mEYEstro / AstigMATIC tabs and the exported files keep the column names.</p>
         <template x-for="sec in SECTIONS" :key="sec">
           <div class="jtable">
             <div class="jtable-title" x-text="SECTION_TITLES[sec]"></div>
             <template x-if="s[sec].order.length===0"><div class="jtable-empty muted small">no variables selected yet</div></template>
             <template x-if="s[sec].order.length">
               <table class="jtable-t">
-                <thead><tr><th></th><th>#</th><th>Parameter</th><th style="width:110px">Type</th><th></th></tr></thead>
+                <thead><tr><th></th><th>#</th><th>Parameter</th><th>Label <span class="muted small">(printed)</span></th><th style="width:110px">Type</th><th></th></tr></thead>
                 <tbody>
                   <template x-for="(v,i) in s[sec].order" :key="v">
                     <tr draggable="true"
@@ -564,6 +564,9 @@
                       <td class="grip">⋮⋮</td>
                       <td class="rownum" x-text="i+1"></td>
                       <td class="pname" x-text="v"></td>
+                      <td><input type="text" class="labelin" :value="labelOf(v)" :placeholder="v"
+                                 :aria-label="'label printed for '+v" @input="setLabel(v,$event.target.value)"
+                                 @dragstart.stop.prevent draggable="false"></td>
                       <td><span class="typetag" x-text="varType(sec,v)"></span></td>
                       <td class="rowbtns">
                         <button class="btn ghost sm" @click="moveVar(sec,i,-1)" :disabled="i===0" title="move up">↑</button>
@@ -574,6 +577,20 @@
                 </tbody>
               </table>
             </template>
+          </div>
+        </template>
+        <template x-if="otherLabelVars().length">
+          <div class="jtable">
+            <div class="jtable-title">Other printed variables <span class="muted small" style="font-family:inherit;font-weight:400">— within-group variables and covariates (matching, GEE, regression)</span></div>
+            <div class="grid3">
+              <template x-for="v in otherLabelVars()" :key="'lab'+v">
+                <div>
+                  <label class="field" x-text="v"></label>
+                  <input type="text" class="labelin" :value="labelOf(v)" :placeholder="v"
+                         :aria-label="'label printed for '+v" @input="setLabel(v,$event.target.value)">
+                </div>
+              </template>
+            </div>
           </div>
         </template>
       </div>
@@ -1377,10 +1394,21 @@
       <template x-if="resultSheet.data">
         <div class="card">
           <h3>Preview: <span x-text="resultSheet.sheet"></span></h3>
+          <!-- the sheet as the workbook holds it: long cells wrap inside bounded
+               columns, and a row with only its first cell filled (a title, a
+               note, a footnote) spans the table, so the group columns of a
+               Publication Table stay in view -->
           <div class="tablewrap">
-            <table class="data">
-              <thead><tr><template x-for="c in resultSheet.data.columns" :key="c"><th x-text="c"></th></template></tr></thead>
-              <tbody><template x-for="(row,ri) in resultSheet.data.rows" :key="ri"><tr><template x-for="(cell,ci) in row" :key="ci"><td x-text="cell"></td></template></tr></template></tbody>
+            <table class="data sheetview">
+              <thead><tr><template x-for="(c,ci) in resultSheet.data.columns" :key="'h'+ci">
+                <th x-show="!(ci>0 && sheetNoteRow(resultSheet.data.columns))"
+                    :colspan="ci===0 && sheetNoteRow(resultSheet.data.columns) ? resultSheet.data.columns.length : null"
+                    :class="ci===0 && sheetNoteRow(resultSheet.data.columns) ? 'note' : ''"><div class="cellwrap" x-text="c"></div></th>
+              </template></tr></thead>
+              <tbody><template x-for="(row,ri) in resultSheet.data.rows" :key="ri"><tr><template x-for="(cell,ci) in row" :key="ci">
+                <td x-show="!(ci>0 && sheetNoteRow(row))" :colspan="ci===0 && sheetNoteRow(row) ? row.length : null"
+                    :class="ci===0 && sheetNoteRow(row) ? 'note' : ''"><div class="cellwrap" x-text="cell"></div></td>
+              </template></tr></template></tbody>
             </table>
           </div>
         </div>

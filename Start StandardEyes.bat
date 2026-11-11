@@ -1,7 +1,7 @@
 @echo off
 REM ============================================================
 REM  StandardEyes
-REM  By Noyman DBE, Mimouni M, Safir M
+REM  By Ben Ephraim Noyman D, Mimouni M, Safir M
 REM
 REM  Self-contained: the Python runtime and every R package the
 REM  analysis needs are bundled in this folder. Nothing is

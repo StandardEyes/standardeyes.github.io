@@ -107,6 +107,14 @@ table.data{border-collapse:collapse; width:100%; font-size:12px}
 table.data th,table.data td{border:1px solid var(--border); padding:4px 7px; text-align:left; white-space:nowrap}
 table.data th{background:var(--soft); position:sticky; top:0; font-weight:600}
 .tablewrap{max-height:420px; overflow:auto; border:1px solid var(--border); border-radius:8px}
+/* the result-sheet viewer: long cells wrap and every column is bounded, so a
+   Publication Table's group columns stay in view at 1280 px; a row with only
+   its first cell filled (a section title, a note, a footnote) spans the table */
+table.data.sheetview th,table.data.sheetview td{white-space:normal; vertical-align:top}
+table.data.sheetview .cellwrap{max-width:12em; white-space:pre-wrap; overflow-wrap:break-word}
+table.data.sheetview .note .cellwrap{max-width:none}
+/* the label printed for a variable (Variables & Types, Output order) */
+input.labelin{width:100%; min-width:140px; font-size:12px; padding:3px 6px}
 .statusbox{background:#0b1220; color:#cbd5e1; border-radius:8px; padding:10px; font-family:ui-monospace,Consolas,monospace; font-size:11.5px; max-height:260px; overflow:auto; white-space:pre-wrap}
 .progress{height:10px; background:#e2e8f0; border-radius:999px; overflow:hidden; margin:8px 0}
 .runbar{display:flex; align-items:center; gap:10px}

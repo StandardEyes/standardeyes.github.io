@@ -163,6 +163,79 @@ disp_name <- function(key, map = NULL) {
 }
 
 # ------------------------------------------------------------
+# Display labels (setting display_labels, build se.12): a column may carry a
+# label for print - "Age (y)" for the column Age_Years. The labels ride on the
+# display-name map as its attribute "labels" (clean key -> label; pipeline.R
+# label_map), so every function that already receives res$display_names can
+# print either: disp_label() - what a reader of a table, a model sheet, a love
+# plot or a legend sees (the label, else the header) - or disp_name() - the
+# column as typed in the file, for the run log, the Manifest's settings and
+# every machine-readable output (data sheets, compatible sheets, the filtered
+# CSV, the WHWK files). Without labels the two are the same. Vectorised; NA
+# stays NA.
+# ------------------------------------------------------------
+disp_label <- function(key, map = NULL) {
+  out <- disp_name(key, map)
+  lab <- attr(map, "labels")
+  if (!length(out) || is.null(lab) || !length(lab) || is.null(names(lab))) return(out)
+  i <- match(as.character(key), names(lab))
+  ok <- !is.na(key) & !is.na(i)
+  if (any(ok)) {
+    v <- as.character(lab)[i[ok]]
+    good <- !is.na(v) & nzchar(v)
+    tmp <- out[ok]; tmp[good] <- v[good]; out[ok] <- tmp
+  }
+  out
+}
+
+# The map with its labels: map = clean key -> header (res$display_names),
+# labels = clean key -> label (empty labels dropped). NULL / empty labels
+# leave the map as it is.
+with_display_labels <- function(map, labels) {
+  lab <- unlist(labels)
+  if (is.null(lab) || !length(lab) || is.null(names(lab))) { attr(map, "labels") <- NULL; return(map) }
+  lab <- stats::setNames(trimws(as.character(lab)), names(lab))
+  lab <- lab[!is.na(lab) & nzchar(lab) & !is.na(names(lab)) & nzchar(names(lab))]
+  attr(map, "labels") <- if (length(lab)) lab else NULL
+  map
+}
+
+# How a summary-table row names its variable (decision C1 of build se.12, one
+# rendering wherever a reader sees a row):
+#   "<label>"                                   continuous / ordinal rows
+#   "<label>, per patient"                      ... of a variable analyzed per patient
+#   "<label>, n/N (%)"                          a dichotomous row counting a yes-like
+#                                               level (Yes, Y, True, 1, Present, Positive)
+#   "<label>: <level>, n/N (%)"                 any other counted level (dichotomous
+#                                               or a level row of a categorical variable)
+#   "<label>: <level>, per patient, n/N (%)"    ... analyzed per patient
+# count: the descriptor of a count cell - "n/N (%)" in the between-group
+# tables (cells "12/50 (24.0%)"), "n (%)" in the within-group descriptions
+# (cells "12 (24.0%)" beside an n column); NULL for a row that is no count.
+ROW_PER_PATIENT <- ", per patient"
+YES_LIKE_LEVELS <- c("yes", "y", "true", "1", "present", "positive")
+level_is_yes_like <- function(lev) {
+  l <- tolower(trimws(as.character(lev)))
+  !is.na(l) & l %in% YES_LIKE_LEVELS
+}
+row_label <- function(label, level = NULL, per_patient = FALSE, count = NULL, named_level = FALSE) {
+  out <- as.character(label)
+  if (length(level) && !is.na(level[1]) && nzchar(as.character(level[1])) &&
+      (isTRUE(named_level) || !level_is_yes_like(level[1])))
+    out <- paste0(out, ": ", as.character(level[1]))
+  if (isTRUE(per_patient)) out <- paste0(out, ROW_PER_PATIENT)
+  if (length(count) && nzchar(count[1])) out <- paste0(out, ", ", count[1])
+  out
+}
+# The variable part of a row label, without the per-patient and count tags
+# (a level stays): "Sex: F, per patient, n/N (%)" -> "Sex: F".
+strip_row_tags <- function(x) {
+  x <- as.character(x)
+  x <- sub(", n(/N)? \\(%\\)$", "", x)
+  sub(paste0(ROW_PER_PATIENT, "$"), "", x)
+}
+
+# ------------------------------------------------------------
 # Sheet names and file names
 # ------------------------------------------------------------
 

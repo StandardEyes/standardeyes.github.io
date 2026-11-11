@@ -169,6 +169,21 @@
     "Sex": "F",
     "Retreatment_Indicated": "Yes"
   },
+  "display_labels": {
+    "Age_Years": "Age (y)",
+    "Preop_SEQ_D": "Preoperative SEQ (D)",
+    "Preop_Sphere_D": "Preoperative sphere (D)",
+    "Preop_Cylinder_D": "Preoperative cylinder (D)",
+    "Preop_Pachymetry_um": "Central pachymetry (µm)",
+    "Preop_UDVA_Snellen": "Preoperative UDVA (logMAR)",
+    "Preop_CDVA_Snellen": "Preoperative CDVA (logMAR)",
+    "FollowUp_Days": "Follow-up (d)",
+    "Postop_SEQ_D": "Postoperative SEQ (D)",
+    "Postop_Cylinder_D": "Postoperative cylinder (D)",
+    "Postop_UDVA_Snellen": "Postoperative UDVA (logMAR)",
+    "Postop_CDVA_Snellen": "Postoperative CDVA (logMAR)",
+    "Retreatment_Indicated": "Retreatment indicated"
+  },
   "output_dir": "Example Output",
   "export_filtered_csv": true,
   "output_prefix": "DS_B_Snellen",

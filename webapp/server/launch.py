@@ -109,7 +109,7 @@ def main() -> int:
     banner = (
         "=" * 62
         + "\n  StandardEyes - refractive surgery analysis"
-        + "\n  By Noyman DBE, Mimouni M, Safir M"
+        + "\n  By Ben Ephraim Noyman D, Mimouni M, Safir M"
         + f"\n  v{PUBLIC_VERSION} (build {APP_VERSION})"
         + f"\n  Newer versions: {RELEASES_URL}\n"
         + "=" * 62

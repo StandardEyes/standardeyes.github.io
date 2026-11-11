@@ -363,10 +363,13 @@ pp_cross_log_text <- function(v, where) {
 # name of a column); when any weight differs from 1 every cell is
 # weighted (mean ± SD, proportions, median [IQR]), the test is a
 # weighted GEE Wald test and the header shows the effective sample
-# size. Rows of variables analysed per patient carry "[per patient]"
+# size. Rows of variables analyzed per patient carry ", per patient"
 # and the header then shows both eye and patient counts.
 # display_names: optional clean key -> original header map (R4-3); the
-# Parameter labels then name each variable by its header as typed in the file.
+# Parameter labels then name each variable by its display label (its
+# "labels" attribute, setting display_labels) or else its header as typed in
+# the file, in the rendering of helpers.R row_label: "Age (y), per patient",
+# "Glare or halo symptoms, n/N (%)", "Sex: F, per patient, n/N (%)".
 # The returned tibble carries attr "row_key" (the clean key of the variable of
 # each row) and attr "row_var" (its display label), so the GEE / regression
 # merges find a variable's rows exactly, whatever its header looks like.
@@ -406,7 +409,10 @@ create_summary_table <- function(df, params_clean, type_map,
                                  va_cols = character(0)) {
 
   if (length(params_clean) == 0) return(tibble::tibble())
+  # the run log names a column as typed in the file; a row names its variable
+  # by its display label (helpers.R disp_label, row_label)
   dn <- function(x) disp_name(x, display_names)
+  lb <- function(x) disp_label(x, display_names)
 
   gv <- droplevels(factor(as.character(df[[group_var]]), levels = glevels))
   df[[group_var]] <- gv
@@ -497,9 +503,14 @@ create_summary_table <- function(df, params_clean, type_map,
       unit_tag <- " [per patient]"
     }
 
-    pl <- dn(pn)                              # the variable as the user named it
-    mk_row <- function(cells, pval, test, param_label = pl, note = "") {
-      row <- tibble::tibble(Parameter = paste0(param_label, unit_tag))
+    pl <- lb(pn)                              # the variable as the user labeled it
+    # the row's label (helpers.R row_label): a counted level after a colon
+    # (a yes-like level of a dichotomous variable is the variable itself),
+    # ", per patient" for a variable analyzed per patient, ", n/N (%)" on a
+    # count row
+    mk_row <- function(cells, pval, test, level = NULL, count = NULL, named_level = FALSE, note = "") {
+      row <- tibble::tibble(Parameter = row_label(pl, level, per_patient = nzchar(unit_tag), count = count,
+                                                  named_level = named_level))
       for (j in seq_along(col_names)) row[[col_names[j]]] <- cells[j]
       row$p_value <- fmt_p(pval)
       # a row without a P value names no test as if it had run (finding T2-09):
@@ -621,7 +632,7 @@ create_summary_table <- function(df, params_clean, type_map,
             else if ((n_x <- cross_pp(present & !is.na(gvec), ids, unit_tag, pn)) > 0)
               .clustered_test(y, gvec, ids, "dichotomous", per_patient = TRUE, cross = n_x)
             else group_test(y, gvec, "dichotomous")
-      return(mk_row(cells, tt$p, tt$test, param_label = paste0(pl, " (", lev, ")"), note = tt$note))
+      return(mk_row(cells, tt$p, tt$test, level = lev, count = "n/N (%)", note = tt$note))
     }
 
     if (var_type == "categorical") {
@@ -660,7 +671,7 @@ create_summary_table <- function(df, params_clean, type_map,
           }
         }, character(1))
         r <- mk_row(cells, if (i == 1) tt$p else NA_real_,
-                    if (i == 1) tt$test else "", param_label = paste0(pl, ": ", lev),
+                    if (i == 1) tt$test else "", level = lev, named_level = TRUE, count = "n/N (%)",
                     note = tt$note)
         if (i != 1) { r$p_value <- ""; r$`Practical Interpretation` <- "" }
         r
@@ -674,7 +685,7 @@ create_summary_table <- function(df, params_clean, type_map,
   keys <- rep(as.character(params_clean), vapply(out, nrow, integer(1)))
   out <- dplyr::bind_rows(out)
   attr(out, "row_key") <- keys
-  attr(out, "row_var") <- dn(keys)
+  attr(out, "row_var") <- lb(keys)
   out
 }
 
@@ -1011,7 +1022,7 @@ make_binary_01 <- function(x, positive_level = NULL, logger = NULL, var = "") {
   keys <- unique(as.character(keys))
   keys <- keys[order(-nchar(keys))]
   for (k in keys) {
-    d <- disp_name(k, map)
+    d <- disp_label(k, map)            # a model term reads as its variable's label
     for (pre in c(paste0("`", k, "`"), k)) {
       hit <- !done & startsWith(out, pre)
       if (any(hit) && !identical(d, k)) {
@@ -1403,7 +1414,7 @@ GEE_LONE_NOTE <- "SE not estimable - this level is held by 1 patient"
                                               if (pp$n_cross == 1) "patient has" else "patients have")
                                     else "matched cohort", ")"),
          ", ", .per_patient_n(pp),
-         if (length(pp$avg)) paste0("; ", paste(disp_name(pp$avg, display_names), collapse = ", "),
+         if (length(pp$avg)) paste0("; ", paste(disp_label(pp$avg, display_names), collapse = ", "),
                                     " averaged over each patient's eyes") else "")
 
 # Clustered GEE of each outcome on the predictors (the group factor and any
@@ -1444,7 +1455,10 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
                            patient_id_clean, dicho_pref_clean = list(),
                            use_weights = FALSE, logger = message, display_names = NULL,
                            matched = FALSE, patient_level = character(0)) {
-  dn <- function(x) disp_name(x, display_names)
+  # the sheets name a variable by its display label; the run log names the
+  # column as typed in the file (helpers.R disp_label / disp_name)
+  dn <- function(x) disp_label(x, display_names)
+  cn <- function(x) disp_name(x, display_names)
   cs <- .cluster_setup(df, patient_id_clean, logger)
   df <- cs$df
   id_col <- cs$id
@@ -1527,7 +1541,7 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
       # a 0/1 model needs exactly two recorded values (R4-2)
       why_lv <- .dicho_outcome_reason(.outcome_levels(df2[[outc]]))
       if (nzchar(why_lv)) { res_list[[outc]] <- skip_all(why_lv); next }
-      df2[[outc]] <- make_binary_01(df2[[outc]], dicho_pref_clean[[outc]], logger, dn(outc))
+      df2[[outc]] <- make_binary_01(df2[[outc]], dicho_pref_clean[[outc]], logger, cn(outc))
     } else df2[[outc]] <- as_numeric_safe(df2[[outc]])
     # covariates read as text: numeric when they are numbers (see helpers.R)
     cv <- coerce_numeric_covs(df2, setdiff(preds, "GroupLabel"), logger, display_names = display_names)
@@ -1607,7 +1621,7 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
       ne_r <- skip_all(NE_WITHIN_REASON, except = c(empty, names(un$out)))
       ne_r$CI <- NE_TEXT
       res_list[[outc]] <- dplyr::bind_rows(ne_r, .unestimable_rows(un$out, outc, eff, bin, na_row), empty_rows)
-      ne_within_add(dn(outc))
+      ne_within_add(cn(outc))
       next
     }
     const <- preds[vapply(preds, is_const, logical(1))]
@@ -1651,7 +1665,7 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
                                       "patient by an ordinary %s model (on a matched cohort, or when a patient ",
                                       "has eyes in more than one group: an independence GEE with robust SE ",
                                       "clustered by patient), never by an eye-level GEE."),
-                               dn(outc), if (bin) "logistic" else "linear"))
+                               cn(outc), if (bin) "logistic" else "linear"))
       if (nzchar(pp$why)) {
         res_list[[outc]] <- dplyr::bind_rows(skip_all(pp$why, except = c(empty, names(un$out))),
                                              left_out, empty_rows)
@@ -1669,14 +1683,14 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
           if (nzchar(fc$refit)) fc$why
           else if (nzchar(.gee_err$msg %||% "")) .gee_err$msg else "did not converge")), left_out, empty_rows)
         if (nzchar(fc$refit))
-          logger(sprintf("GEE '%s' (covariates: %s): not estimable - %s.", dn(outc),
-                         if (length(setdiff(preds, "GroupLabel"))) paste(dn(setdiff(preds, "GroupLabel")), collapse = ", ")
+          logger(sprintf("GEE '%s' (covariates: %s): not estimable - %s.", cn(outc),
+                         if (length(setdiff(preds, "GroupLabel"))) paste(cn(setdiff(preds, "GroupLabel")), collapse = ", ")
                          else "none", fc$why))
         next
       }
       if (nzchar(fc$refit))
         logger(sprintf("GEE '%s' (covariates: %s): exchangeable fit not accepted - %s; refitted with an %s.",
-                       dn(outc), if (length(setdiff(preds, "GroupLabel"))) paste(dn(setdiff(preds, "GroupLabel")), collapse = ", ")
+                       cn(outc), if (length(setdiff(preds, "GroupLabel"))) paste(cn(setdiff(preds, "GroupLabel")), collapse = ", ")
                                  else "none", fc$refit, "independence working correlation"))
       t <- extract_gee_tidy(fit, fam, dn(outc), cs$unit)
       # no corrected covariance or no t reference (too few patients for the
@@ -1866,13 +1880,12 @@ build_gee_lookup <- function(gee_df, group_term) {
   rows %>% dplyr::select(Outcome, gee_effect_label, gee_p_label, gee_caution)
 }
 
-# Summary-table rows that belong to a variable: "X", "X (level)", "X: level",
-# and "X [per patient]" / "X (level) [per patient]".
+# Summary-table rows that belong to a variable (helpers.R row_label): "X",
+# "X: level", "X, per patient", "X, n/N (%)", "X: level, per patient, n/N (%)".
 .rows_of <- function(param_labels, var) {
   which(param_labels == var |
-          startsWith(param_labels, paste0(var, " (")) |
           startsWith(param_labels, paste0(var, ": ")) |
-          startsWith(param_labels, paste0(var, " [")))
+          startsWith(param_labels, paste0(var, ", ")))
 }
 
 # The rows of variable `var` (its display label - or its clean key, when the
@@ -1947,7 +1960,10 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
                                   glevels, use_weights = FALSE, logger = message,
                                   display_names = NULL, matched = FALSE,
                                   patient_level = character(0)) {
-  dn <- function(x) disp_name(x, display_names)
+  # the sheets name a variable by its display label; the run log names the
+  # column as typed in the file (helpers.R disp_label / disp_name)
+  dn <- function(x) disp_label(x, display_names)
+  cn <- function(x) disp_name(x, display_names)
   ref <- glevels[1]
   pub <- list(); full <- list(); n_flagged <- 0
   cs <- .cluster_setup(df, patient_id_clean, logger)
@@ -2035,7 +2051,7 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
                             as.character(sum(!is.na(df2[[outc]]))))))
         next
       }
-      df2[[outc]] <- make_binary_01(df2[[outc]], dicho_pref_clean[[outc]], logger, dn(outc))
+      df2[[outc]] <- make_binary_01(df2[[outc]], dicho_pref_clean[[outc]], logger, cn(outc))
     } else df2[[outc]] <- as_numeric_safe(df2[[outc]])
     # covariates read as text become numeric when they are numbers, instead of
     # one dummy per distinct value (see coerce_numeric_covs in helpers.R)
@@ -2135,7 +2151,7 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
         ne_r[[REG_CRUDE_EFF]] <- NE_TEXT; ne_r[[REG_CRUDE_P]] <- NE_TEXT
       }
       add_rows(list(ne_r, unest_rows(), empty_rows))
-      ne_within_add(dn(outc))
+      ne_within_add(cn(outc))
       next
     }
     if (dich) {
@@ -2192,7 +2208,7 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
       fc <- gee_fit_checked(function(cs_) fit_gee(fmla, df2, id_col, fam_r, use_weights, corstr = cs_), cstr)
       fit <- fc$fit
       if (nzchar(fc$refit))
-        logger(sprintf("Regression '%s': exchangeable fit not accepted - %s; %s.", dn(outc), fc$refit,
+        logger(sprintf("Regression '%s': exchangeable fit not accepted - %s; %s.", cn(outc), fc$refit,
                        if (is.null(fit)) paste0("not estimable (", fc$why, ")")
                        else "refitted with an independence working correlation"))
     }

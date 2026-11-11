@@ -1,6 +1,6 @@
 ===========================================================
  StandardEyes
- By Noyman DBE, Mimouni M, Safir M
+ By Ben Ephraim Noyman D, Mimouni M, Safir M
 ===========================================================
 
 WHAT IT IS
@@ -21,9 +21,10 @@ On macOS or Linux, run it from source (see README.md).
 -----------------------------------------------------------
  WHAT IS NEW IN 1.2.0
 -----------------------------------------------------------
-Version 1.2.0 changes no default: a preset or settings
-file saved by 1.1.0 (or 1.0.0) loads and runs as before,
-and it matches eyes.
+Version 1.2.0 changes no statistical default: a preset or
+settings file saved by 1.1.0 (or 1.0.0) loads and runs as
+before, and it matches eyes. The table rows are named in
+a print-ready form (see "Display labels" below).
 
 * Patient-level matching (option). Matching tab, "Match"
   = patients (both eyes together); settings file key
@@ -156,6 +157,26 @@ and it matches eyes.
   matched table, the Publication Table footnote, the
   Manifest and the figure legends say which weighting the
   matched tables use.
+
+* Display labels for print-ready tables and figures.
+  Variables & Types tab, Output order: type a label beside
+  a variable, such as "Age (y)" or "Central pachymetry
+  (µm)", and the tables, model sheets, balance tables and
+  love plots print it instead of the column name (settings
+  file key display_labels, column -> label; empty = the
+  column name). The data sheets, the mEYEstro / AstigMATIC
+  tabs, the filtered CSV and the WHWK files keep the
+  column names. Rows now read "Age (y), per patient",
+  "Glare or halo symptoms, n/N (%)" and "Sex: F, per
+  patient, n/N (%)" instead of "Age_Years [per patient]"
+  and "Sex (F) [per patient]". The seven example settings
+  files carry clinical labels.
+
+* The sheet viewer wraps long cells. On the Run & Results
+  tab a sheet opens as the workbook holds it (no
+  "Unnamed: 1" headers), long cells wrap and every column
+  is bounded, so the group columns of a Publication Table
+  stay in view.
 
 * A review build for blinded peer review. The release can
   also be built as StandardEyes-review.zip: the same
@@ -768,7 +789,7 @@ The browser shows nothing / cannot connect
     also shows the version and any startup error.
 
 Am I looking at the right app?
-    The header says "StandardEyes - By Noyman DBE,
+    The header says "StandardEyes - By Ben Ephraim Noyman D,
     Mimouni M, Safir M" followed by its version in the
     form "v1.2.0 (build <date>-se.<n>)": the release
     number, then the internal build id, which contains
@@ -832,5 +853,5 @@ the "licenses" folder of the release.
 
 -----------------------------------------------------------
  StandardEyes
- By Noyman DBE, Mimouni M, Safir M
+ By Ben Ephraim Noyman D, Mimouni M, Safir M
 -----------------------------------------------------------

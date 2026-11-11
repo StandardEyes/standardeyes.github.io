@@ -810,7 +810,8 @@ def match_preview(req: MatchPreviewReq):
     if config_schema.psm_method(cfg) != "nearest":
         return {"unsupported": cfg.get("psm_method"),
                 "message": "Live preview supports the 'nearest' method only (others are too slow to preview)."}
-    psm_errs = [e for e in config_schema.validate_raw(cfg) if not e.startswith("Filter on")]
+    # (the matching settings only: a filter or a print label never blocks the preview)
+    psm_errs = [e for e in config_schema.validate_raw(cfg) if not e.startswith(("Filter on", "Display label"))]
     if psm_errs:
         raise HTTPException(400, " ".join(psm_errs))
     # the same coercion the run gets (empty caliper = no caliper, ...)
@@ -1516,17 +1517,60 @@ def results():
     return out
 
 
+def _cell_text(v):
+    """A worksheet cell as the viewer shows it: numbers stay numbers (a whole
+    float as an integer), dates and times as text, an empty cell as None."""
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, float):
+        return int(v) if v.is_integer() and abs(v) < 1e15 else v
+    if isinstance(v, (int, str)):
+        return v
+    return str(v)
+
+
+def sheet_table(path: str, sheet: str, max_rows: int = 500) -> dict:
+    """The first rows of a result sheet exactly as the workbook holds them:
+    {columns: the sheet's first row, rows: the next rows (at most max_rows)}.
+    The cells are read as they are - no header guessing - so a sheet that
+    opens with a title or a note above its tables (the PSM, GEE and matched
+    sheets) shows that row as it is, never a generated name such as
+    'Unnamed: 1' for its empty cells or 'Value.1' for a repeated one; an
+    empty header cell is ''. Empty columns at the right are dropped."""
+    import openpyxl  # noqa: PLC0415
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        if sheet not in wb.sheetnames:
+            raise KeyError(f"Worksheet named '{sheet}' not found")
+        ws = wb[sheet]
+        # the cells actually present, not the size the file declares (a
+        # declared size of "A1" would cut every row to its first cell)
+        ws.reset_dimensions()
+        # parse only the rows shown: a 20,000-row Matched_Data sheet otherwise
+        # blocks the worker for seconds on every click
+        raw = [[_cell_text(v) for v in row]
+               for row in ws.iter_rows(min_row=1, max_row=max_rows + 1, values_only=True)]
+    finally:
+        wb.close()
+    width = max((max((i + 1 for i, v in enumerate(r) if v is not None and v != ""), default=0) for r in raw),
+                default=0)
+    raw = [(r + [None] * width)[:width] for r in raw]
+    if not raw or width == 0:
+        return {"columns": [], "rows": []}
+    head = ["" if v is None else str(v) for v in raw[0]]
+    return {"columns": head, "rows": raw[1:]}
+
+
 @app.get("/api/results/sheet")
 def results_sheet(file: str = Query(...), sheet: str = Query(...), max_rows: int = 500):
     real = _safe_output_path(file)
     max_rows = max(1, min(int(max_rows), 5000))
     try:
-        # parse only the rows shown: a 20,000-row Matched_Data sheet otherwise
-        # blocks the worker for seconds on every click
-        df = pd.read_excel(real, sheet_name=sheet, engine="openpyxl", nrows=max_rows)
+        return sheet_table(real, sheet, max_rows)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"Could not read sheet: {e}")
-    return _table(df, max_rows=max_rows)
 
 
 def _sheet_names(path: str) -> list[str]:

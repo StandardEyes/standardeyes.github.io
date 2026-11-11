@@ -1153,13 +1153,16 @@ gee_skip_note <- function(g, corstr = NULL) {
 # categorical -> one row per level n(%). Returns a tibble.
 # ------------------------------------------------------------
 # display_names: optional clean key -> original header map (res$display_names,
-# contract R4-3): the Parameter labels name the column as typed in the file.
+# contract R4-3): the Parameter labels name the variable by its display label,
+# else by its header as typed in the file (helpers.R disp_label, row_label).
 # A variable with no recorded value prints "no data", whatever its type.
 # va_cols: the acuity columns analysed in logMAR (va_info()$in_logmar).
 describe_within_group <- function(df_g, params_clean, type_map, dicho_pref_clean = list(),
                                   levels_map = list(), patient_id_clean = NA_character_,
                                   display_names = NULL, va_cols = character(0)) {
-  dn <- function(x) disp_name(x, display_names)
+  # a row names its variable by its display label (helpers.R disp_label,
+  # row_label: "Glare or halo symptoms, n (%)", "Sex: F, n (%)")
+  dn <- function(x) disp_label(x, display_names)
   rows <- list()
   n_tot <- nrow(df_g)
   has_pid <- !is.na(patient_id_clean) && patient_id_clean %in% names(df_g)
@@ -1210,8 +1213,8 @@ describe_within_group <- function(df_g, params_clean, type_map, dicho_pref_clean
         lev <- pick_display_level(pn, v, dicho_pref_clean, display_names = display_names)
         c_ <- sum(as.character(v) == as.character(lev), na.rm = TRUE)
         rows[[length(rows)+1]] <- tibble::tibble(
-          Parameter = paste0(dn(pn), " (", lev, ")"), n = nn, Summary = paste0(c_, " (", fmt_pct(c_, nn), ")"),
-          .unit = unit)
+          Parameter = row_label(dn(pn), lev, count = "n (%)"), n = nn,
+          Summary = paste0(c_, " (", fmt_pct(c_, nn), ")"), .unit = unit)
       }
     } else if (vt == "categorical") {
       vv <- as.character(v); levs <- sort(unique(na.omit(vv)))
@@ -1221,8 +1224,8 @@ describe_within_group <- function(df_g, params_clean, type_map, dicho_pref_clean
       } else for (lev in levs) {
         c_ <- sum(vv == lev, na.rm = TRUE)
         rows[[length(rows)+1]] <- tibble::tibble(
-          Parameter = paste0(dn(pn), ": ", lev), n = nn, Summary = paste0(c_, " (", fmt_pct(c_, nn), ")"),
-          .unit = unit)
+          Parameter = row_label(dn(pn), lev, count = "n (%)", named_level = TRUE), n = nn,
+          Summary = paste0(c_, " (", fmt_pct(c_, nn), ")"), .unit = unit)
       }
     }
   }
@@ -1279,14 +1282,14 @@ pub_values_note <- function(out, va_decimal = character(0)) {
     out_txt <- c(out_txt, paste0("Visual acuity: the Snellen geometric mean (logMAR mean ± SD), then the range of the ",
                                  "eyes in Snellen."))
   if (has("\\(n = [0-9]+\\)"))
-    out_txt <- c(out_txt, "(n = ...) in a cell: the eyes (patients, for a row marked [per patient]) with data, where fewer than the column's n.")
+    out_txt <- c(out_txt, "(n = ...) in a cell: the eyes (patients, for a row marked \"per patient\") with data, where fewer than the column's n.")
   ref <- sub(" \\(n = .*$", "", hdr[grepl(" \\(n = ", hdr)][1])
   if (has("β = ")) {
     # the units of an acuity row's β, as analyzed: logMAR (a logMAR acuity
     # cell, the Visual acuity line's test) and / or decimal acuity (a row of
     # an acuity column analyzed as decimal)
     va_lm <- has("logMAR\\); range ")
-    prm <- if ("Parameter" %in% names(out)) sub(" \\[per patient\\]$", "", as.character(out$Parameter)) else character(0)
+    prm <- if ("Parameter" %in% names(out)) strip_row_tags(out$Parameter) else character(0)
     va_dec <- length(va_decimal) > 0 && any(prm %in% va_decimal)
     va_txt <- if (va_lm && va_dec) " (logMAR for the acuity rows shown in Snellen, decimal acuity - higher = better - for the others)"
               else if (va_lm) " (logMAR for acuity)"
@@ -1295,8 +1298,10 @@ pub_values_note <- function(out, va_decimal = character(0)) {
     out_txt <- c(out_txt, paste0("β = difference from ", if (!is.na(ref)) ref else "the reference group",
                                  " in the variable's units", va_txt, ", with its 95% CI."))
   }
+  # (a row counting a yes-like level names the variable alone: helpers.R row_label)
   if (has("OR = "))
-    out_txt <- c(out_txt, paste0("OR = odds ratio of the level named in the row vs ",
+    out_txt <- c(out_txt, paste0("OR = odds ratio of the counted level (the level after the colon, or else the ",
+                                 "condition the row names) vs ",
                                  if (!is.na(ref)) ref else "the reference group", ", with its 95% CI."))
   # (the CIs are not adjusted, finding T2-03: said so, as a CI that excludes
   # the null beside an adjusted P of .05 or more is no contradiction)
@@ -1799,20 +1804,24 @@ loveplot_title_fit <- function(p, w_in, h_in, size = 9) {
 
 # cobalt's balance-table row names (a covariate key, or "<key>_<level>" for a
 # factor level; "distance" for the propensity score) with each covariate key
-# replaced by its header (R4-3). Longest keys first, so "Age_2" is never read
-# as "Age" + "_2"; a key that IS its header leaves the name unchanged.
+# replaced by its display label, else its header (R4-3; helpers.R disp_label),
+# and a factor level after a colon - "Sex: M", as a model term or a table row
+# names a level (helpers.R row_label). Longest keys first, so "Age_2" is never
+# read as "Age" + "_2".
 .balance_display_names <- function(vars, keys, map) {
   out <- as.character(vars)
-  if (!length(out) || is.null(map) || !length(map)) return(out)
+  if (!length(out)) return(out)
   keys <- unique(as.character(unlist(keys)))
   keys <- keys[!is.na(keys) & nzchar(keys)]
   keys <- keys[order(-nchar(keys))]
   done <- rep(FALSE, length(out))
   for (k in keys) {
-    d <- disp_name(k, map)
+    d <- disp_label(k, map)
     hit <- !done & (out == k | startsWith(out, paste0(k, "_")))
-    if (any(hit) && !identical(d, k))
-      out[hit] <- paste0(d, substring(out[hit], nchar(k) + 1L))
+    if (any(hit)) {
+      rest <- substring(out[hit], nchar(k) + 2L)
+      out[hit] <- ifelse(nzchar(rest), paste0(d, ": ", rest), d)
+    }
     done <- done | hit
   }
   out
@@ -1825,10 +1834,14 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
   # the Contents text of the export tabs belongs to this workbook only
   rm(list = ls(.sheet_notes, all.names = TRUE), envir = .sheet_notes)
   glevels <- levels(dat$GroupLabel)
-  # clean key -> the header as typed in the file (pipeline.R, contract R4-3):
-  # every label the user reads names the column by its header
+  # clean key -> the header as typed in the file (pipeline.R, contract R4-3),
+  # with the display labels as its "labels" attribute: the tables, model
+  # sheets, balance tables and love plots name a variable by its label (dn);
+  # a column named as a column (the patient ID, the export tabs, the data
+  # sheets) keeps its header (cn)
   dmap <- res$display_names
-  dn <- function(x) disp_name(x, dmap)
+  dn <- function(x) disp_label(x, dmap)
+  cn <- function(x) disp_name(x, dmap)
 
   # configured covariates that are not in the file: one WARNING line per
   # configuration (log_once; this function runs once per subset run)
@@ -1847,7 +1860,7 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
     dplyr::arrange(dplyr::desc(N))
   # headers in words, the source column as typed in the file (finding T2-06)
   qc <- as.data.frame(qc, check.names = FALSE, stringsAsFactors = FALSE)
-  names(qc)[1:2] <- c(paste0("Value in ", dn(res$group_source_clean)), "Group")
+  names(qc)[1:2] <- c(paste0("Value in ", cn(res$group_source_clean)), "Group")
   ov_groups <- as.data.frame(init$groups, check.names = FALSE, stringsAsFactors = FALSE)
   names(ov_groups)[names(ov_groups) == "GroupLabel"] <- "Group"
   vi <- va_info(dat, cfg, res)
@@ -2114,7 +2127,7 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
       data.frame(`Matching covariate` = unres$matching, check.names = FALSE, stringsAsFactors = FALSE) else NULL
     # the patient-ID column as the PSM sheet names it: its header
     pid_key <- res$patient_id_clean %||% NA_character_
-    pid_shown <- if (!is.na(pid_key[1]) && pid_key[1] %in% names(dat)) dn(pid_key[1]) else cfg$patient_id_raw
+    pid_shown <- if (!is.na(pid_key[1]) && pid_key[1] %in% names(dat)) cn(pid_key[1]) else cfg$patient_id_raw
 
     for (pr in pairings) {
       md <- pr$matched
@@ -2229,7 +2242,7 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
         if (exists("psm_score_label", mode = "function")) psm_score_label(psm$distance) else "Propensity score"
       # the patient-ID column under its header
       j <- which(names(ps_dist) == pid_key[1])
-      if (length(j)) names(ps_dist)[j] <- dn(pid_key[1])
+      if (length(j)) names(ps_dist)[j] <- cn(pid_key[1])
       ps_sections <- list(ps_dist)
       # the score's scale in the section title (D13): "... (logit of the
       # propensity score; matched rows)"
@@ -2564,6 +2577,17 @@ filter_rules_text <- function(rules) {
          " (a row with a missing value is kept by every rule except 'is missing' / 'is not missing')")
 }
 
+# The display labels of a run (setting display_labels; the "labels" attribute
+# of res$display_names, helpers.R with_display_labels) as the Manifest records
+# them: "Age_Years = 'Age (y)'; Sex = 'Sex'", by the headers as typed.
+display_labels_text <- function(map) {
+  lab <- attr(map, "labels")
+  if (!length(lab)) return("none")
+  paste0(paste(sprintf("%s = '%s'", disp_name(names(lab), map), as.character(lab)), collapse = "; "),
+         " (tables, model sheets, balance tables and love plots print the labels; the data sheets, the ",
+         "mEYEstro / AstigMATIC tabs, the filtered CSV and the WHWK files keep the column headers)")
+}
+
 # The analysed variables by section and type, the preferred level of each
 # dichotomous variable, the per-patient variables and the within-group
 # variables counted once per patient, as the Manifest records them (finding
@@ -2846,6 +2870,9 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
       c("Reference group",      ref_txt),
       c("Filter rules",         filter_rules_text(cfg$filter_rules)),
       c("Variables",            variables_text(cfg)),
+      # the display labels (setting display_labels), only when there are any
+      if (length(attr(res$display_names, "labels")))
+        c("Display labels",     display_labels_text(res$display_names)),
       c("VA notation",          vi$label),
       c("logMAR conversion",    paste0(logmar_txt, if (length(vi$in_logmar))
         "; acuity cells and figure headers read the Snellen geometric mean (logMAR mean ± SD), the table range in Snellen"

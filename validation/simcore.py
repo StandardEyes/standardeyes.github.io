@@ -591,8 +591,62 @@ def settings(data_file, **over):
     return c
 
 
+# Clinical labels for print (setting display_labels, build se.12): every
+# variable a settings file prints in a table, a model sheet, a balance table or
+# a love plot gets one (acuity: analyzed in logMAR in every shipped settings
+# file, whatever the recorded notation). A label equal to its column name is
+# not written.
+_MU = "\u00b5"
+DISPLAY_LABELS = {
+    "Age_Years": "Age (y)",
+    "Preop_SEQ_D": "Preoperative SEQ (D)",
+    "Preop_Sphere_D": "Preoperative sphere (D)",
+    "Preop_Cylinder_D": "Preoperative cylinder (D)",
+    "Preop_Pachymetry_um": f"Central pachymetry ({_MU}m)",
+    "Preop_Mean_K_D": "Mean keratometry (D)",
+    "Optical_Zone_mm": "Optical zone (mm)",
+    "Ablation_Depth_um": f"Ablation depth ({_MU}m)",
+    "Ablation_or_Lenticule_Depth_um": f"Ablation or lenticule depth ({_MU}m)",
+    "FollowUp_Days": "Follow-up (d)",
+    "Postop_SEQ_D": "Postoperative SEQ (D)",
+    "Postop_Cylinder_D": "Postoperative cylinder (D)",
+    "Postop_Haze_Grade": "Haze grade (0\u20134)",
+    "DryEye_Symptoms": "Dry-eye symptoms",
+    "Complication_Type": "Complication",
+    "Retreatment_Indicated": "Retreatment indicated",
+    "Glare_Halo_Symptoms": "Glare or halo symptoms",
+}
+for _when, _word in (("Preop", "Preoperative"), ("Postop", "Postoperative")):
+    for _va in ("UDVA", "CDVA"):
+        for _sfx in ("", "_logMAR", "_Snellen", "_Letters"):
+            DISPLAY_LABELS[f"{_when}_{_va}{_sfx}"] = f"{_word} {_va} (logMAR)"
+
+
+def display_labels_for(cfg):
+    """The display labels of the variables a settings file prints."""
+    seen = []
+    for sec in ("baseline", "preop", "outcome", "within_group"):
+        for ty in ("continuous", "ordinal", "dichotomous", "categorical"):
+            seen += list((cfg.get(sec) or {}).get(ty) or [])
+    for k in ("psm_covariates_raw", "gee_adjust_covariates_raw", "regression_covariates_raw"):
+        seen += list(cfg.get(k) or [])
+    out = {}
+    for v in seen:
+        if v in DISPLAY_LABELS and DISPLAY_LABELS[v] != v and v not in out:
+            out[v] = DISPLAY_LABELS[v]
+    return out
+
+
 def write_settings(name, cfg, title, description, demonstrates, notes=None):
-    c = dict(cfg)
+    # the display labels go after the preferred levels, as in the shipped files
+    c = {}
+    for k, v in cfg.items():
+        if k == "display_labels":
+            continue
+        c[k] = v
+        if k == "dichotomous_preferred_level":
+            c["display_labels"] = display_labels_for(cfg)
+    c.setdefault("display_labels", display_labels_for(cfg))
     c["_title"] = title
     c["_description"] = description
     c["_demonstrates"] = demonstrates

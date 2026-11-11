@@ -22,8 +22,8 @@ Everything runs on your own computer. Nothing is uploaded, and no internet conne
 
 ## What is new in 1.2.0
 
-Version 1.2.0 changes no default: a preset or settings file saved by 1.1.0 (or 1.0.0) loads and runs as
-before, and it matches eyes.
+Version 1.2.0 changes no statistical default: a preset or settings file saved by 1.1.0 (or 1.0.0) loads and
+runs as before, and it matches eyes. The table rows are named in a print-ready form (see *Display labels* below).
 
 - **Patient-level matching (option).** Matching tab, *Match* = patients (both eyes together); settings-file key
   `psm_unit: "patient"` (the default `"eye"` matches eyes, as in 1.1.0). Each patient's analyzed eyes in a
@@ -91,6 +91,16 @@ before, and it matches eyes.
   counts once in the matched descriptives and table tests; the matched GEE and regression models still follow
   *Use matching weights in matched GEE* (GEE tab). The note above each matched table, the Publication Table
   footnote, the Manifest and the figure legends say which weighting the matched tables use.
+- **Display labels for print-ready tables and figures.** Variables & Types tab, *Output order*: type a label
+  beside a variable, such as "Age (y)" or "Central pachymetry (µm)", and the tables, model sheets, balance
+  tables and love plots print it instead of the column name (settings-file key `display_labels`, column → label;
+  empty = the column name). The data sheets, the mEYEstro / AstigMATIC tabs, the filtered CSV and the WHWK files
+  keep the column names. Rows now read "Age (y), per patient", "Glare or halo symptoms, n/N (%)" and "Sex: F, per
+  patient, n/N (%)" instead of "Age_Years [per patient]" and "Sex (F) [per patient]". The seven example
+  settings files carry clinical labels.
+- **The sheet viewer wraps long cells.** On the Run & Results tab a sheet opens as the workbook holds it (no
+  "Unnamed: 1" headers), long cells wrap and every column is bounded, so the group columns of a Publication
+  Table stay in view.
 - **A review build for blinded peer review.** The release can also be built as `StandardEyes-review.zip`: the
   same program with the author names and every link to the website and repository withheld (the program name
   stays); every workbook's Manifest then records "review build".
@@ -190,7 +200,7 @@ attached to each release as part of the ZIP, which is Windows-only (`Start Stand
 
 If StandardEyes contributes to a publication, please cite:
 
-> Noyman DBE, Mimouni M, Safir M. StandardEyes: free software for standardized comparative analysis and
+> Ben Ephraim Noyman D, Mimouni M, Safir M. StandardEyes: free software for standardized comparative analysis and
 > outcomes reporting in refractive surgery. *Manuscript in preparation* (2026).
 
 See [`CITATION.cff`](CITATION.cff).

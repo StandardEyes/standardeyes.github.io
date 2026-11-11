@@ -860,6 +860,58 @@ set_va_analysis_columns <- function(dat, va, fmt, do_logmar, label_of, logger = 
   list(data = dat, converted = converted, as_logmar = as_logmar, as_decimal = as_decimal)
 }
 
+# The display labels of a configuration (setting display_labels, build se.12:
+# a map column -> label, as the interface saves it beside each variable):
+# returns clean key -> label, or NULL for none (the default; a missing key, an
+# empty map). A blank label, or one equal to its column's own header, is no
+# label. A column that is not in the file, and a label a reader could not tell
+# from another variable's printed name (the same text as another label or
+# another column's header, ignoring case), are named in the log and left out:
+# that column keeps its header. The log says once that labels are in use.
+display_labels_of <- function(cfg, raw_names, disp_map, logger = message) {
+  dl <- cfg$display_labels
+  if (is.null(dl) || !length(dl)) return(NULL)
+  nm <- names(dl)
+  if (is.null(nm)) {
+    logger("Display labels ignored: the setting display_labels must map column names to labels.")
+    return(NULL)
+  }
+  keys <- character(0); labs <- character(0)
+  for (i in seq_along(dl)) {
+    col <- nm[i]
+    lab <- as.character(unlist(dl[[i]]))
+    lab <- if (length(lab)) lab[1] else NA_character_
+    if (is.na(lab) || is.na(col) || !nzchar(trimws(col))) next
+    lab <- trimws(gsub("[[:cntrl:]]+", " ", lab))
+    if (!nzchar(lab)) next
+    k <- as.character(resolve_raw_to_clean(raw_names, col))[1]
+    if (is.na(k)) {
+      logger(paste0(unresolved_name_message(raw_names, col, "Display label column"),
+                    " Its label '", lab, "' is not used."))
+      next
+    }
+    if (k %in% keys || identical(lab, unname(disp_map[k]))) next
+    keys <- c(keys, k); labs <- c(labs, lab)
+  }
+  if (!length(keys)) return(NULL)
+  # every column's printed name with the labels in place: a labeled column
+  # whose name is not unique (ignoring case) keeps its header
+  printed <- stats::setNames(as.character(disp_map), names(disp_map))
+  printed[keys] <- labs
+  low <- tolower(printed)
+  clash <- keys[low[keys] %in% low[duplicated(low)]]
+  for (k in clash)
+    logger(sprintf(paste0("Display label '%s' of column '%s' is not used: another variable is printed under the ",
+                          "same name - the column header is printed instead."), labs[match(k, keys)],
+                   disp_name(k, disp_map)))
+  ok <- !(keys %in% clash)
+  if (!any(ok)) return(NULL)
+  logger(sprintf(paste0("Display labels: %d column(s) labeled - the tables, model sheets, balance tables and ",
+                        "love plots print the labels; the run log, the data sheets, the mEYEstro / AstigMATIC ",
+                        "tabs, the filtered CSV and the WHWK files keep the column headers."), sum(ok)))
+  stats::setNames(labs[ok], keys[ok])
+}
+
 # A preferred (event) level of a dichotomous variable that does not match the
 # filtered data is logged once here, with the level actually used. Only the
 # variables analysed as dichotomous (dicho_vars) are checked: the GUI keeps a
@@ -968,6 +1020,10 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
   bump(0.08, "Resolving column names ...")
   log_header_collisions(raw_names, logger)
   res <- resolve_config(cfg, raw_names, logger)
+  # the display labels (setting display_labels: column -> label) ride on the
+  # map; the tables, model sheets, balance tables and love plots print them
+  # (helpers.R disp_label), the log and the exported data keep the headers
+  disp_map <- with_display_labels(disp_map, display_labels_of(cfg, raw_names, disp_map, logger))
   res$display_names <- disp_map
   res$run_started <- run_started
   # the matched-analysis note says "clustered by patient" only with a mapped

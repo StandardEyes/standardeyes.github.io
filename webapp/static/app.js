@@ -281,6 +281,10 @@ function defaultState(){
       do_regression:true, regression_stage:"unmatched", regression_covariates_raw:[],
       roles: Object.fromEntries(Object.keys(ROLE_LABELS).map(k=>[k,""])),
       dicho_map: {},           // column -> positive level (GUI-driven)
+      // column -> label for print ("Age (y)"); empty = the column name. Tables,
+      // model sheets, balance tables and love plots print it; the data sheets
+      // and exports keep the column names
+      display_labels: {},
       output_dir:"", output_prefix:"StandardEyes", export_filtered_csv:true,
     };
 }
@@ -1059,6 +1063,28 @@ function builder(){
         if(!cur.includes(k)) delete this.s.within_levels[k];
     },
 
+    // ---- labels for print (display_labels: column -> label) ----
+    // The label typed for a column ("" = none: the column name is printed).
+    labelOf(v){ return String((this.s.display_labels||{})[v] ?? ""); },
+    setLabel(v,txt){
+      if(!this.s.display_labels) this.s.display_labels={};
+      if(String(txt??"").trim()) this.s.display_labels[v]=String(txt);
+      else delete this.s.display_labels[v];
+    },
+    // The variables printed in the tables or the love plots that are in no
+    // section's output-order list: the within-group variables and the
+    // matching, GEE and regression covariates (their labels are set here)
+    otherLabelVars(){
+      const inSec=new Set(SECTIONS.flatMap(sec=>this.selectedInSection(sec)));
+      const s=this.s, seen=new Set(), out=[];
+      for(const v of [...this.withinVars(), ...(s.psm_covariates_raw||[]), ...(s.gee_adjust_covariates_raw||[]),
+                      ...(s.regression_covariates_raw||[])])
+        if(v && !inSec.has(v) && !seen.has(v)){ seen.add(v); out.push(v); }
+      return out;
+    },
+    // how many labels the run will print (the "Before you run" summary)
+    labelCount(){ return Object.values(this.s.display_labels||{}).filter(v=>String(v??"").trim()).length; },
+
     // ================= file =================
     async pickFile(){
       try{
@@ -1671,6 +1697,9 @@ function builder(){
         regression_covariates_raw:s.regression_covariates_raw.slice(),
         roles:{...s.roles},
         dichotomous_preferred_level: {...s.dicho_map},
+        // the labels typed (blank ones left out)
+        display_labels: Object.fromEntries(Object.entries(s.display_labels||{})
+          .map(([k,v])=>[k, String(v??"").trim()]).filter(([k,v])=>k && v)),
         output_dir:s.output_dir, output_prefix:s.output_prefix, export_filtered_csv:s.export_filtered_csv,
       };
     },
@@ -1868,6 +1897,11 @@ function builder(){
         s.dicho_map = {};
         for(const [k,v] of Object.entries(c.dichotomous_preferred_level)) s.dicho_map[k]=String(v);
       }
+      // labels for print: text labels only (a settings file without the key
+      // has none - every variable prints its column name)
+      s.display_labels = {};
+      if(c.display_labels && typeof c.display_labels==="object" && !Array.isArray(c.display_labels))
+        for(const [k,v] of Object.entries(c.display_labels)) if(typeof v==="string" && v.trim()) s.display_labels[k]=v;
       this.syncOrders();
       this.ensureDichoDefaults();
     },
@@ -2151,6 +2185,9 @@ function builder(){
       out.push(["Visual acuity", !s.do_logmar ? "analyzed as recorded ("+this.vaFormatLabel(s.va_format)+")"
         : s.va_format==="logmar" ? "recorded in logMAR, analyzed as recorded"
         : "logMAR for "+s.logmar_cols_raw.length+" column(s), shown as Snellen with the logMAR mean ± SD"]);
+      { const nl=this.labelCount();
+        out.push(["Variable names", nl ? nl+" label(s) printed in the tables and love plots (Variables & Types); the other variables by their column names"
+                                       : "column names (no labels set; Variables & Types, Output order)"]); }
       if(s.make_graphs){
         const w=String(s.figure_width_cm??"").trim();
         out.push(["Figures", (s.figure_style==="annotated" ? "annotated (v1.0.0 look)" : "journal style, legend text in <figure>_legend.txt")+
@@ -2221,6 +2258,14 @@ function builder(){
         if(r.ok) this.resultSheet.data=j;
         else this.resultSheet.error=j.detail||"Could not read this sheet";
       }catch(e){ if(seq===this._sheetSeq) this.resultSheet.error=String(e); }
+    },
+    // a row of the sheet viewer with only its first cell filled (a section
+    // title, a note, a footnote): shown across the table, so its long text
+    // never widens the first column
+    sheetNoteRow(row){
+      if(!Array.isArray(row) || row.length<2) return false;
+      const blank=v=>v===null || v===undefined || v==="";
+      return !blank(row[0]) && row.slice(1).every(blank);
     },
     downloadUrl(file){ return "/api/download?file="+encodeURIComponent(file); },
 

@@ -169,6 +169,22 @@
   "dichotomous_preferred_level": {
     "Sex": "F"
   },
+  "display_labels": {
+    "Age_Years": "Age (y)",
+    "Preop_SEQ_D": "Preoperative SEQ (D)",
+    "Preop_Sphere_D": "Preoperative sphere (D)",
+    "Preop_Cylinder_D": "Preoperative cylinder (D)",
+    "Preop_UDVA": "Preoperative UDVA (logMAR)",
+    "Preop_CDVA": "Preoperative CDVA (logMAR)",
+    "Preop_Mean_K_D": "Mean keratometry (D)",
+    "Preop_Pachymetry_um": "Central pachymetry (µm)",
+    "Ablation_or_Lenticule_Depth_um": "Ablation or lenticule depth (µm)",
+    "FollowUp_Days": "Follow-up (d)",
+    "Postop_SEQ_D": "Postoperative SEQ (D)",
+    "Postop_Cylinder_D": "Postoperative cylinder (D)",
+    "Postop_UDVA": "Postoperative UDVA (logMAR)",
+    "Postop_CDVA": "Postoperative CDVA (logMAR)"
+  },
   "output_dir": "Example Output",
   "export_filtered_csv": true,
   "output_prefix": "DS_D",

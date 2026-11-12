@@ -179,6 +179,23 @@
     "Sex": "F",
     "DryEye_Symptoms": "Yes"
   },
+  "display_labels": {
+    "Age_Years": "Age (y)",
+    "Preop_SEQ_D": "Preoperative SEQ (D)",
+    "Preop_Sphere_D": "Preoperative sphere (D)",
+    "Preop_Cylinder_D": "Preoperative cylinder (D)",
+    "Preop_UDVA": "Preoperative UDVA",
+    "Preop_CDVA": "Preoperative CDVA",
+    "Preop_Pachymetry_um": "Central pachymetry (µm)",
+    "Preop_Mean_K_D": "Mean keratometry (D)",
+    "Ablation_Depth_um": "Ablation depth (µm)",
+    "FollowUp_Days": "Follow-up (d)",
+    "Postop_SEQ_D": "Postoperative SEQ (D)",
+    "Postop_Cylinder_D": "Postoperative cylinder (D)",
+    "Postop_UDVA": "Postoperative UDVA",
+    "Postop_CDVA": "Postoperative CDVA",
+    "DryEye_Symptoms": "Dry-eye symptoms"
+  },
   "output_dir": "Example Output",
   "export_filtered_csv": true,
   "output_prefix": "DS_E_eye",

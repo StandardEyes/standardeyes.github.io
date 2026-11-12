@@ -1,41 +1,41 @@
 WEBVTT
 
-00:00:00.715 --> 00:00:03.887
+00:00:00.705 --> 00:00:03.878
 Tutorial six. Run, preview and save.
 
-00:00:08.257 --> 00:00:16.305
+00:00:08.204 --> 00:00:16.253
 Before you run, the Run tab lists how the numbers will be computed and shown. The workbook's Manifest sheet records the same settings.
 
-00:00:16.538 --> 00:00:21.103
+00:00:16.519 --> 00:00:21.084
 Tick Preview only, if you want to look at the results before anything is saved.
 
-00:00:23.806 --> 00:00:30.693
+00:00:23.794 --> 00:00:30.681
 Press Run. The log lists every step as it happens: filters, conversions, tests and figures.
 
-00:00:30.944 --> 00:00:35.184
+00:00:30.925 --> 00:00:35.166
 A full run takes a minute or two. It is shown here speeded up.
 
-00:00:35.427 --> 00:00:38.135
+00:00:35.415 --> 00:00:38.122
 Done. The workbook and the figures are ready.
 
-00:00:38.371 --> 00:00:45.351
+00:00:38.425 --> 00:00:45.405
 Previews of the figures appear in the app. Each figure is also written as its own file, with a legend file beside it.
 
-00:00:46.122 --> 00:00:50.038
+00:00:46.129 --> 00:00:50.044
 Here is the combined figure, with every panel and every group.
 
-00:00:51.123 --> 00:00:58.382
+00:00:51.174 --> 00:00:58.433
 And the double-angle plots of the preoperative astigmatism, the surgically induced astigmatism and the prediction error.
 
-00:00:59.193 --> 00:01:02.690
+00:00:59.294 --> 00:01:02.791
 You can open any sheet of the workbook without leaving the app.
 
-00:01:05.259 --> 00:01:13.633
-This is the outcome table, exactly as it is written to Excel: a column for each group, the P value, and the test that was used.
+00:01:05.305 --> 00:01:15.908
+This is the publication table, exactly as it is written to Excel. Each variable carries its printed label, and long cells wrap, so every group column stays in view.
 
-00:01:13.876 --> 00:01:19.928
+00:01:16.169 --> 00:01:22.220
 When you are happy with the results, save everything to your output folder, or only the files you want.
 
-00:01:20.750 --> 00:01:25.222
+00:01:23.025 --> 00:01:27.497
 StandardEyes. For ophthalmologists, by ophthalmologists.
 

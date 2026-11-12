@@ -73,8 +73,9 @@ runs as before, and it matches eyes. The table rows are named in a print-ready f
   axis made AstigMATIC drop the eye); the mEYEstro paper writes a plano target as 0, 0, 0, and the axis of a
   zero cylinder enters no calculation. AstigMATIC assumes a plano astigmatic target and discards a row with a
   missing value, so eyes with a non-plano astigmatic target or a missing cylinder, axis or eye code are left
-  out of its tab, and the tab's note, the Contents sheet and the run log count them ("183 eyes kept, 39 left
-  out: non-plano astigmatic target"). The Contents sheet gives the cells to copy for each tab.
+  out of its tab, and the tab's note, the Contents sheet and the run log count them ("179 eyes kept, 43 left
+  out: 39 non-plano astigmatic target, 4 missing cylinder, axis or eye"). The Contents sheet gives the cells
+  to copy for each tab.
   **Correction:** in 1.1.0 the mEYEstro tab placed the postoperative CDVA before the UDVA. mEYEstro reads the
   UDVA first, so mEYEstro graphs made from a 1.1.0 tab show the two swapped: export the tab again with 1.2.0.
 - **NE when a variable does not vary within the groups.** A continuous or ordinal variable that is constant

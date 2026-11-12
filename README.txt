@@ -120,9 +120,10 @@ a print-ready form (see "Display labels" below).
   missing value, so eyes with a non-plano astigmatic
   target or a missing cylinder, axis or eye code are left
   out of its tab; the tab's note, the Contents sheet and
-  the run log count them ("183 eyes kept, 39 left out:
-  non-plano astigmatic target"). The Contents sheet gives
-  the cells to copy for each tab.
+  the run log count them ("179 eyes kept, 43 left out:
+  39 non-plano astigmatic target, 4 missing cylinder,
+  axis or eye"). The Contents sheet gives the cells to
+  copy for each tab.
   CORRECTION: in 1.1.0 the mEYEstro tab placed the
   postoperative CDVA before the UDVA. mEYEstro reads the
   UDVA first, so mEYEstro graphs made from a 1.1.0 tab

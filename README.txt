@@ -154,7 +154,13 @@ a print-ready form (see "Display labels" below).
   green and magenta unless a group is drawn in a color
   close to them; then they take another color far from
   every group color (olive or dark green; violet or pink),
-  and the legends name it.
+  and the legends name it. They are also told apart by
+  their pattern, so a reader with a color-vision
+  deficiency, for whom they can take on the color of a
+  group, can still read them: the +/-0.50 D lines are
+  long-dashed and the +/-1.00 D lines dot-dashed (the
+  identity line is solid, each group's regression line
+  dotted).
 
 * An enlarged centroid panel beside every double-angle
   plot. At print size the 95% confidence region of a
@@ -201,15 +207,25 @@ a print-ready form (see "Display labels" below).
     figure P values stay independence);
   - gee_refit = "on" | "off": off keeps every exchangeable
     GEE that converged, whatever its working correlation
-    (one that did not converge is still refitted and
-    labeled);
+    and without the scoring-step check (one that did not
+    converge is still refitted and labeled); a fit the
+    default rule would refit is labeled with that rule's
+    reason ("exchangeable working correlation kept with
+    gee_refit = off (not accepted by the default rule:
+    working correlation 1.020 - 1 or more, not a valid
+    correlation)") and counted in the run log;
   - separated_estimates = "ne" | "report": report prints,
-    for an outcome with no events in one group, the
-    estimate, CI and P the GEE returns (fitted as geepack
-    fits it by default, on the rows in the data's order),
-    each marked with a dagger and the footnote "no events
-    in one group: estimate unreliable", counted in the run
-    log;
+    for an outcome with no events (or only events) in one
+    group, the estimate, CI and P the GEE returns for that
+    group's comparison (fitted as geepack fits it by
+    default, on the rows in the data's order), each marked
+    with a dagger and the footnote "no events in one group:
+    estimate unreliable" (or "only events ..."), counted in
+    the run log; the other comparisons, the intercept and
+    the covariates still come from the converged model
+    without that group, and when there is none (two
+    groups, or the reference group affected) every row of
+    the fit is marked with a dagger;
   - std_axis_range = "as_recorded" | "0-179": 0-179
     reduces every axis of a converted refraction modulo
     180, so an axis of 180 reads 0 (the axis rows and the
@@ -219,8 +235,12 @@ a print-ready form (see "Display labels" below).
     difference in proportions (cobalt's own default) in
     the PSM sheet and the love plot.
   "Matched tables" (above) stays on the Matching tab. The
-  Manifest, the run log and the table footnotes and
-  legends name every value that is not the default.
+  Manifest and the run log name every value that is not
+  the default; the Publication Table footnotes, the GEE
+  sheet notes, the PSM sheet and the figure and love-plot
+  legends state each rule where it changes what they show
+  (the mEYEstro and AstigMATIC tabs carry no notes: the
+  axis rule is in the Manifest).
 
 * An R version notice. When the R found is not 4.5.x (the
   version the bundled R packages were built for), the
@@ -233,10 +253,14 @@ a print-ready form (see "Display labels" below).
 * Color-blind-safe example colors. The seven example
   settings files and presets draw their groups in
   Okabe-Ito colors (blue, orange, vermillion, sky blue,
-  reddish purple), chosen so that the black identity line
-  and the green / magenta +/-0.50 D / +/-1.00 D lines stay
-  clear of every group. The software's own default colors
-  are unchanged.
+  reddish purple), which stay distinct from one another
+  under the common color-vision deficiencies, chosen so
+  that at normal color vision the black identity line and
+  the green / magenta +/-0.50 D / +/-1.00 D lines stay
+  clear of every group. Under a deficiency those two line
+  sets can take on a group's color, which is why they are
+  told apart by their pattern too (long dashes, dot-dash;
+  above). The software's own default colors are unchanged.
 
 * Display labels for print-ready tables and figures.
   Variables & Types tab, Output order: type a label beside

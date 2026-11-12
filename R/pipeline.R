@@ -1161,6 +1161,10 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
       # the columns now holding minus-cylinder values, for the exported data's
       # headers (suffix "_minus_cyl", T1-07)
       res$std_minus_cols <- unique(c(res$std_minus_cols, unname(cl[!is.na(cl)])))
+      # the axis columns converted (all three columns found), for the
+      # Publication Table footnote of std_axis_range = "0-179" (export.R
+      # axis_rule_foot; finding CR-3)
+      if (!any(is.na(cl))) res$std_axis_cols <- unique(c(res$std_axis_cols, unname(cl[["axis"]])))
     }
     # the switch alone converts nothing: said, so plus-cylinder data are never
     # analysed unconverted without a word (a warning when cylinder roles are
@@ -1387,8 +1391,13 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
 
     # the run (label + subset values) is recorded in the workbook's Manifest
     invisible(gee_refit_take()); invisible(.gee_fallback_take()); invisible(.pp_cross_take())
-    invisible(ne_within_take()); invisible(sep_report_take())
+    invisible(ne_within_take()); invisible(sep_report_take()); invisible(gee_kept_take())
     built <- build_workbook_for_data(dat_run, cfg, res, logger, loveplot_dir = output_dir, run = run)
+    # gee_refit = off: the exchangeable fits kept although the default rule
+    # would refit them - models, regressions and clustered table tests
+    # (helpers.R gee_kept_log_text; finding CR-2)
+    kept_x <- gee_kept_log_text(paste0("Workbook of run '", run$label, "'"), gee_kept_take())
+    if (!is.null(kept_x)) logger(kept_x)
     # outcomes with no events in one group printed with their estimate
     # (separated_estimates = report; helpers.R)
     sep_x <- sep_report_log_text(sep_report_take(), paste0("Workbook of run '", run$label, "'"))

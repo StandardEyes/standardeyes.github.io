@@ -2,8 +2,9 @@
 # graphs.R
 # StandardEyes publication figure set: ALL groups superimposed
 # on each panel, user colors, stat+P annotations, %-labels,
-# indicator lines (black identity, green +/-0.50 D, magenta
-# +/-1.00 D), per-group regression lines + equations on the scatters,
+# indicator lines (black identity, green long-dashed +/-0.50 D,
+# magenta dot-dashed +/-1.00 D), per-group regression lines +
+# equations on the scatters,
 # JCRS-standard double-angle astigmatism plots, grey semicircle
 # vector plots, and a sectioned composite figure with captions
 # below each panel. Bins follow the published standard-graph
@@ -56,6 +57,15 @@ gr_ref_line_name <- function() {
 # stay green and magenta.
 IND_HALF_CANDIDATES <- c(green = IND_HALF, olive = "#808000", `dark green` = "#0B5D1E")
 IND_ONE_CANDIDATES <- c(magenta = IND_ONE, violet = "#9B59D0", pink = "#F781BF")
+# Their line types (finding CR-6 of the se.12 review): under a colour-vision
+# deficiency (simulated protanopia, deuteranopia, tritanopia) the green and
+# magenta lines take on the colour of a group - the default palette's orange
+# too - so each set is told apart by its pattern as well: ±0.50 D long dashes,
+# ±1.00 D dot-dash, apart from the solid identity line and the dotted ("22")
+# regression line of each group; the legends name both the colour and the
+# pattern.
+IND_HALF_LTY <- "longdash"; IND_ONE_LTY <- "dotdash"
+IND_HALF_LTY_NAME <- "long-dashed"; IND_ONE_LTY_NAME <- "dot-dashed"
 ind_line_cols_for <- function(pal, ref = REF_LINE_CANDIDATES[["black"]]) {
   half <- line_col_far_from(IND_HALF_CANDIDATES, c(pal, ref))
   one <- line_col_far_from(IND_ONE_CANDIDATES, c(pal, ref, half))
@@ -293,8 +303,9 @@ GR_THIN_NOTE <- paste0("Value labels of some bars are not printed at this width 
 # (the scatter line's "{REF}" is the identity line's color, gr_ref_line_name; "{HALF}" and
 # "{ONE}" the ±0.50 D and ±1.00 D lines' colors, gr_ind_name)
 GR_PANEL_NOTES <- list(
-  scatter = paste0("Solid {REF} line, y = x (attempted equals achieved); {HALF} lines, ±0.50 D; ",
-                   "{ONE} lines, ±1.00 D; dotted line, the least-squares regression line of each group."),
+  scatter = paste0("Solid {REF} line, y = x (attempted equals achieved); {HALF} ", IND_HALF_LTY_NAME,
+                   " lines, ±0.50 D; {ONE} ", IND_ONE_LTY_NAME, " lines, ±1.00 D; dotted line, the least-squares ",
+                   "regression line of each group."),
   "10_CIhist" = paste0("Correction index bins are closed on the right: a bin labeled 0.16 to 0.30 holds ",
                        "0.15 < CI ≤ 0.30, so a ratio of 0.153 is in it."),
   "11_AEhist" = paste0("Angle-of-error bins include the edge nearer zero: 5° and -5° are in -5 to 5, ",
@@ -457,6 +468,12 @@ gr_gee_legend_lines <- function(texts, polar = FALSE) {
       out <- c(out, paste0("The summary tables of this run use the classical tests (Summary-table tests = classical: ",
                            "eyes treated as independent), so their P values can differ from the patient-clustered ",
                            "P values of this figure."))
+    # gee_refit = "off" (an unmatched pass: a matched one fits independence
+    # only): the rule, as the tables' footnote states it (finding CR-3)
+    if (!isTRUE(.gr_opts$matched) && identical(repro_opt("gee_refit"), "off"))
+      out <- c(out, paste0("gee_refit = off: every exchangeable GEE that converged is kept, whatever its working ",
+                           "correlation and without the scoring-step check (the run log counts the fits the default ",
+                           "rule would refit with an independence working correlation)."))
     # an independence refit named in a test label (decision R3-4)
     if (any(grepl("independence working correlation", t, fixed = TRUE)))
       # (decision V12-2: the reason is stated, never assumed)
@@ -619,6 +636,11 @@ GR_PERM_TEST <- "Permutation test over patients (GEE not fitted)"
 # The test name as printed in a two-group header, short enough for one line
 gr_short_test <- function(lab) {
   lab <- as.character(lab)
+  # gee_refit = "off": a kept exchangeable fit's reason is left out of the
+  # drawn name too (the legend states the rule, gr_gee_legend_lines; the run
+  # log counts the fits; finding CR-2)
+  if (any(grepl(GEE_EXCH_KEPT_HEAD, lab, fixed = TRUE)))
+    lab <- sub(paste0("[;,] ", GEE_EXCH_KEPT_HEAD, " \\(not accepted by the default rule[^()]*\\)"), "", lab)
   # an independence refit (R3-4) keeps its name, shortened: its reason
   # (decision V12-2) is left out here - the run log counts the reasons, and the
   # summary table's test label of the same variable gives it
@@ -882,6 +904,10 @@ gr_test_y <- function(x, kind, event = NULL) {
 # independence working correlation is named inside the label's parentheses,
 # "GEE (clustered by patient; independence working correlation ...)".
 gr_refit_label <- function(lab, p) {
+  # gee_refit = "off": an exchangeable fit kept although the default rule
+  # would refit it is named with that rule's reason (finding CR-2)
+  if (nzchar(as.character(attr(p, "kept") %||% "")[1]))
+    return(sub("\\)$", paste0("; ", gee_kept_label(attr(p, "kept")), ")"), lab))
   if (!nzchar(as.character(attr(p, "refit") %||% "")[1])) return(lab)
   sub("\\)$", paste0("; ", gee_refit_label(attr(p, "refit")), ")"), lab)
 }
@@ -2943,8 +2969,10 @@ scatter_ind <- function(d, pal, xlab, ylab, title, from_zero = FALSE,
   d_fit <- d[d$Group %in% fit_grp, , drop = FALSE]
   p <- ggplot2::ggplot(d, ggplot2::aes(x, y, colour = Group)) +
     ggplot2::geom_abline(slope = 1, intercept = 0, colour = gr_ref_line_col(), linewidth = .55) +
-    ggplot2::geom_abline(slope = 1, intercept = c(-.5, .5), colour = gr_ind_col("half"), linewidth = .45) +
-    ggplot2::geom_abline(slope = 1, intercept = c(-1, 1), colour = gr_ind_col("one"), linewidth = .45) +
+    ggplot2::geom_abline(slope = 1, intercept = c(-.5, .5), colour = gr_ind_col("half"), linewidth = .45,
+                         linetype = IND_HALF_LTY) +
+    ggplot2::geom_abline(slope = 1, intercept = c(-1, 1), colour = gr_ind_col("one"), linewidth = .45,
+                         linetype = IND_ONE_LTY) +
     ggplot2::geom_point(alpha = .7, size = 1.5) +
     (if (nrow(d_fit))
        ggplot2::geom_smooth(data = d_fit, method = "lm", formula = y ~ x, se = FALSE,
@@ -4334,7 +4362,9 @@ astig_bivariate_p <- function(x, y, g, id = NULL, w = NULL, matched = isTRUE(.gr
         if (nzchar(fc$refit)) gee_refit_note(fc$refit)
         pg <- gr_wald_p(f2, grep("(^g)|(:g)", names(stats::coef(f2))))
         if (is.finite(pg))
-          return(structure(as.numeric(pg), test = if (nzchar(fc$refit)) paste0(gtest, ", ", gee_refit_label(fc$refit)) else gtest,
+          return(structure(as.numeric(pg), test = if (nzchar(fc$refit)) paste0(gtest, ", ", gee_refit_label(fc$refit))
+                                                  else if (nzchar(fc$kept %||% "")) paste0(gtest, ", ", gee_kept_label(fc$kept))
+                                                  else gtest,
                            few = few_patient_groups(idk, g[ok], unit)))
       }
     }
@@ -6785,6 +6815,7 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
   .gr_opts$cluster_id <- NULL; .gr_opts$weights <- NULL; .gr_opts$n_failed <- 0L
   .gr_opts$n_gee_fallback <- 0L; .gr_opts$n_label_thin <- 0L
   invisible(gee_refit_take())             # the figure pass's own independence refits (R3-4)
+  invisible(gee_kept_take())              # its fits kept with gee_refit = off (CR-2)
   on.exit({ .gr_opts$cluster_id <- NULL; .gr_opts$weights <- NULL; .gr_opts$journal <- FALSE
             .gr_opts$tables_classical <- FALSE; .gr_opts$out_dpi <- NULL; .gr_opts$at_width <- FALSE
             .gr_opts$out_vector <- FALSE
@@ -6978,7 +7009,12 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
     logger(paste0("StandardEyes figures: p-values clustered by patient (GEE; exchangeable working correlation, ",
                   "independence on a matched cohort or where a test is labeled so; ", gee_inference_text(),
                   ") wherever a patient has two analyzed eyes - both eyes of a patient count once; ",
-                  "with one eye per patient the classical tests run, as in the tables."))
+                  "with one eye per patient the classical tests run, as in the tables",
+                  # gee_refit = off (finding CR-3)
+                  if (identical(repro_opt("gee_refit"), "off"))
+                    paste0("; gee_refit = off: every exchangeable GEE that converged is kept, whatever its working ",
+                           "correlation and without the scoring-step check") else "",
+                  "."))
   } else {
     .gr_opts$cluster_id <- NULL
     if (cluster_by_pt)
@@ -7417,6 +7453,10 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
   refits <- gee_refit_take()
   n_refit <- length(refits)
   if (n_refit > 0) logger(gee_refit_log_text(n_refit, paste0("StandardEyes figures", run_lab), refits))
+  # gee_refit = off: the figure tests' exchangeable fits kept although the
+  # default rule would refit them (finding CR-2)
+  kept_x <- gee_kept_log_text(paste0("StandardEyes figures", run_lab), gee_kept_take())
+  if (!is.null(kept_x)) logger(kept_x)
   if ((.gr_opts$n_gee_fallback %||% 0L) > 0)
     logger(sprintf("StandardEyes figures%s: in %d test(s) the clustered GEE could not be fitted (no convergence, a numerically singular covariance, or a group of a 0/1 outcome without events); those P values come from a permutation test over patients (%d permutations, %s; a double-angle centroid comparison: the unclustered Hotelling / Pillai test) and are labeled \"GEE not fitted\" on the figure.",
                    run_lab, .gr_opts$n_gee_fallback, CLUSTER_PERM_B, CLUSTER_PERM_UNITS))

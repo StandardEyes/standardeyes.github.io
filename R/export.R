@@ -1242,9 +1242,12 @@ gee_skip_note <- function(g, corstr = NULL) {
   n_ind <- n_of(get0("GEE_INDEP_REFIT_HEAD", ifnotfound = "independence working correlation (the exchangeable fit was not accepted"))
   # separated_estimates = "report": the outcomes printed with their separated fit
   n_sep <- n_of(get0("SEP_MODEL_TAG", ifnotfound = "separated_estimates = report"))
+  # (the footnote by the reasons the Model column names - no events, only
+  # events, or both; finding CR-5)
+  sep_ft <- sep_foots_of_models(g$Model)
   sep_txt <- if (n_sep > 0) paste0(n_sep, " outcome(s) have no events (or only events) in one group: the estimate, ",
                                    "CI and P the model returns are printed, marked ", SEP_DAGGER, " - ",
-                                   SEP_FOOT_NONE, " (separated_estimates = report).")
+                                   paste(sep_ft, collapse = "; "), " (separated_estimates = report).")
   r34 <- c(if (n_pp > n_pp_gee) paste0(n_pp - n_pp_gee, " outcome(s) are per-patient variables: modeled on one row per patient ",
                                 "by an ordinary linear or logistic model (model-based SE), never by an eye-level ",
                                 "GEE - see the 'Model' column."),
@@ -1256,7 +1259,20 @@ gee_skip_note <- function(g, corstr = NULL) {
                                  "exchangeable fit was not accepted (working correlation 0.95 or more, no ",
                                  "convergence, or an unstable scoring step - the 'Model' column gives the reason of ",
                                  "each); the robust SE stay clustered by patient."))
-  r34 <- c(r34, sep_txt)
+  # gee_refit = "off" on a sheet of exchangeable models (unmatched, or
+  # matched_gee_corstr = "exchangeable"): the rule, and the outcomes whose fit
+  # the default rule would refit (labeled in the Model column; finding CR-3)
+  exch_sheet <- !(length(corstr) && grepl("independence", corstr[1], fixed = TRUE))
+  refit_off_txt <- if (identical(repro_opt("gee_refit"), "off") && exch_sheet) {
+    n_kept <- n_of("kept with gee_refit = off")
+    paste0("gee_refit = off: every exchangeable GEE that converged is kept, whatever its working correlation and ",
+           "without the scoring-step check (a fit that did not converge is still refitted with an independence ",
+           "working correlation)",
+           if (n_kept > 0) paste0("; ", n_kept, " outcome(s) whose fit the default rule would refit are labeled so ",
+                                  "in the 'Model' column") else "",
+           ".")
+  }
+  r34 <- c(r34, sep_txt, refit_off_txt)
   if (bad == 0 && !few && !length(wtxt) && !length(r34) && !length(ne_txt)) return(NULL)
   # without a patient ID each eye is its own cluster and the cautions count eyes
   unit <- if (few && all(grepl("with few eyes$", cau))) "eyes" else "patients"
@@ -1454,27 +1470,61 @@ pub_values_note <- function(out, va_decimal = character(0)) {
 # reproduces an earlier analysis changes how they are fitted (helpers.R
 # REPRO_OPTIONS); NULL with the defaults. matched / weighted: the table's
 # cohort is matched / its GEE models use non-unit matching weights.
-gee_rule_foot <- function(matched = FALSE, weighted = FALSE) {
-  parts <- c(
-    if (isTRUE(matched) && matched_gee_exchangeable())
-      paste0("an exchangeable working correlation (matched_gee_corstr = exchangeable)",
-             if (isTRUE(weighted)) ", models weighted by the matching weights" else ""),
-    if (identical(repro_opt("gee_refit"), "off"))
-      "every exchangeable fit that converged is kept, whatever its working correlation (gee_refit = off)")
-  if (!length(parts)) return(NULL)
-  paste0("GEE columns: ", paste(parts, collapse = "; "), ".")
+# What the table holds decides the lines (finding CR-3): gee_cols / adj_cols /
+# ctests = it has GEE columns / adjusted-regression columns / P values from
+# clustered GEE tests. matched_gee_corstr = "exchangeable" changes a matched
+# table's GEE columns; gee_refit = "off" changes every exchangeable GEE - an
+# unmatched table's clustered P values, GEE and adjusted columns, and a matched
+# table's GEE columns when they are exchangeable (its clustered tests and
+# regression are independence fits, which the option does not touch).
+gee_rule_foot <- function(matched = FALSE, weighted = FALSE, gee_cols = TRUE, adj_cols = FALSE, ctests = FALSE) {
+  out <- character(0)
+  exch_m <- isTRUE(matched) && matched_gee_exchangeable()
+  if (exch_m && isTRUE(gee_cols))
+    out <- c(out, paste0("GEE columns: an exchangeable working correlation (matched_gee_corstr = exchangeable)",
+                         if (isTRUE(weighted)) ", models weighted by the matching weights" else "", "."))
+  if (identical(repro_opt("gee_refit"), "off")) {
+    scope <- if (isTRUE(matched)) c(if (exch_m && isTRUE(gee_cols)) "GEE columns")
+             else c(if (isTRUE(ctests)) "P values of the clustered tests", if (isTRUE(gee_cols)) "GEE columns",
+                    if (isTRUE(adj_cols)) "adjusted columns")
+    if (length(scope)) {
+      scope_txt <- if (length(scope) == 1) scope
+                   else paste0(paste(scope[-length(scope)], collapse = ", "), " and ", scope[length(scope)])
+      out <- c(out, paste0(toupper(substr(scope_txt, 1, 1)), substring(scope_txt, 2),
+                           ": every exchangeable GEE that converged is kept, whatever its working correlation and ",
+                           "without the scoring-step check (gee_refit = off); one that did not converge is still ",
+                           "refitted with an independence working correlation."))
+    }
+  }
+  if (!length(out)) NULL else out
 }
 
-# model_note: an optional footnote line on how the GEE column was fitted, when
-# an option reproducing an earlier analysis changes it (gee_rule_foot).
+# The Publication Table footnote line on the axis of a standardized refraction
+# when std_axis_range = "0-179" and such an axis is a row of the table (finding
+# CR-3): axis_rows = the axis columns converted, by their row names.
+axis_rule_foot <- function(rows_shown, axis_rows) {
+  if (!identical(repro_opt("std_axis_range"), "0-179") || !length(axis_rows)) return(NULL)
+  hit <- unique(intersect(axis_rows, rows_shown))
+  if (!length(hit)) return(NULL)
+  paste0("Axis of a standardized refraction (", paste(hit, collapse = "; "), "): every axis in 0-179, an axis of ",
+         "180 written as 0 (std_axis_range = 0-179).")
+}
+
+# gee_rule: list(matched =, weighted =) - the footnote lines on how the GEE
+# columns, the adjusted columns and the clustered P values were fitted when an
+# option reproducing an earlier analysis changes them (gee_rule_foot, from
+# what the table holds); NULL adds none. axis_rows: the rows of standardized
+# axes, footnoted when std_axis_range = "0-179" (axis_rule_foot).
 make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_note = NULL,
-                                   va_decimal = character(0), weights_note = NULL, model_note = NULL) {
+                                   va_decimal = character(0), weights_note = NULL, model_note = NULL,
+                                   gee_rule = NULL, axis_rows = character(0)) {
   drop_cols <- c("Test", "Practical Interpretation")
   secs <- list()
   ne_why <- character(0); ne_row <- character(0)
-  nw_row <- character(0); sep_row <- character(0)
+  nw_row <- character(0); sep_row <- character(0); sep_kind <- character(0)
   t_lab <- character(0); t_row <- character(0)
   c_txt <- character(0); c_row <- character(0)
+  rows_shown <- character(0); has_gee <- FALSE; has_adj <- FALSE
   for (nm in names(sections)) {
     d <- sections[[nm]]
     if (is.null(d) || nrow(d) == 0) next
@@ -1484,6 +1534,11 @@ make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_
     rv <- attr(d, "row_var")
     if (length(rv) != nrow(d)) rv <- NULL
     d <- as.data.frame(d, check.names = FALSE, stringsAsFactors = FALSE)
+    # what the table holds, for the footnote lines of gee_rule / axis_rows
+    rows_shown <- c(rows_shown, if (!is.null(rv)) rv else if ("Parameter" %in% names(d)) strip_row_tags(d$Parameter))
+    filled <- function(cc) cc %in% names(d) && any(!is.na(d[[cc]]) & nzchar(as.character(d[[cc]])))
+    has_gee <- has_gee || filled("GEE effect (95% CI)")
+    has_adj <- has_adj || filled("Adjusted effect (95% CI)")
     interp <- if ("Practical Interpretation" %in% names(d))
       as.character(d[["Practical Interpretation"]]) else rep(NA_character_, nrow(d))
     ne <- grepl("^Not estimable", interp)
@@ -1506,9 +1561,17 @@ make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_
     sp <- rep(FALSE, nrow(d))
     for (cc in intersect(c("GEE effect (95% CI)", "GEE p value"), names(d)))
       sp <- sp | grepl(SEP_DAGGER, as.character(d[[cc]]), fixed = TRUE)
-    if (any(sp))
-      sep_row <- c(sep_row, if (!is.null(rv)) rv[sp] else if ("Parameter" %in% names(d)) d$Parameter[sp]
-                            else rep(nm, sum(sp)))
+    if (any(sp)) {
+      # each row's footnote by its reason (no events / only events), as its
+      # Interpretation states it (analysis.R merge_gee_into_summary_table;
+      # finding CR-5): one row can need both
+      nm_sp <- if (!is.null(rv)) rv[sp] else if ("Parameter" %in% names(d)) d$Parameter[sp] else rep(nm, sum(sp))
+      ip <- interp[sp]; ip[is.na(ip)] <- ""
+      only <- grepl(SEP_FOOT_ONLY, ip, fixed = TRUE)
+      none <- grepl(SEP_FOOT_NONE, ip, fixed = TRUE) | !only
+      sep_row <- c(sep_row, nm_sp[none], nm_sp[only])
+      sep_kind <- c(sep_kind, rep(SEP_FOOT_NONE, sum(none)), rep(SEP_FOOT_ONLY, sum(only)))
+    }
     # the few-patients caution of a row's P value or GEE column (D19, finding
     # S2-3): the Interpretation column is not in this sheet, so a footnote
     # names it with the rows it applies to
@@ -1585,9 +1648,10 @@ make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_
   foot <- character(0)
   if (length(nw_row))
     foot <- paste0(NE_WITHIN_FOOT, " (", paste(unique(nw_row), collapse = "; "), ").")
-  if (length(sep_row))
+  # one line per kind of separated row (finding CR-5)
+  for (sk in intersect(c(SEP_FOOT_NONE, SEP_FOOT_ONLY), sep_kind))
     foot <- c(foot, if (length(foot)) "",
-              paste0(SEP_DAGGER, " ", SEP_FOOT_NONE, " (", paste(unique(sep_row), collapse = "; "), ")."))
+              paste0(SEP_DAGGER, " ", sk, " (", paste(unique(sep_row[sep_kind == sk]), collapse = "; "), ")."))
   if (length(ne_why)) {
     if (length(foot)) foot <- c(foot, "")
     # one line per distinct reason, in order of first appearance
@@ -1608,6 +1672,15 @@ make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_
   # analysis changes it (an exchangeable working correlation on a matched
   # cohort, no refit to independence)
   if (length(model_note) && nzchar(model_note[1])) foot <- c(foot, if (length(foot)) "", model_note[1])
+  if (length(gee_rule)) {
+    ctests <- any(grepl("exchangeable working correlation", t_lab, fixed = TRUE) |
+                  grepl(GEE_INDEP_REFIT_HEAD, t_lab, fixed = TRUE))
+    gl <- gee_rule_foot(isTRUE(gee_rule$matched), isTRUE(gee_rule$weighted), gee_cols = has_gee,
+                        adj_cols = has_adj, ctests = ctests)
+    if (length(gl)) foot <- c(foot, if (length(foot)) "", gl)
+  }
+  al <- axis_rule_foot(rows_shown, axis_rows)
+  if (length(al)) foot <- c(foot, if (length(foot)) "", al)
   if (length(t_lab)) {
     # one line per test, in order of first appearance (decision D12)
     foot <- c(foot, if (length(foot)) "", "Tests behind the P values:",
@@ -1767,6 +1840,9 @@ PSM_BALANCE_WORDS_RAW <- c(Type = "Type",
                            M.Threshold = "Balanced (|difference| < 0.1)",
                            M.Threshold.Un = "Balanced before matching (|difference| < 0.1)")
 psm_balance_raw <- function() identical(repro_opt("smd_binary"), "raw")
+# the love plot's axis title then (finding CR-7): continuous covariates are
+# standardized, a binary one is the raw difference in proportions
+LOVEPLOT_RAW_XLAB <- "Mean differences (standardized; binary: raw)"
 psm_balance_words <- function(d) {
   words <- if (psm_balance_raw()) PSM_BALANCE_WORDS_RAW else PSM_BALANCE_WORDS
   if ("Type" %in% names(d))
@@ -2180,7 +2256,9 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
            `Preoperative / intraoperative` = preop_tbl,
            `Outcomes`                      = outcome_tbl), tests_note = tests_note,
       va_decimal = dn(vi$as_decimal),
-      model_note = if (gee_stage %in% c("unmatched", "both") && isTRUE(cfg$add_gee_columns)) gee_rule_foot(FALSE))
+      # the options reproducing an earlier analysis, footnoted from what the
+      # table holds (gee_rule_foot, axis_rule_foot; finding CR-3)
+      gee_rule = list(matched = FALSE), axis_rows = dn(res$std_axis_cols %||% character(0)))
 
   if (isTRUE(cfg$make_meyestro))
     optional_tab("mEYEstro tabs", make_meyestro_tabs(dat, wb, res$roles, pairing = NULL,
@@ -2356,6 +2434,11 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
         lp_plot <- tryCatch(do.call(cobalt::love.plot, lp_args) + ggplot2::labs(title = NULL) +
                               ggplot2::theme(plot.background = ggplot2::element_rect(fill = "white", colour = NA)),
                             error = function(e) { logger(paste0(lp_what, " not drawn: ", conditionMessage(e))); NULL })
+        # smd_binary = "raw": the axis title says what the points are - a
+        # binary covariate's point is its raw difference in proportions, not
+        # cobalt's "Standardized Mean Differences" (finding CR-7)
+        lp_xlab <- if (psm_balance_raw()) LOVEPLOT_RAW_XLAB else "Standardized Mean Differences"
+        if (!is.null(lp_plot) && psm_balance_raw()) lp_plot <- lp_plot + ggplot2::labs(x = lp_xlab)
         # journal style (D20): open L-shaped axes instead of cobalt's panel box
         if (!is.null(lp_plot) && exists("gr_journal_axes", mode = "function") &&
             isTRUE(gr_figure_settings(cfg, logger = NULL)$journal))
@@ -2403,7 +2486,7 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
                               if (!is.na(psm_score_scale(psm$distance)))
                                 paste0(psm_score_label(psm$distance), ": the ", psm_score_scale(psm$distance),
                                        ", on which the matching was done.")),
-                            texts = c(bal_shown, if (psm_balance_raw()) "Mean Differences" else "Standardized Mean Differences"),
+                            texts = c(bal_shown, lp_xlab),
                             cfg = cfg)
           }
         }
@@ -2585,8 +2668,8 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
                `Preoperative / intraoperative` = p_m,
                `Outcomes`                      = o_m), note = w_note, tests_note = tests_note,
           va_decimal = dn(vi$as_decimal), weights_note = w_foot,
-          model_note = if (gee_stage %in% c("matched", "both") && isTRUE(cfg$add_gee_columns))
-                         gee_rule_foot(TRUE, use_w && w_nonunit))
+          gee_rule = list(matched = TRUE, weighted = use_w && w_nonunit),
+          axis_rows = dn(res$std_axis_cols %||% character(0)))
 
       # the pairing's number names its export tabs ("AstigMATIC_M1_<group>")
       pair_no <- match(lab, vapply(pairings, function(q) as.character(q$label)[1], character(1)))
@@ -2937,8 +3020,15 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
                 (isTRUE(cfg$do_regression) && one(cfg$regression_stage, "unmatched") %in% c("matched", "both"))
     # weights not all 1 used in the matched GEE / regression: those models use
     # an independence working correlation (R4-1)
-    w_corstr <- if (!is.null(match_weights) && weights_nonunit(match_weights))
-      " (working correlation: independence (weighted))" else ""
+    # (matched_gee_corstr = "exchangeable": the matched GEE models are
+    # exchangeable, weighted; the matched regression stays independence -
+    # finding CR-4)
+    w_corstr <- if (!is.null(match_weights) && weights_nonunit(match_weights)) {
+      if (matched_gee_exchangeable())
+        paste0(" (working correlation: the matched GEE exchangeable (weighted; matched_gee_corstr = exchangeable), ",
+               "the matched regression independence (weighted))")
+      else " (working correlation: independence (weighted))"
+    } else ""
     # matched_table_weights = "none": the matched tables count every eye once
     # (analysis.R matched_table_weights_of)
     tbl_unw <- identical(matched_table_weights_of(cfg), "none")
@@ -3095,8 +3185,10 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
       c("GEE working correlation",
         paste0(if (identical(repro_opt("gee_refit"), "off"))
                  paste0("exchangeable, every fit that converged kept whatever its working correlation (gee_refit = ",
-                        "off) - one that did not converge refitted with an independence working correlation and ",
-                        "labeled so (sheets, tables, figures, run log); ")
+                        "off), without the working-correlation limit of ", get0("GEE_EXCH_ALPHA_MAX", ifnotfound = 0.95),
+                        " and without the scoring-step check - a fit the default rule would refit is labeled with ",
+                        "that rule's reason and counted in the run log; one that did not converge refitted with an ",
+                        "independence working correlation and labeled so (sheets, tables, figures, run log); ")
                else paste0("exchangeable, kept only if the fit converged, its working correlation is below ",
                get0("GEE_EXCH_ALPHA_MAX", ifnotfound = 0.95), " and one further scoring step moves no coefficient ",
                "by more than ", get0("GEE_EXCH_STEP_MAX", ifnotfound = 0.01), " SE - otherwise refitted with an ",
@@ -3110,8 +3202,10 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
                "by an independence GEE with the robust SE clustered by patient), never by an eye-level GEE",
                if (identical(repro_opt("separated_estimates"), "report"))
                  paste0("; an outcome with no events (or only events) in one group prints the estimate, CI and P ",
-                        "its model returns (geepack's default iterations, no refit), marked ", SEP_DAGGER, " - ",
-                        SEP_FOOT_NONE, " (separated_estimates = report)"))),
+                        "its model returns (geepack's default iterations, no refit), marked ", SEP_DAGGER,
+                        " as unreliable; its other comparisons, intercept and covariates come from the converged ",
+                        "model without that group, or are marked too when there is none (separated_estimates = ",
+                        "report)"))),
       # the options that reproduce an earlier analysis, when any is not at its
       # default (helpers.R REPRO_OPTIONS)
       if (length(repro_nondefault())) c("Reproduce an earlier analysis", repro_options_text()),

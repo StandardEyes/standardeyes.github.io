@@ -693,23 +693,34 @@ gee_control <- function() geepack::geese.control(epsilon = GEE_EPSILON, maxit = 
 #                       tables; decision D18 = independence). The clustered
 #                       table tests and the figure P values keep independence.
 #   gee_refit           "on" | "off": "off" keeps every exchangeable fit that
-#                       converged, whatever its working correlation (no
-#                       acceptance check, decision R3-4); a fit that did not
-#                       converge is still refitted with an independence
-#                       working correlation and labeled so. Every exchangeable
-#                       GEE of the run (models, clustered table tests, figure
-#                       P values).
+#                       converged, whatever its working correlation and
+#                       without the scoring-step check (no acceptance check,
+#                       decision R3-4); a fit so kept that the default rule
+#                       would refit is labeled with that rule's reason
+#                       (gee_kept_label) and counted in the run log. A fit that
+#                       did not converge is still refitted with an
+#                       independence working correlation and labeled so. Every
+#                       exchangeable GEE of the run (models, clustered table
+#                       tests, figure P values).
 #   separated_estimates "ne" | "report": a 0/1 outcome with no events (or only
 #                       events) in one group has no finite estimate. "ne"
 #                       reports the comparison as not estimable; "report"
 #                       prints the estimate, CI and P the model returns (the
 #                       GEE sheets and the tables' GEE columns), each marked
 #                       with SEP_DAGGER and the footnote "no events in one
-#                       group: estimate unreliable", and the run log counts
-#                       them. Such a model never converges: it is fitted with
+#                       group: estimate unreliable" ("only events ..." for a
+#                       group with only events), and the run log counts them.
+#                       Such a model never converges: it is fitted with
 #                       geepack's own default iterations (at most 25, a change
 #                       below 1e-4), as an earlier script ran it, so the
-#                       printed estimate is where those iterations stop.
+#                       printed estimate is where those iterations stop. Only
+#                       the comparisons of the groups with no events (or only
+#                       events) come from that fit; the other comparisons, the
+#                       intercept and the covariates come from the converged
+#                       model without those groups, as by default - and when
+#                       no such model exists (the reference is such a group, or
+#                       fewer than two groups would remain) every row of the
+#                       fit is marked.
 #   std_axis_range      "as_recorded" | "0-179": the axis of a standardized
 #                       refraction (the minus-cylinder conversion) - as
 #                       recorded (a transposed plus cylinder in 1-180), or
@@ -771,9 +782,10 @@ repro_nondefault <- function() {
 # each non-default option in words, for the run log and the Manifest
 REPRO_OPTION_WORDS <- c(
   matched_gee_corstr = "matched-cohort GEE models with an exchangeable working correlation",
-  gee_refit = "every converged exchangeable GEE kept, whatever its working correlation, with no refit to independence",
-  separated_estimates = paste0("an outcome with no events in one group prints the model's estimate, CI and P, ",
-                               "marked † as unreliable"),
+  gee_refit = paste0("every converged exchangeable GEE kept, whatever its working correlation and without the ",
+                     "scoring-step check, with no refit to independence"),
+  separated_estimates = paste0("an outcome with no events (or only events) in one group prints the model's ",
+                               "estimate, CI and P, marked † as unreliable"),
   std_axis_range = "the axis of a standardized refraction reduced to 0-179, so an axis of 180 reads 0",
   smd_binary = "the balance of a binary matching covariate as the raw difference in proportions")
 repro_options_text <- function() {
@@ -790,6 +802,15 @@ SEP_FOOT_ONLY <- "only events in one group: estimate unreliable"
 # and sheets read to mark its cells
 SEP_MODEL_TAG <- "separated_estimates = report"
 sep_foot_of <- function(reason) if (any(grepl("^only events", reason))) SEP_FOOT_ONLY else SEP_FOOT_NONE
+# The footnote(s) of the marked comparisons whose Model texts are `mdl`, in
+# order: SEP_FOOT_NONE and / or SEP_FOOT_ONLY, by the reason each names
+# (finding CR-5: a group with only events is never footnoted "no events")
+sep_foots_of_models <- function(mdl) {
+  mdl <- as.character(mdl); mdl <- mdl[!is.na(mdl) & grepl(SEP_MODEL_TAG, mdl, fixed = TRUE)]
+  if (!length(mdl)) return(character(0))
+  only <- grepl(paste0(SEP_MODEL_TAG, ": only events"), mdl, fixed = TRUE)
+  c(if (any(!only)) SEP_FOOT_NONE, if (any(only)) SEP_FOOT_ONLY)
+}
 # The outcomes so reported while one workbook is built, for the run log line
 .sep_rows <- new.env(parent = emptyenv())
 .sep_rows$vars <- character(0)
@@ -798,15 +819,18 @@ sep_report_take <- function() { v <- .sep_rows$vars; .sep_rows$vars <- character
 sep_report_log_text <- function(v, where) {
   if (!length(v)) return(NULL)
   sprintf(paste0("%s: %d outcome(s) with no events (or only events) in one group print the estimate, CI and P the ",
-                 "model returns (separated_estimates = report), each marked %s - %s: %s."),
-          where, length(v), SEP_DAGGER, SEP_FOOT_NONE, paste0("'", v, "'", collapse = ", "))
+                 "model returns (separated_estimates = report), each marked %s as unreliable: %s."),
+          where, length(v), SEP_DAGGER, paste0("'", v, "'", collapse = ", "))
 }
 # A number of a separated estimate as the tables print it: two decimals, or
-# two significant digits in scientific notation from 1e6 up (an odds ratio of
-# a separated fit can be 1e19)
+# two significant digits in scientific notation where two decimals would not
+# show its size - from 1e6 up (an odds ratio of a separated fit can be 1e19)
+# and below 0.005 (it can be 1e-19, which two decimals print as 0.00; finding
+# CR-8). Zero stays 0.00.
 fmt_sep_num <- function(x) {
   x <- suppressWarnings(as.numeric(x))
-  ifelse(!is.finite(x), "n/a", ifelse(abs(x) >= 1e6, formatC(x, format = "e", digits = 1), fmt_fix(x, 2)))
+  sci <- is.finite(x) & (abs(x) >= 1e6 | (x != 0 & abs(x) < 0.005))
+  ifelse(!is.finite(x), "n/a", ifelse(sci, formatC(x, format = "e", digits = 1), fmt_fix(x, 2)))
 }
 fmt_effect_sep <- function(kind, est, lo = NA_real_, hi = NA_real_) {
   sym <- ifelse(toupper(kind) == "OR", "OR", "β")
@@ -948,12 +972,18 @@ gee_fit_checked <- function(fit_fun, corstr = "exchangeable") {
     return(list(fit = f, corstr = corstr, refit = "", why = ""))
   }
   f1 <- fit_fun("exchangeable")
+  why <- gee_exch_reject(f1)
   # gee_refit = "off" (reproducing an earlier analysis): a converged
-  # exchangeable fit is kept whatever its working correlation; one that did
-  # not converge is refitted below, as always (it is never printed as
-  # converged)
-  why <- if (identical(repro_opt("gee_refit"), "off") && gee_converged(f1)) "" else gee_exch_reject(f1)
-  if (!nzchar(why)) return(list(fit = f1, corstr = "exchangeable", refit = "", why = ""))
+  # exchangeable fit is kept whatever its working correlation and without the
+  # scoring-step check; one that did not converge is refitted below, as always
+  # (it is never printed as converged). kept = the reason the default rule
+  # would refit it ("" when it accepts the fit), which the labels name
+  # (gee_kept_label) and the run log counts (gee_kept_note; finding CR-2)
+  if (nzchar(why) && identical(repro_opt("gee_refit"), "off") && gee_converged(f1)) {
+    gee_kept_note(why)
+    return(list(fit = f1, corstr = "exchangeable", refit = "", why = "", kept = why))
+  }
+  if (!nzchar(why)) return(list(fit = f1, corstr = "exchangeable", refit = "", why = "", kept = ""))
   f2 <- fit_fun("independence")
   # the reason names a constant outcome only when it is constant within every
   # patient (decision V12-2)
@@ -970,6 +1000,48 @@ gee_fit_checked <- function(fit_fun, corstr = "exchangeable") {
 # refit here; the pipeline and the figure pass log how many (and reset).
 gee_refit_note <- function(what) .gee_inf$refits <- c(.gee_inf$refits, what)
 gee_refit_take <- function() { r <- .gee_inf$refits %||% character(0); .gee_inf$refits <- character(0); r }
+
+# gee_refit = "off": the exchangeable fits kept although the default rule
+# would refit them (gee_fit_checked records the reason of each - models,
+# regressions, clustered table tests and figure P values); the pipeline and the
+# figure pass log how many, by reason (gee_kept_log_text), and reset.
+.gee_inf$kept <- character(0)
+gee_kept_note <- function(why) .gee_inf$kept <- c(.gee_inf$kept, as.character(why))
+gee_kept_take <- function() { r <- .gee_inf$kept %||% character(0); .gee_inf$kept <- character(0); r }
+# The label of such a fit (finding CR-2): the working correlation and the
+# reason the default rule gives, e.g. "exchangeable working correlation kept
+# with gee_refit = off (not accepted by the default rule: working correlation
+# 1.020 - 1 or more, not a valid correlation)" or "(...: unstable step)".
+# GEE_EXCH_KEPT_HEAD is the part every such label starts with.
+GEE_EXCH_KEPT_HEAD <- "exchangeable working correlation kept with gee_refit = off"
+gee_kept_reason_short <- function(why) {
+  s <- gee_refit_reason_short(why)
+  a <- suppressWarnings(as.numeric(sub("^working correlation ([-+0-9.eE]+).*$", "\\1", s)))
+  if (grepl("^working correlation [-+0-9.]", s) && is.finite(a) && a >= 1)
+    s <- paste0(s, " - 1 or more, not a valid correlation")
+  s
+}
+gee_kept_label <- function(why) {
+  s <- gee_kept_reason_short(why)
+  paste0(GEE_EXCH_KEPT_HEAD, " (not accepted by the default rule", if (nzchar(s)) paste0(": ", s), ")")
+}
+# The run-log line: "<where>: in 3 exchangeable GEE fit(s) kept with gee_refit
+# = off the default rule would have refitted with an independence working
+# correlation (working correlation 0.95 or more: 2 - of which 1 or more, not a
+# valid correlation: 1; unstable step: 1)."
+gee_kept_log_text <- function(where, reasons) {
+  reasons <- as.character(reasons)
+  if (!length(reasons)) return(NULL)
+  kd <- vapply(reasons, gee_refit_reason_kind, character(1), USE.NAMES = FALSE)
+  rs <- table(factor(kd, levels = unique(kd)))
+  a <- suppressWarnings(as.numeric(sub("^.*estimated working correlation ([-+0-9.eE]+).*$", "\\1", reasons)))
+  n_inv <- sum(grepl("estimated working correlation", reasons, fixed = TRUE) & is.finite(a) & a >= 1)
+  sprintf(paste0("%s: %d exchangeable GEE fit(s) kept with gee_refit = off although the default rule would refit ",
+                 "them with an independence working correlation (%s)%s; each is labeled so."),
+          where, length(reasons), paste(sprintf("%s: %d", names(rs), as.integer(rs)), collapse = ", "),
+          if (n_inv > 0) sprintf("; %d of them with a working correlation of 1 or more, which is not a valid correlation",
+                                 n_inv) else "")
+}
 # The kind of a refit's reason, for counting: "the outcome is constant within
 # patients" when it is (its working correlation of about 1 follows from it),
 # else "working correlation 0.95 or more", "did not converge", "unstable step"
@@ -1116,7 +1188,11 @@ gee_group_p <- function(x, g, id, kind = "continuous", event = NULL, w = NULL,
     return(NA_real_)
   }
   if (nzchar(fc$refit)) gee_refit_note(fc$refit)
-  tag <- function(p) if (nzchar(fc$refit)) structure(p, refit = fc$refit, corstr = fc$corstr) else p
+  # (gee_refit = "off": an exchangeable fit kept although the default rule
+  # would refit it carries that rule's reason, attr "kept", for the label)
+  tag <- function(p) if (nzchar(fc$refit)) structure(p, refit = fc$refit, corstr = fc$corstr)
+                     else if (nzchar(fc$kept %||% "")) structure(p, kept = fc$kept)
+                     else p
   if (isTRUE(each)) {
     if (!identical(levels(d$g)[1], glv[1])) return(na_why(paste0(glv[1], " has no data for this variable")))
     cn <- names(stats::coef(fit))

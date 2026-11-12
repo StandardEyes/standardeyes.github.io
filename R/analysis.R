@@ -281,6 +281,9 @@ collapse_patient_level <- function(df, pn, group_var, patient_id_clean,
   # an exchangeable fit that was not accepted: the independence refit is named
   # instead (R3-4)
   if (nzchar(as.character(attr(p, "refit") %||% "")[1])) wc <- gee_refit_label(attr(p, "refit"))
+  # gee_refit = "off": an exchangeable fit kept although the default rule
+  # would refit it is named with that rule's reason (finding CR-2)
+  else if (nzchar(as.character(attr(p, "kept") %||% "")[1])) wc <- gee_kept_label(attr(p, "kept"))
   lab <- paste0(base, if (isTRUE(per_patient)) paste0(", ", GEE_PER_PATIENT), ", ", wc, ", clustered by ",
                 if (identical(unit, "eye")) "eye" else "patient", " (", gee_se_label(q), ")")
   # a single group, a constant variable, "B has n = 1", a group of one
@@ -1664,8 +1667,26 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
                    else sb[intersect(names(sb), cmp_in)]
       }
     }
+    # Finding CR-1 of the se.12 review: only the comparisons of those groups
+    # come from the separated fit, on every group's rows (df_sep, fitted below
+    # with geepack's own iterations); the other comparisons, the intercept and
+    # the covariates come from the converged model without those groups,
+    # exactly as by default. sep_whole: no such model exists (the reference has
+    # no events or only events, or fewer than two groups would remain) - the
+    # separated fit is then the whole model, and every row of it is marked.
+    sep_whole <- FALSE
+    df_sep <- NULL
     if (grp_in) {
-      if (!length(sep_why)) un <- .drop_unestimable_groups(df2, outc, ref_g, bin)
+      un <- .drop_unestimable_groups(df2, outc, ref_g, bin)
+      if (length(sep_why)) {
+        if (nzchar(un$skip)) {
+          sep_whole <- TRUE
+          un <- list(df = df2, skip = "", out = character(0), n = integer(0), events = integer(0))
+        } else {
+          df_sep <- df2
+          sep_why <- sep_why[intersect(names(sep_why), names(un$out))]
+        }
+      }
       if (nzchar(un$skip %||% "")) {
         # no comparison of this outcome can be estimated: one row per
         # comparison (term GroupLabel<g>), so the summary and Publication
@@ -1734,6 +1755,92 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
     }
 
     f <- as.formula(paste0("`", outc, "` ~ ", paste(sprintf("`%s`", preds), collapse = " + ")))
+    # the Model text of an eye-level fit: its working correlation as fitted -
+    # independence on a matched or weighted cohort, an independence refit with
+    # its reason, matched_gee_corstr = "exchangeable", or exchangeable - and,
+    # with gee_refit = "off", the reason the default rule would refit a kept
+    # fit (finding CR-2)
+    model_txt_of <- function(refit = "", kept = "") {
+      head <- if (bin) "GEE Binomial" else "GEE Gaussian"
+      kept_txt <- if (nzchar(kept %||% "")) sub(paste0("^", GEE_EXCH_KEPT_HEAD, " "), "kept with gee_refit = off ",
+                                               gee_kept_label(kept)) else ""
+      if (w_ind && ind) paste0(head, ", working correlation: independence (weighted)")
+      else if (ind) paste0(head, ", working correlation: independence (matched cohort)")
+      else if (nzchar(refit)) paste0(head, ", ", gee_refit_label(refit))
+      # matched_gee_corstr = "exchangeable": a matched cohort's exchangeable
+      # fit, weighted or not
+      else if (exch_m) paste0(head, ", working correlation: exchangeable (", if (w_ind) "weighted, " else "",
+                              "matched cohort)", if (nzchar(kept_txt)) paste0(" - ", kept_txt))
+      else if (nzchar(kept_txt)) paste0(head, ", ", gee_kept_label(kept))
+      else paste0(head, " (exchangeable)")
+    }
+    # separated_estimates = "report": each separated comparison's effect text
+    # (two significant digits in scientific notation where two decimals would
+    # not show its size) and its Model cell, which names the reason and the
+    # marker that the tables and sheets read (SEP_MODEL_TAG); whole = TRUE (the
+    # separated fit is the whole model): its other rows - the intercept and the
+    # covariates - are marked as coming from that fit too (finding CR-1)
+    sep_mark <- function(t, whole = FALSE, conv = FALSE) {
+      for (gn in names(sep_why)) {
+        k <- !is.na(t$term) & t$term == paste0("GroupLabel", gn)
+        if (!any(k)) next
+        t$CI[k] <- paste0(fmt_effect_sep("OR", t$EffectValue[k], t$CI_low[k], t$CI_high[k]), SEP_DAGGER)
+        t$Model[k] <- paste0(t$Model[k], "; ", SEP_MODEL_TAG, ": ", sep_why[[gn]], " - ",
+                             sub("^[^:]*: ", "", sep_foot_of(sep_why[[gn]])), " ", SEP_DAGGER)
+      }
+      if (isTRUE(whole)) {
+        # (a row the backstop above blanked, "Skipped: unstable estimate", stays as it is)
+        o <- !is.na(t$term) & !(t$term %in% paste0("GroupLabel", names(sep_why))) & !is.na(t$Model) &
+          !grepl("Skipped: |Not estimable", t$Model)
+        o[is.na(o)] <- FALSE
+        if (any(o)) {
+          # an odds or odds ratio of that fit whose size two decimals would
+          # hide (0.00, or 1e6 and up) is printed as the separated
+          # comparisons are (fmt_effect_sep; finding CR-8)
+          tiny <- function(x) is.finite(x) & (abs(x) >= 1e6 | (x != 0 & abs(x) < 0.005))
+          rf <- o & !is.na(t$CI) & nzchar(t$CI) & t$Effect %in% c("OR", "Odds") &
+            (tiny(t$EffectValue) | tiny(t$CI_low) | tiny(t$CI_high))
+          rf[is.na(rf)] <- FALSE
+          if (any(rf))
+            t$CI[rf] <- paste0(ifelse(t$Effect[rf] == "Odds", "Odds", "OR"),
+                               sub("^OR", "", fmt_effect_sep("OR", t$EffectValue[rf], t$CI_low[rf], t$CI_high[rf])))
+          t$CI[o] <- ifelse(is.na(t$CI[o]) | !nzchar(t$CI[o]), t$CI[o], paste0(t$CI[o], SEP_DAGGER))
+          t$Model[o] <- paste0(t$Model[o], "; ", SEP_MODEL_TAG, ": ", paste(unique(sep_why), collapse = "; "),
+                               " - from the same fit, which ", if (conv) "converged but " else "did not converge; ",
+                               "estimate unreliable ", SEP_DAGGER)
+        }
+      }
+      t
+    }
+    # the separated fit: the model on `data` with the run's working
+    # correlation, geepack's own default iterations and the rows in the data's
+    # order (as an earlier script ran it; fit_gee data_order), never refitted
+    sep_fit <- function(data)
+      fit_gee(f, data, id_col, fam, use_weights, corstr = if (ind) "independence" else "exchangeable",
+              control = geepack::geese.control(), data_order = TRUE)
+    # separated_estimates = "report", groups left out of the model above (no
+    # events or only events): their comparisons come from the separated fit on
+    # every group's rows, printed and marked, in place of their "not
+    # estimable" rows; the model without them gives everything else (finding
+    # CR-1). A group of one patient keeps its "not estimable" row.
+    if (!is.null(df_sep) && length(sep_why)) {
+      fs <- sep_fit(df_sep)
+      ts <- if (!is.null(fs)) extract_gee_tidy(fs, fam, dn(outc), cs$unit) else NULL
+      if (!is.null(ts) && !nzchar(attr(ts, "why") %||% "")) {
+        one_sep <- .one_patient_groups(df_sep, id_col, cs$unit)
+        ts <- ts[!is.na(ts$term) & ts$term %in% paste0("GroupLabel", setdiff(names(sep_why), names(one_sep))), ,
+                 drop = FALSE]
+        if (nrow(ts)) {
+          adj_s <- setdiff(preds, "GroupLabel")
+          ts$Model <- paste0(paste(setdiff(notes, .left_out_note(un$out)), collapse = ""), model_txt_of(), cl_note)
+          ts$Covariates <- if (length(adj_s)) paste(dn(adj_s), collapse = ", ") else "none"
+          ts$Note <- NA_character_
+          ts <- sep_mark(ts)
+          left_out <- dplyr::bind_rows(ts, if (!is.null(left_out)) left_out[!(left_out$term %in% ts$term), , drop = FALSE])
+          sep_report_add(cn(outc))
+        }
+      }
+    }
     # one minimum-data rule for every clustered model (R4-10): the eyes and
     # patients actually in this model, and its coefficients
     n_par <- tryCatch(ncol(stats::model.matrix(f, df2)), error = function(e) NA_integer_)
@@ -1761,16 +1868,14 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
       model_txt <- .per_patient_label(pp, bin, display_names)
     } else {
       # an exchangeable fit only when it is accepted, else independence (R3-4)
-      fc <- if (length(sep_why)) {
-        # separated_estimates = "report": the model has no finite estimate and
-        # never converges - fitted once with the run's working correlation,
-        # geepack's own default iterations and the rows in the data's order (as
-        # an earlier script ran it; fit_gee data_order), no refit; its
-        # separated comparisons are marked below
-        cs_sep <- if (ind) "independence" else "exchangeable"
-        f_sep <- fit_gee(f, df2, id_col, fam, use_weights, corstr = cs_sep, control = geepack::geese.control(),
-                         data_order = TRUE)
-        list(fit = f_sep, corstr = cs_sep, refit = "", why = if (is.null(f_sep)) "the model could not be fitted" else "")
+      fc <- if (sep_whole) {
+        # separated_estimates = "report" and no model without the separated
+        # groups (sep_whole, above): the model has no finite estimate and never
+        # converges - the separated fit (sep_fit), no refit; every row of it is
+        # marked below
+        f_sep <- sep_fit(df2)
+        list(fit = f_sep, corstr = if (ind) "independence" else "exchangeable", refit = "", kept = "",
+             why = if (is.null(f_sep)) "the model could not be fitted" else "")
       } else gee_fit_checked(function(cs_) fit_gee(f, df2, id_col, fam, use_weights, corstr = cs_),
                              if (ind) "independence" else "exchangeable")
       fit <- fc$fit
@@ -1798,18 +1903,7 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
                                              left_out, empty_rows)
         next
       }
-      model_txt <- if (w_ind && ind) paste0(if (bin) "GEE Binomial" else "GEE Gaussian",
-                                            ", working correlation: independence (weighted)")
-                   else if (ind) paste0(if (bin) "GEE Binomial" else "GEE Gaussian",
-                                        ", working correlation: independence (matched cohort)")
-                   else if (nzchar(fc$refit)) paste0(if (bin) "GEE Binomial" else "GEE Gaussian", ", ",
-                                                     gee_refit_label(fc$refit))
-                   # matched_gee_corstr = "exchangeable": a matched cohort's
-                   # exchangeable fit, weighted or not
-                   else if (exch_m) paste0(if (bin) "GEE Binomial" else "GEE Gaussian",
-                                           ", working correlation: exchangeable (",
-                                           if (w_ind) "weighted, " else "", "matched cohort)")
-                   else if (bin) "GEE Binomial (exchangeable)" else "GEE Gaussian (exchangeable)"
+      model_txt <- model_txt_of(fc$refit, fc$kept %||% "")
     }
     # covariate levels held by one patient: estimate only (extract_gee_tidy)
     lone <- setdiff(attr(t, "lone") %||% character(0), paste0("GroupLabel", names(one_pt)))
@@ -1841,17 +1935,13 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
         t$CI[bad] <- NA_character_
         t$Model[bad] <- paste0(note, "Skipped: unstable estimate (quasi-separation) - effect not reported")
       }
-      # each separated comparison: its effect text (two significant digits in
-      # scientific notation from 1e6 up), and its Model cell names the reason
-      # and the marker, which the tables and sheets read (SEP_MODEL_TAG)
-      for (gn in names(sep_why)) {
-        k <- !is.na(t$term) & t$term == paste0("GroupLabel", gn)
-        if (!any(k)) next
-        t$CI[k] <- paste0(fmt_effect_sep("OR", t$EffectValue[k], t$CI_low[k], t$CI_high[k]), SEP_DAGGER)
-        t$Model[k] <- paste0(t$Model[k], "; ", SEP_MODEL_TAG, ": ", sep_why[[gn]], " - ",
-                             sub("^[^:]*: ", "", sep_foot_of(sep_why[[gn]])), " ", SEP_DAGGER)
+      # the separated fit as the whole model (sep_whole): every comparison
+      # marked with its reason, and its intercept and covariates as coming
+      # from that fit (sep_mark; finding CR-1)
+      if (sep_whole) {
+        t <- sep_mark(t, whole = TRUE, conv = gee_converged(fit))
+        sep_report_add(cn(outc))
       }
-      if (length(sep_why)) sep_report_add(cn(outc))
     }
     t$Note <- NA_character_
     k_lone <- !is.na(t$term) & t$term %in% lone & is.finite(t$EffectValue)
@@ -2015,6 +2105,9 @@ build_gee_lookup <- function(gee_df, group_term) {
   # a comparison of an outcome with no events in one group, printed as the
   # model returns it (separated_estimates = "report"): both cells marked
   rows$.sep <- grepl(SEP_MODEL_TAG, mdl, fixed = TRUE)
+  # its footnote by its reason: no events, or only events (finding CR-5)
+  rows$gee_sep_foot <- vapply(mdl, function(m) paste(sep_foots_of_models(m), collapse = "; "), character(1),
+                              USE.NAMES = FALSE)
   rows <- rows %>%
     dplyr::mutate(
       # one effect style for every table (D24): "β = -9.98 (95% CI, -29.04
@@ -2040,9 +2133,12 @@ build_gee_lookup <- function(gee_df, group_term) {
                                           else paste0(.cmp, ": ", gee_effect_label, collapse = "\n"),
                        gee_p_label = if (all(.ne_w)) NE_TEXT else paste0(.cmp, ": ", gee_p_label, collapse = "\n"),
                        gee_caution = paste(unique(gee_caution[nzchar(gee_caution)]), collapse = "; "),
+                       gee_sep_foot = paste(intersect(c(SEP_FOOT_NONE, SEP_FOOT_ONLY),
+                                                      unlist(strsplit(gee_sep_foot, "; ", fixed = TRUE))),
+                                            collapse = "; "),
                        .groups = "drop")
   }
-  rows %>% dplyr::select(Outcome, gee_effect_label, gee_p_label, gee_caution)
+  rows %>% dplyr::select(Outcome, gee_effect_label, gee_p_label, gee_caution, gee_sep_foot)
 }
 
 # Summary-table rows that belong to a variable (helpers.R row_label): "X",
@@ -2097,11 +2193,16 @@ merge_gee_into_summary_table <- function(summary_tbl, gee_lookup) {
       # the dagger of its GEE cells means
       if (grepl(SEP_DAGGER, as.character(gee_lookup$gee_effect_label[i]), fixed = TRUE) &&
           "Practical Interpretation" %in% names(out)) {
-        pin <- as.character(out[["Practical Interpretation"]][hit])
-        pin[is.na(pin)] <- ""
-        k <- !grepl(SEP_FOOT_NONE, pin, fixed = TRUE)
-        if (any(k)) out[hit[k], "Practical Interpretation"] <-
-          trimws(paste0(pin[k], " GEE column: ", SEP_DAGGER, " ", SEP_FOOT_NONE, "."))
+        # (no events, or only events, in a group: its own words, finding CR-5)
+        sf <- if ("gee_sep_foot" %in% names(gee_lookup)) as.character(gee_lookup$gee_sep_foot[i]) else ""
+        sf <- unlist(strsplit(if (is.na(sf) || !nzchar(sf)) SEP_FOOT_NONE else sf, "; ", fixed = TRUE))
+        for (ft in sf) {
+          pin <- as.character(out[["Practical Interpretation"]][hit])
+          pin[is.na(pin)] <- ""
+          k <- !grepl(ft, pin, fixed = TRUE)
+          if (any(k)) out[hit[k], "Practical Interpretation"] <-
+            trimws(paste0(pin[k], " GEE column: ", SEP_DAGGER, " ", ft, "."))
+        }
       }
     }
   }
@@ -2422,6 +2523,9 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
                             if (w_ind) ", working correlation: independence (weighted)"
                             else if (ind) ", working correlation: independence (matched cohort)"
                             else if (nzchar(fc$refit)) paste0(", ", m_note)
+                            # gee_refit = "off": a kept fit the default rule
+                            # would refit names that rule's reason (CR-2)
+                            else if (nzchar(fc$kept %||% "")) paste0(", ", gee_kept_label(fc$kept))
                             # an accepted exchangeable fit is named too (R3-4, T1-04)
                             else ", working correlation: exchangeable")
     # covariate levels held by one patient: estimate only (extract_gee_tidy)
@@ -2444,6 +2548,8 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
       fit_c <- fcc$fit
       if (nzchar(fcc$refit) && !is.null(fit_c))
         note <- .join_note(note, paste0("crude model: ", gee_refit_label(fcc$refit)))
+      else if (nzchar(fcc$kept %||% "") && !is.null(fit_c))
+        note <- .join_note(note, paste0("crude model: ", gee_kept_label(fcc$kept)))
       if (!is.null(fit_c)) {
         tcr <- extract_gee_tidy(fit_c, fam_r, dn(outc), cs$unit)
         if (nzchar(attr(tcr, "why") %||% "")) tcr <- NULL

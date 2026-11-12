@@ -65,7 +65,7 @@
     <div class="dl">
       <div class="main">
         <h2>StandardEyes 1.2.0 for Windows</h2>
-        <p>The complete app: the interface, the statistical engine, the example data and the user manual.</p>
+        <p>The complete app: the interface, the statistical analysis in R, the example data and the user manual.</p>
         <div class="cta" style="margin-top:22px">
           <a class="btn lg light" href="https://github.com/StandardEyes/standardeyes.github.io/releases/latest/download/StandardEyes-windows.zip">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg>
@@ -80,7 +80,7 @@
           <dt>System</dt><dd>Windows 10 or 11, 64-bit</dd>
           <dt>Also needs</dt><dd><a href="https://cran.r-project.org/bin/windows/base/old/4.5.2/">R 4.5.2 for Windows</a></dd>
           <dt>Disk space</dt><dd>About 250 MB after extracting</dd>
-          <dt>SHA-256</dt><dd><span class="hash" id="sha">d0aa40de39500e4025eb8366c541f9c5131305f364ad514a50c93b26085efdce</span><br><button class="btn sm ghost" data-copy="#sha" style="margin-top:8px">Copy checksum</button></dd>
+          <dt>SHA-256</dt><dd><span class="hash" id="sha">fb2baf708ea74eb3b7ad688c859d8b797859710d4669dcfb3eb210966450626f</span><br><button class="btn sm ghost" data-copy="#sha" style="margin-top:8px">Copy checksum</button></dd>
         </dl>
         <p class="fine" style="margin:16px 0 0"><a href="#new">What is new in 1.2.0</a> · <a href="https://github.com/StandardEyes/standardeyes.github.io/releases">All releases and release notes</a> · <a href="https://github.com/StandardEyes/standardeyes.github.io">Source code</a></p>
       </div>
@@ -108,7 +108,10 @@
         <tr><td><strong>NE when a variable does not vary within the groups.</strong> A variable that is constant within each group but differs between them (one optical zone per platform) leaves nothing to estimate: its GEE and adjusted comparisons print NE (not estimable) instead of β = 0.00 (95% CI, 0.00 to 0.00) and P &lt; .001, and so does a table test that needs a within-group variance. A rank test or the permutation test keeps its P value. With three or more groups only the comparisons concerned are NE, and they stay out of the Holm adjustment.</td><td>No switch; the run log names the rows.</td></tr>
         <tr><td><strong>Matched tables without the weights (option).</strong> The matched descriptives and table tests can count every matched eye once. This needs nearest-neighbor matching without replacement; with other methods the weights are the matching itself, and the run is refused.</td><td>Matching tab, <b>Matched tables</b> = unweighted (<code>matched_table_weights: "none"</code>; the default keeps the weights, as in 1.1.0).</td></tr>
         <tr><td><strong>An enlarged centroid panel beside every double-angle plot.</strong> At print size the 95% confidence region of a centroid is often smaller than its marker, so a small panel shows each cohort's centroid and its region enlarged, on the plot's own axes. No number changes.</td><td>Special outputs tab, <b>Enlarged centroid panels</b> (<code>astig_centroid_panels</code>; on by default).</td></tr>
-        <tr><td><strong>Reference lines are never a group color.</strong> The y = x line and the zero line are black. The ±0.50 D and ±1.00 D lines stay green and magenta unless a group is drawn in a color close to them; then they take another color, and the legend file names it.</td><td>No switch.</td></tr>
+        <tr><td><strong>Reference lines are never a group color, and they have their own patterns.</strong> The y = x line and the zero line are black. The ±0.50 D and ±1.00 D lines stay green and magenta unless a group is drawn in a color close to them; then they take another color. They are also long-dashed (±0.50 D) and dot-dashed (±1.00 D), so a reader with a color-vision deficiency can tell them apart. The legend file names each line's color and pattern.</td><td>No switch.</td></tr>
+        <tr><td><strong>Color-blind-safe example colors.</strong> The seven example settings files and presets draw their groups in Okabe-Ito colors (blue, orange, vermillion, sky blue, reddish purple), which stay distinct under the common color-vision deficiencies. The app's own default colors are unchanged.</td><td>Data &amp; Groups tab, the color of each group.</td></tr>
+        <tr><td><strong>Options to reproduce an earlier analysis (advanced).</strong> Five rules an earlier analysis script may have used, to repeat its numbers exactly: the working correlation of the matched GEE models, keeping every converged exchangeable GEE instead of refitting it, printing the model's estimate (marked † as unreliable) for an outcome with no events in one group, writing an axis of 180 as 0 in the converted refraction, and the raw difference in proportions as the balance of a binary matching covariate. Each default keeps the 1.1.0 rule, so a settings file without them runs as before. The Manifest and the run log name every changed rule, and the footnotes, sheet notes and figure legends state it where it changes what they show.</td><td>GEE tab, the collapsed section <b>Reproduce an earlier analysis (advanced)</b> (<code>matched_gee_corstr</code>, <code>gee_refit</code>, <code>separated_estimates</code>, <code>std_axis_range</code>, <code>smd_binary</code>). Keep the defaults for a new analysis.</td></tr>
+        <tr><td><strong>An R version notice.</strong> The R packages bundled with the app were built for R 4.5.x. With another R, the app shows a notice with the address of R 4.5.2 for Windows, and so do the console window, the R setup screen and the run log. The analysis still runs.</td><td>The top of the app, when the R in use is not 4.5.x.</td></tr>
         <tr><td><strong>The sheet viewer wraps long cells</strong>, so every group column of a Publication Table stays in view, and a sheet opens as the workbook holds it.</td><td>Run &amp; Results tab, any sheet name.</td></tr>
       </tbody>
     </table></div>
@@ -170,7 +173,7 @@
       <div class="card">
         <h3>What is in the download</h3>
         <ul style="margin:8px 0 0; padding-left:20px">
-          <li>The app and its statistical engine (R code you can read).</li>
+          <li>The app and its statistical analysis (R code you can read).</li>
           <li>A private Python runtime for the interface, and the 48 R packages the analysis uses. Nothing is installed into Windows and nothing is downloaded later.</li>
           <li>The simulated <a href="examples.html">example datasets</a> with seven worked studies, and the generators that wrote them (<code>validation</code> folder).</li>
           <li>The user manual and the license texts of every bundled component.</li>

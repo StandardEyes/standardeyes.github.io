@@ -1,41 +1,44 @@
 WEBVTT
 
-00:00:00.676 --> 00:00:04.591
+00:00:00.620 --> 00:00:04.535
 Tutorial four. Matching, regression and GEE.
 
-00:00:10.989 --> 00:00:20.198
+00:00:10.868 --> 00:00:20.077
 Propensity-score matching makes the groups comparable. Choose the covariates to match on. The method, the ratio and the caliper are all yours to set.
 
-00:00:20.425 --> 00:00:28.381
+00:00:20.281 --> 00:00:28.237
 You can match eyes, or patients. Here patients are matched, so both eyes of a patient enter or leave the matched cohort together.
 
-00:00:28.636 --> 00:00:40.260
+00:00:28.441 --> 00:00:40.065
 By default the propensity score is matched on the logit scale, so the caliper is zero point two standard deviations of the logit of the score. The probability scale is still available.
 
-00:00:40.465 --> 00:00:50.510
+00:00:40.227 --> 00:00:50.272
 The matched tables use the matching weights by default. They can also count every matched eye once, an option offered only for nearest-neighbor matching without replacement.
 
-00:00:50.738 --> 00:00:58.276
+00:00:50.444 --> 00:00:57.982
 A live preview runs the real matching on your settings. You see how many patients each group keeps, before you commit to a run.
 
-00:01:01.667 --> 00:01:11.109
+00:01:01.351 --> 00:01:10.792
 The regression tab adds a covariate-adjusted model for every outcome. The adjusted effect is written beside the crude estimate, fitted on the same eyes.
 
-00:01:14.560 --> 00:01:21.773
+00:01:14.170 --> 00:01:21.382
 GEE models are clustered on the patient, so two eyes of one person are never counted as independent evidence.
 
-00:01:21.994 --> 00:01:29.300
+00:01:21.566 --> 00:01:28.871
 Every GEE test and interval uses the Mancl-DeRouen small-sample correction, with a t reference.
 
-00:01:29.553 --> 00:01:41.038
+00:01:29.062 --> 00:01:40.547
 The summary tables are clustered too. When a patient has two analyzed eyes, the P value of each row comes from a patient-clustered GEE, the same P value its figure prints.
 
-00:01:41.253 --> 00:01:47.397
+00:01:40.737 --> 00:01:46.881
 P values are printed in journal style, with two decimals, or three below point zero one.
 
-00:01:47.625 --> 00:01:52.980
+00:01:47.080 --> 00:01:52.435
 The GEE effect and its P value can be added as columns to the summary tables.
 
-00:01:53.776 --> 00:01:58.249
+00:01:52.637 --> 00:02:03.936
+At the end of the tab, an advanced section holds five rules that an earlier analysis script may have used, so that its numbers can be repeated exactly. For a new analysis, keep the defaults.
+
+00:02:04.829 --> 00:02:09.302
 StandardEyes. For ophthalmologists, by ophthalmologists.
 

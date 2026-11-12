@@ -85,8 +85,8 @@
   },
   "reference_group": "PRK",
   "group_colors": {
-    "PRK": "#5B2C86",
-    "LASIK": "#F26522"
+    "PRK": "#0072B2",
+    "LASIK": "#E69F00"
   },
   "group_labels": {},
   "do_matching": false,

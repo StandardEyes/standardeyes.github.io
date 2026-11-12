@@ -76,8 +76,8 @@
   },
   "reference_group": "Center 1",
   "group_colors": {
-    "Center 1": "#1F5FA8",
-    "Center 2": "#D1495B"
+    "Center 1": "#0072B2",
+    "Center 2": "#D55E00"
   },
   "group_labels": {},
   "do_matching": false,

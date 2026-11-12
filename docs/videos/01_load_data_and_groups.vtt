@@ -1,32 +1,32 @@
 WEBVTT
 
-00:00:00.669 --> 00:00:04.398
+00:00:00.705 --> 00:00:04.434
 Tutorial one. Load your data and define the groups.
 
-00:00:05.526 --> 00:00:10.696
+00:00:05.487 --> 00:00:10.656
 Start by loading your Excel file. You can browse for it, or paste its full path.
 
-00:00:12.882 --> 00:00:19.120
+00:00:13.104 --> 00:00:19.341
 The file is read straight from your disk. Nothing is uploaded. The app runs entirely on this computer.
 
-00:00:19.390 --> 00:00:31.664
+00:00:19.632 --> 00:00:31.907
 This is simulated dataset A, one of five that come with the app. It has one row for each eye, treated by PRK or LASIK. Its README sheet gives the model that generated the data.
 
-00:00:31.917 --> 00:00:37.318
+00:00:32.193 --> 00:00:37.595
 An example study is one click away. A preset holds every setting of one study.
 
-00:00:40.064 --> 00:00:46.394
+00:00:40.377 --> 00:00:46.707
 Tell the app which columns identify the patient and the eye, and which column defines the groups you want to compare.
 
-00:00:46.667 --> 00:01:00.566
+00:00:46.982 --> 00:01:00.882
 Name each group, and tick the values that belong to it. Here the groups are PRK and LASIK, with PRK as the reference. You can define two groups or more, and every comparison is made against the reference group.
 
-00:01:00.811 --> 00:01:05.934
+00:01:01.165 --> 00:01:06.287
 Live counts update as you work: the rows in the analysis, and the rows in each group.
 
-00:01:06.212 --> 00:01:13.518
+00:01:06.526 --> 00:01:13.831
 Save your own study as a preset. Reload it later, or send it to a colleague, and the analysis is reproduced exactly.
 
-00:01:14.341 --> 00:01:18.814
+00:01:14.693 --> 00:01:19.166
 StandardEyes. For ophthalmologists, by ophthalmologists.
 

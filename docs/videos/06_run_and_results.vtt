@@ -1,41 +1,41 @@
 WEBVTT
 
-00:00:00.705 --> 00:00:03.878
+00:00:00.685 --> 00:00:03.857
 Tutorial six. Run, preview and save.
 
-00:00:08.204 --> 00:00:16.253
+00:00:08.178 --> 00:00:16.226
 Before you run, the Run tab lists how the numbers will be computed and shown. The workbook's Manifest sheet records the same settings.
 
-00:00:16.519 --> 00:00:21.084
+00:00:16.526 --> 00:00:21.091
 Tick Preview only, if you want to look at the results before anything is saved.
 
-00:00:23.794 --> 00:00:30.681
+00:00:23.816 --> 00:00:30.703
 Press Run. The log lists every step as it happens: filters, conversions, tests and figures.
 
-00:00:30.925 --> 00:00:35.166
+00:00:30.983 --> 00:00:35.223
 A full run takes a minute or two. It is shown here speeded up.
 
-00:00:35.415 --> 00:00:38.122
+00:00:35.687 --> 00:00:38.395
 Done. The workbook and the figures are ready.
 
-00:00:38.425 --> 00:00:45.405
+00:00:38.609 --> 00:00:45.589
 Previews of the figures appear in the app. Each figure is also written as its own file, with a legend file beside it.
 
-00:00:46.129 --> 00:00:50.044
+00:00:46.380 --> 00:00:50.296
 Here is the combined figure, with every panel and every group.
 
-00:00:51.174 --> 00:00:58.433
+00:00:51.456 --> 00:00:58.715
 And the double-angle plots of the preoperative astigmatism, the surgically induced astigmatism and the prediction error.
 
-00:00:59.294 --> 00:01:02.791
+00:00:59.469 --> 00:01:02.966
 You can open any sheet of the workbook without leaving the app.
 
-00:01:05.305 --> 00:01:15.908
+00:01:05.603 --> 00:01:16.206
 This is the publication table, exactly as it is written to Excel. Each variable carries its printed label, and long cells wrap, so every group column stays in view.
 
-00:01:16.169 --> 00:01:22.220
+00:01:16.418 --> 00:01:22.469
 When you are happy with the results, save everything to your output folder, or only the files you want.
 
-00:01:23.025 --> 00:01:27.497
+00:01:23.261 --> 00:01:27.734
 StandardEyes. For ophthalmologists, by ophthalmologists.
 

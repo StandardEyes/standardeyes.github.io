@@ -1,23 +1,23 @@
 WEBVTT
 
-00:00:00.684 --> 00:00:04.134
+00:00:00.617 --> 00:00:04.068
 Tutorial three. Inclusion rules and subsets.
 
-00:00:08.495 --> 00:00:17.054
+00:00:08.336 --> 00:00:16.896
 Build your inclusion criteria as rules. Each rule has a column, an operator and a value. Add as many as your protocol needs.
 
-00:00:17.315 --> 00:00:25.410
+00:00:17.053 --> 00:00:25.148
 Each rule shows how many rows remain, and how many each group lost. It is a live version of the participant flow diagram.
 
-00:00:25.672 --> 00:00:28.844
+00:00:25.441 --> 00:00:28.613
 The group counts in the sidebar follow every change.
 
-00:00:29.109 --> 00:00:37.250
+00:00:28.828 --> 00:00:36.970
 Subsets run a complete analysis for each value of a column. For example, one preset can give a full analysis for each center.
 
-00:00:37.466 --> 00:00:45.514
+00:00:37.140 --> 00:00:45.188
 Preview the rows that will be analyzed. You can export them as a CSV file, with the group of each row, to keep with the manuscript.
 
-00:00:46.300 --> 00:00:50.773
+00:00:46.060 --> 00:00:50.533
 StandardEyes. For ophthalmologists, by ophthalmologists.
 

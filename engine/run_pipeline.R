@@ -62,7 +62,7 @@ if (dir.exists(bundled_lib)) {
   rv <- paste(R.version$major, strsplit(R.version$minor, ".", fixed = TRUE)[[1]][1], sep = ".")
   if (!identical(rv, "4.5"))
     emit("LOG NOTE: bundled packages were built for R 4.5.x but this is R ", rv,
-         ". If the analysis fails, install R 4.5.x.")
+         ". If the analysis fails, install R 4.5.2 for Windows: https://cran.r-project.org/bin/windows/base/old/4.5.2/")
 }
 
 # ---- Args ----

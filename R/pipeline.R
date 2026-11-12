@@ -1089,6 +1089,12 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
                   "tables use the matching weights. Unweighted matched tables need nearest-neighbor matching ",
                   "without replacement."))
   if (isTRUE(cfg$do_matching)) logger(paste0("Matched tables: ", matched_table_weights_text(cfg), "."))
+  # the options that reproduce an earlier analysis (helpers.R
+  # set_repro_options): read once, an unknown value named and its default
+  # used; the run log names the ones that are not at their default
+  set_repro_options(cfg, logger)
+  if (length(repro_nondefault()))
+    logger(paste0("Reproduce an earlier analysis: ", repro_options_text(), "."))
 
   # matching on, but none of its covariates is in the file: said once, here
   # (the Manifest records the skip); export.R builds no matched cohort then
@@ -1151,7 +1157,7 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
                else paste0("Standardization: no ", f, " column set for the triple '",
                            paste(nm[nzchar(trimws(nm))], collapse = " / "), "'."))
       dat <- standardize_minus_cyl(dat, cl[["sphere"]], cl[["cylinder"]], cl[["axis"]], logger,
-                                   display_names = disp_map)
+                                   display_names = disp_map, axis_range = repro_opt("std_axis_range"))
       # the columns now holding minus-cylinder values, for the exported data's
       # headers (suffix "_minus_cyl", T1-07)
       res$std_minus_cols <- unique(c(res$std_minus_cols, unname(cl[!is.na(cl)])))
@@ -1381,8 +1387,12 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
 
     # the run (label + subset values) is recorded in the workbook's Manifest
     invisible(gee_refit_take()); invisible(.gee_fallback_take()); invisible(.pp_cross_take())
-    invisible(ne_within_take())
+    invisible(ne_within_take()); invisible(sep_report_take())
     built <- build_workbook_for_data(dat_run, cfg, res, logger, loveplot_dir = output_dir, run = run)
+    # outcomes with no events in one group printed with their estimate
+    # (separated_estimates = report; helpers.R)
+    sep_x <- sep_report_log_text(sep_report_take(), paste0("Workbook of run '", run$label, "'"))
+    if (!is.null(sep_x)) logger(sep_x)
     # per-patient table rows tested clustered (a patient has eyes in two groups)
     pp_x <- pp_cross_log_text(.pp_cross_take(), paste0("Workbook of run '", run$label, "'"))
     if (!is.null(pp_x)) logger(pp_x)

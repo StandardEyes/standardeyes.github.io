@@ -1325,6 +1325,10 @@ def run(req: RunReq, request: Request):
     async def event_stream():
         try:
             yield _sse({"type": "log", "message": f"Using Rscript: {rscript}"})
+            # R not 4.5.x: said, never blocking the run
+            r_note = rrunner.r_version_notice(rscript)
+            if r_note:
+                yield _sse({"type": "log", "message": "WARNING: " + r_note})
             for n in notes:
                 yield _sse({"type": "log", "message": "Note: " + n})
             async for ev in rrunner.stream_pipeline(rscript, WRAPPER, cfg_path, APP_ROOT,
@@ -1776,7 +1780,11 @@ def r_setup():
     info = ""
     if cur:
         _, info = rrunner.validate_rscript(cur)
+    # a non-blocking notice when the R in use is not 4.5.x (the version the
+    # bundled packages were built for), with where to get R 4.5.2
     return {"rscript": cur, "info": info,
+            "version": rrunner.r_version(cur), "notice": rrunner.r_version_notice(cur),
+            "r45_url": rrunner.R_45_URL,
             "saved": rrunner.load_settings().get("rscript_path"),
             "candidates": rrunner.discover_r_installs(),
             "bundled_lib": os.path.isdir(os.path.join(APP_ROOT, "runtime", "Rlib"))}

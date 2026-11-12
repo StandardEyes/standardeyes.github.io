@@ -79,8 +79,8 @@
   },
   "reference_group": "Control",
   "group_colors": {
-    "Control": "#5B2C86",
-    "Condition": "#F26522"
+    "Control": "#0072B2",
+    "Condition": "#D55E00"
   },
   "group_labels": {},
   "do_matching": true,

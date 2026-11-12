@@ -64,6 +64,15 @@ DEFAULTS: dict[str, Any] = {
     # (the 1.1.0 rule); "none" = every matched eye counts once. The matched
     # GEE / regression follow use_matching_weights_in_gee
     "matched_table_weights": "weights",
+    # options to reproduce an earlier analysis (R/helpers.R REPRO_OPTIONS; the
+    # interface's collapsed section "Reproduce an earlier analysis
+    # (advanced)"): the first value of each REPRO_CHOICES entry is the default,
+    # the StandardEyes rule
+    "matched_gee_corstr": "independence",
+    "gee_refit": "on",
+    "separated_estimates": "ne",
+    "std_axis_range": "as_recorded",
+    "smd_binary": "standardized",
     "run_gee_stage": "matched",
     # small-sample inference of every GEE test and interval (decision D11):
     # "md" = Mancl-DeRouen bias-corrected robust SE with a t reference (F for
@@ -416,6 +425,45 @@ PSM_UNITS = ("eye", "patient")
 _PSM_UNIT_ALIASES = {"eyes": "eye", "patients": "patient"}
 # the matched tables' weighting (R/analysis.R MATCHED_TABLE_WEIGHTS)
 MATCHED_TABLE_WEIGHTS = ("weights", "none")
+# the options that reproduce an earlier analysis (R/helpers.R REPRO_OPTIONS),
+# default first, with the words the engine reads as each value (repro_norm)
+REPRO_CHOICES = {
+    "matched_gee_corstr": ("independence", "exchangeable"),
+    "gee_refit": ("on", "off"),
+    "separated_estimates": ("ne", "report"),
+    "std_axis_range": ("as_recorded", "0-179"),
+    "smd_binary": ("standardized", "raw"),
+}
+_REPRO_ALIASES = {
+    "gee_refit": {"true": "on", "1": "on", "yes": "on", "false": "off", "0": "off", "no": "off"},
+    "separated_estimates": {"not estimable": "ne"},
+    "std_axis_range": {"as recorded": "as_recorded", "as-recorded": "as_recorded", "0 179": "0-179",
+                       "0 to 179": "0-179", "modulo 180": "0-179"},
+    "smd_binary": {"std": "standardized"},
+}
+_REPRO_TEXT = {
+    "matched_gee_corstr": "independence (the default) or exchangeable",
+    "gee_refit": "on (the default) or off",
+    "separated_estimates": "ne (not estimable, the default) or report",
+    "std_axis_range": "as_recorded (the default) or 0-179",
+    "smd_binary": "standardized (the default) or raw",
+}
+
+
+def repro_choice(cfg: dict, key: str) -> str:
+    """An option that reproduces an earlier analysis as R reads it: its own
+    word (aliases and true / false read as R/helpers.R repro_norm does), the
+    default when blank or missing, else the value as given (unknown)."""
+    v = (cfg or {}).get(key)
+    if isinstance(v, bool) and key == "gee_refit":
+        return "on" if v else "off"
+    if _blank(v):
+        return REPRO_CHOICES[key][0]
+    t = re.sub(r"[_ ]+", " ", str(v).strip().lower())
+    for c in REPRO_CHOICES[key]:
+        if c.replace("_", " ") == t:
+            return c
+    return _REPRO_ALIASES.get(key, {}).get(t, str(v).strip())
 
 
 def matched_table_weights_problem(cfg: dict) -> str | None:
@@ -565,6 +613,9 @@ def normalize_cfg(cfg: dict, file_path: str, sheet: Any = None) -> dict:
     out["psm_unit"] = psm_unit(out)
     # a settings file of 1.1.0 has no matched-table weighting: weights
     out["matched_table_weights"] = _choice(out, "matched_table_weights")
+    # nor the options that reproduce an earlier analysis: their defaults
+    for k in REPRO_CHOICES:
+        out[k] = repro_choice(out, k)
     # a settings file of v1.0.0 has neither key: the v1.1.0 defaults apply
     out["gee_small_sample"] = _choice(out, "gee_small_sample")
     out["table_tests"] = _choice(out, "table_tests")
@@ -823,6 +874,10 @@ def validate_cfg(cfg: dict, columns: list | None = None, data: Any = None) -> li
         why = matched_table_weights_problem(cfg)
         if why:
             errs.append(why)
+    for k in REPRO_CHOICES:
+        if repro_choice(cfg, k) not in REPRO_CHOICES[k]:
+            errs.append(f"Setting {k} = '{cfg.get(k)}' is not supported - use {_REPRO_TEXT[k]} "
+                        "(Reproduce an earlier analysis, GEE tab).")
 
     bad_fmts = [f for f in (cfg.get("graph_formats") or []) if f not in GRAPH_FORMATS]
     if bad_fmts:

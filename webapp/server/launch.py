@@ -119,6 +119,20 @@ def main() -> int:
     )
     print(banner, flush=True)
 
+    # the R in use is not 4.5.x (the version the bundled R packages were built
+    # for): a notice in this window too, with where to get R 4.5.2 - asked in
+    # the background, never delaying or blocking the app
+    def r_notice():
+        try:
+            import rrunner
+            note = rrunner.r_version_notice(rrunner.find_rscript())
+        except Exception:  # noqa: BLE001  (the notice must never stop the app)
+            return
+        if note:
+            print("\n  NOTICE: " + note + "\n", flush=True)
+
+    threading.Thread(target=r_notice, daemon=True).start()
+
     # open the browser once the server is actually accepting connections
     def opener():
         for _ in range(80):

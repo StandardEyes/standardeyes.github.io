@@ -85,10 +85,10 @@
   },
   "reference_group": "Platform 1",
   "group_colors": {
-    "Platform 1": "#5B2C86",
-    "Platform 2": "#F26522",
-    "Platform 3": "#1B9E4B",
-    "Platform 4": "#1F78B4"
+    "Platform 1": "#0072B2",
+    "Platform 2": "#E69F00",
+    "Platform 3": "#56B4E9",
+    "Platform 4": "#CC79A7"
   },
   "group_labels": {},
   "do_matching": false,

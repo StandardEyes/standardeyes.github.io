@@ -44,6 +44,12 @@
   ⚠ The running app is out of date (server <span x-text="serverVersion"></span>, page needs <span x-text="UI_VERSION"></span>).
   Close the app's black console window and double-click <b>Start StandardEyes.bat</b> again, then hard-refresh this page (Ctrl+F5).
 </div>
+<!-- the R in use is not 4.5.x (rrunner.r_version_notice): a notice, never a block -->
+<div class="stalebar" id="r-version-notice" role="status" x-show="rInfo.rscript && rInfo.notice" x-cloak>
+  ⚠ <span x-text="'R '+(rInfo.version||'')+' is installed, but the R packages bundled with StandardEyes were built for R 4.5.x, so an analysis may fail.'"></span>
+  Install R 4.5.2 for Windows from <a :href="rInfo.r45_url || 'https://cran.r-project.org/bin/windows/base/old/4.5.2/'" target="_blank" rel="noopener noreferrer">cran.r-project.org/bin/windows/base/old/4.5.2/</a>
+  and choose it under ⚙ R setup. You can still run the analysis.
+</div>
 
 <!-- ============ R SETUP ============ -->
 <div class="setupbar" x-show="rSetupOpen" x-cloak>
@@ -1059,6 +1065,29 @@
             <label class="ms-item"><input type="checkbox" :checked="has(s.gee_adjust_covariates_raw,c)" @change="toggle(s.gee_adjust_covariates_raw,c)"><span x-text="c"></span></label>
           </template></div>
         </div>
+      </div>
+      <div class="card">
+        <details id="repro-section">
+          <summary><b>Reproduce an earlier analysis (advanced)</b> <span class="muted small" x-text="reproNonDefault().length ? reproNonDefault().length+' changed from the default' : 'all at their defaults'"></span></summary>
+          <p class="opt-hint" style="margin-left:0">Rules an earlier analysis script may have used, to repeat its numbers exactly. Keep the defaults for a new analysis. Every value that is not the default is named in the workbook's Manifest, the run log and the table footnotes. <b>Matched tables</b> (weighted or unweighted) stays on the Matching tab.</p>
+          <div class="grid2">
+            <div><label class="field" for="matched-gee-corstr">Working correlation of the matched GEE</label>
+              <select id="matched-gee-corstr" x-model="s.matched_gee_corstr"><template x-for="o in reproChoices('matched_gee_corstr')" :key="o[0]"><option :value="o[0]" x-text="o[1]"></option></template></select>
+              <p class="opt-hint" style="margin-left:0">The matched-cohort GEE models (GEE sheets and the GEE columns): independence, or exchangeable as many earlier scripts fitted them.</p></div>
+            <div><label class="field" for="gee-refit">Refit an exchangeable GEE with independence</label>
+              <select id="gee-refit" x-model="s.gee_refit"><template x-for="o in reproChoices('gee_refit')" :key="o[0]"><option :value="o[0]" x-text="o[1]"></option></template></select>
+              <p class="opt-hint" style="margin-left:0">Off keeps every exchangeable fit that converged, whatever its working correlation (even 0.95 or more); a fit that did not converge is still refitted and labeled.</p></div>
+            <div><label class="field" for="separated-estimates">Outcomes with no events in one group</label>
+              <select id="separated-estimates" x-model="s.separated_estimates"><template x-for="o in reproChoices('separated_estimates')" :key="o[0]"><option :value="o[0]" x-text="o[1]"></option></template></select>
+              <p class="opt-hint" style="margin-left:0">Report prints the estimate, CI and P the GEE returns, each marked † with the footnote “no events in one group: estimate unreliable”; the run log counts them.</p></div>
+            <div><label class="field" for="std-axis-range">Axis of the standardized refraction</label>
+              <select id="std-axis-range" x-model="s.std_axis_range"><template x-for="o in reproChoices('std_axis_range')" :key="o[0]"><option :value="o[0]" x-text="o[1]"></option></template></select>
+              <p class="opt-hint" style="margin-left:0">0-179 writes an axis of 180 as 0 in the converted refraction (Refraction standardization, Variables tab): its axis rows and export tabs change; sphere, cylinder and SEQ do not.</p></div>
+            <div><label class="field" for="smd-binary">Balance of a binary matching covariate</label>
+              <select id="smd-binary" x-model="s.smd_binary"><template x-for="o in reproChoices('smd_binary')" :key="o[0]"><option :value="o[0]" x-text="o[1]"></option></template></select>
+              <p class="opt-hint" style="margin-left:0">Raw prints the difference in proportions (cobalt's own default) in the balance table and love plot, instead of the standardized difference.</p></div>
+          </div>
+        </details>
       </div>
     </div>
 

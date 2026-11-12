@@ -331,7 +331,7 @@ def write_settings():
         outcome={"continuous": ["FollowUp_Days", "Postop_SEQ_D", "Postop_Cylinder_D", "Postop_UDVA", "Postop_CDVA"],
                  "ordinal": [], "dichotomous": [], "categorical": []},
         groups={"LASIK": ["LASIK"], "KLEx": ["KLEx"]}, reference_group="LASIK",
-        group_colors={"LASIK": "#F26522", "KLEx": "#1B9E4B"},
+        group_colors={"LASIK": "#E69F00", "KLEx": "#56B4E9"},
         std_triples=[{"sph": "Preop_Sphere_D", "cyl": "Preop_Cylinder_D", "axis": "Preop_Axis_Deg"},
                      {"sph": "Target_Sphere_D", "cyl": "Target_Cylinder_D", "axis": "Target_Axis_Deg"},
                      {"sph": "Postop_Sphere_D", "cyl": "Postop_Cylinder_D", "axis": "Postop_Axis_Deg"}],

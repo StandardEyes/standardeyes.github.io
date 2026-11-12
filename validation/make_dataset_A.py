@@ -434,7 +434,7 @@ def write_settings():
                  "ordinal": ["Postop_Haze_Grade"], "dichotomous": ["DryEye_Symptoms"], "categorical": ["Complication_Type"]},
         patient_level_params_raw=["Age_Years", "Sex", "Optical_Zone_mm"],
         groups={"PRK": ["PRK"], "LASIK": ["LASIK"]}, reference_group="PRK",
-        group_colors={"PRK": "#5B2C86", "LASIK": "#F26522"},
+        group_colors={"PRK": "#0072B2", "LASIK": "#E69F00"},
         stability_figs=True, stability_visits=visits, stability_include_preop=True,
         stability_change_from="6", stability_change_to="12", stability_change_threshold=0.5,
         dichotomous_preferred_level={"Sex": "F", "DryEye_Symptoms": "Yes"},

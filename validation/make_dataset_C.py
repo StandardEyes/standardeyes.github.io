@@ -309,7 +309,7 @@ def write_settings():
         outcome={"continuous": ["FollowUp_Days", "Postop_SEQ_D", "Postop_Cylinder_D", va[2], va[3]],
                  "ordinal": [], "dichotomous": ["Glare_Halo_Symptoms"], "categorical": []},
         groups={p: [p] for p in PLATFORMS}, reference_group="Platform 1",
-        group_colors={"Platform 1": "#5B2C86", "Platform 2": "#F26522", "Platform 3": "#1B9E4B", "Platform 4": "#1F78B4"},
+        group_colors={"Platform 1": "#0072B2", "Platform 2": "#E69F00", "Platform 3": "#56B4E9", "Platform 4": "#CC79A7"},
         run_gee_stage="unmatched", run_main_gee=True,
         va_format="etdrs", logmar_cols_raw=va,
         roles={"pre_ucva": va[0], "pre_bcva": va[1], "post_ucva": va[2], "post_bcva": va[3],

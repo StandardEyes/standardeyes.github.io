@@ -365,7 +365,7 @@ def write_settings():
             outcome={"continuous": ["FollowUp_Days", "Postop_SEQ_D", "Postop_Cylinder_D", "Postop_UDVA", "Postop_CDVA"],
                      "ordinal": [], "dichotomous": ["DryEye_Symptoms"], "categorical": []},
             groups={"Control": ["Control"], "Condition": ["Condition"]}, reference_group="Control",
-            group_colors={"Control": "#5B2C86", "Condition": "#F26522"},
+            group_colors={"Control": "#0072B2", "Condition": "#D55E00"},
             do_matching=True, psm_covariates_raw=list(conf), psm_method="nearest", psm_distance="linear.logit",
             psm_ratio=1, psm_replace=False, psm_caliper=0.2, psm_std_caliper=True, psm_m_order="largest",
             psm_unit=unit,

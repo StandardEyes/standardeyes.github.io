@@ -44,26 +44,66 @@ def save_settings(data: dict) -> None:
         json.dump(data, fh, indent=2)
 
 
-def validate_rscript(path: str) -> tuple[bool, str]:
-    """Run the candidate Rscript and report its version (or why it failed)."""
+# Where R 4.5.2 for Windows can be downloaded: the version the bundled R
+# packages were built for (the main CRAN page offers a newer R).
+R_45_URL = "https://cran.r-project.org/bin/windows/base/old/4.5.2/"
+_R_VERSIONS: dict[str, str] = {}      # Rscript path -> the version it reported ("" = could not tell)
+
+
+def r_version_notice_text(ver: str) -> str:
+    """The notice shown when the R in use is not 4.5.x ("" when it is, or when
+    its version is not known). It never blocks a run."""
+    if not ver or ver.startswith("4.5"):
+        return ""
+    return (f"R {ver} is installed, but the R packages bundled with StandardEyes were built for R 4.5.x, "
+            f"so an analysis may fail. R 4.5.2 for Windows: {R_45_URL} (the analysis still runs).")
+
+
+def r_version(path: str | None) -> str:
+    """The version an Rscript reports ("4.5.2"; "" when it cannot be run),
+    asked once per path while the server runs."""
+    if not path:
+        return ""
+    k = os.path.normcase(os.path.normpath(path))
+    if k not in _R_VERSIONS:
+        ok, _msg, ver = _rscript_version(path)
+        _R_VERSIONS[k] = ver if ok else ""
+    return _R_VERSIONS[k]
+
+
+def r_version_notice(path: str | None) -> str:
+    """The R-version notice of the Rscript in use ("" for R 4.5.x)."""
+    return r_version_notice_text(r_version(path))
+
+
+def _rscript_version(path: str) -> tuple[bool, str, str]:
+    """(ok, message, version) of a candidate Rscript."""
     if not path or not os.path.exists(path):
-        return False, "That file does not exist."
+        return False, "That file does not exist.", ""
     if not os.path.basename(path).lower().startswith("rscript"):
-        return False, "Please choose Rscript.exe (inside R's bin folder)."
+        return False, "Please choose Rscript.exe (inside R's bin folder).", ""
     try:
         out = run_captured([path, "--vanilla", "-e",
                             'cat(paste(R.version$major, R.version$minor, sep="."))'],
                            cwd=None, timeout=90)
     except Exception as e:  # noqa: BLE001
-        return False, f"Could not run it: {e}"
+        return False, f"Could not run it: {e}", ""
     ver = (out.stdout or "").strip().splitlines()[-1:] or [""]
     ver = ver[0].strip()
     if out.returncode != 0 or not ver:
-        return False, (out.stderr or "Rscript did not report a version.").strip()[:300]
-    if not ver.startswith("4.5"):
+        return False, (out.stderr or "Rscript did not report a version.").strip()[:300], ""
+    return True, f"Found R {ver}.", ver
+
+
+def validate_rscript(path: str) -> tuple[bool, str]:
+    """Run the candidate Rscript and report its version (or why it failed)."""
+    ok, msg, ver = _rscript_version(path)
+    if ok:
+        _R_VERSIONS[os.path.normcase(os.path.normpath(path))] = ver
+    if ok and not ver.startswith("4.5"):
         return True, (f"Found R {ver}. The bundled packages were built for R 4.5.x — "
-                      "the analysis may fail. Installing R 4.5.x is recommended.")
-    return True, f"Found R {ver}."
+                      f"the analysis may fail. Installing R 4.5.x is recommended: {R_45_URL}")
+    return ok, msg
 
 
 def find_rscript() -> str | None:

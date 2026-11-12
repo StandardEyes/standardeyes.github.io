@@ -1089,7 +1089,11 @@ gee_weighted_independence <- function(df, use_weights = FALSE) {
 # The working correlation of those models, for the GEE sheets' note and the
 # Manifest: "independence (weighted)", "independence (matched cohort)" or
 # "exchangeable".
+# matched_gee_corstr = "exchangeable" (reproducing an earlier analysis):
+# "exchangeable (weighted)" / "exchangeable (matched cohort)".
 gee_corstr_label <- function(df, use_weights = FALSE, matched = FALSE) {
+  if (isTRUE(matched) && matched_gee_exchangeable())
+    return(if (gee_weighted_independence(df, use_weights)) "exchangeable (weighted)" else "exchangeable (matched cohort)")
   if (gee_weighted_independence(df, use_weights)) "independence (weighted)"
   else if (isTRUE(matched)) "independence (matched cohort)"
   else "exchangeable"
@@ -1106,8 +1110,15 @@ set_matched_note_pid <- function(has_pid) .matched_note$has_pid <- isTRUE(has_pi
 # the patients were matched with both eyes kept together; with "eye" it is the
 # 1.1.0 sentence, unchanged
 set_matched_note_unit <- function(unit) .matched_note$unit <- if (identical(unit, "patient")) "patient" else "eye"
+# matched_gee_corstr = "exchangeable": the GEE models use an exchangeable
+# working correlation, the clustered table tests and figure P values still an
+# independence one - the note says both
+matched_gee_exchangeable <- function() identical(repro_opt("matched_gee_corstr"), "exchangeable")
 matched_analysis_note <- function(clustered = .matched_note$has_pid) paste0(
-  "Matched analyses use an independence working correlation with robust standard errors",
+  if (matched_gee_exchangeable())
+    paste0("Matched GEE models use an exchangeable working correlation (matched_gee_corstr = exchangeable), ",
+           "the clustered table tests and figure P values an independence one, with robust standard errors")
+  else "Matched analyses use an independence working correlation with robust standard errors",
   if (isTRUE(clustered)) " clustered by patient" else ", each eye its own cluster (no patient ID mapped)",
   "; matched sets (pairs) are not used as clusters.",
   if (identical(.matched_note$unit, "patient"))
@@ -1514,7 +1525,19 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
   grp_all <- if (has_g) .groups_with_data(df$GroupLabel) else character(0)
   lev_all <- if (has_g) levels(df$GroupLabel) else character(0)
   w_ind <- gee_weighted_independence(df, use_weights)
-  ind <- w_ind || isTRUE(matched)
+  # ind_pp: the per-patient models of a matched or weighted cohort (an
+  # independence GEE on one row per patient, D18 - one row per cluster, so the
+  # working correlation plays no part there)
+  ind_pp <- w_ind || isTRUE(matched)
+  # the eye-level models: independence on a matched cohort (D18) and with
+  # non-unit weights (R4-1), unless matched_gee_corstr = "exchangeable"
+  # (reproducing an earlier analysis), which fits a matched cohort's models -
+  # weighted or not - with an exchangeable working correlation
+  exch_m <- isTRUE(matched) && matched_gee_exchangeable()
+  ind <- ind_pp && !exch_m
+  # separated_estimates = "report": a 0/1 outcome with no events (or only
+  # events) in a group is fitted all the same, its comparison marked
+  sep_report <- identical(repro_opt("separated_estimates"), "report")
   # a per-patient model's weight: the patient's, over all of its eyes in the
   # cohort, before any eye is dropped (finding S2-2)
   if (w_ind && length(patient_level)) df$.pt_w <- .patient_mean_weight(df, id_col)
@@ -1628,9 +1651,22 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
     # events, or a single eye) is reported as such; the others are still fitted
     un <- list(out = character(0))
     one_pt <- character(0)
+    # separated_estimates = "report" (an eye-level model of a 0/1 outcome):
+    # the groups with no events or only events stay in the model, and the
+    # comparisons they make (all of them when the reference is such a group)
+    # are printed and marked; sep_why: comparison -> its reason
+    sep_why <- character(0)
+    if (grp_in && bin && sep_report && !(identical(cs$unit, "patient") && outc %in% patient_level)) {
+      sb <- .unestimable_groups(df2[[outc]], df2$GroupLabel, TRUE)
+      if (length(sb)) {
+        cmp_in <- setdiff(intersect(.groups_with_data(df2$GroupLabel), grp_all), ref_g)
+        sep_why <- if (ref_g %in% names(sb)) stats::setNames(rep(sb[[ref_g]], length(cmp_in)), cmp_in)
+                   else sb[intersect(names(sb), cmp_in)]
+      }
+    }
     if (grp_in) {
-      un <- .drop_unestimable_groups(df2, outc, ref_g, bin)
-      if (nzchar(un$skip)) {
+      if (!length(sep_why)) un <- .drop_unestimable_groups(df2, outc, ref_g, bin)
+      if (nzchar(un$skip %||% "")) {
         # no comparison of this outcome can be estimated: one row per
         # comparison (term GroupLabel<g>), so the summary and Publication
         # tables read "not estimable" instead of an empty GEE cell
@@ -1710,7 +1746,7 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
     # a per-patient variable: one row per patient, an ordinary model (R3-4);
     # on a matched cohort an independence GEE with robust SE (D18, finding S1)
     if (identical(cs$unit, "patient") && outc %in% patient_level) {
-      pp <- .per_patient_model(f, df2, preds, id_col, bin, w_ind, dn(outc), matched = ind)
+      pp <- .per_patient_model(f, df2, preds, id_col, bin, w_ind, dn(outc), matched = ind_pp)
       log_once(logger, sprintf(paste0("GEE sheets: '%s' is a per-patient variable - modeled on one row per ",
                                       "patient by an ordinary %s model (on a matched cohort, or when a patient ",
                                       "has eyes in more than one group: an independence GEE with robust SE ",
@@ -1725,8 +1761,18 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
       model_txt <- .per_patient_label(pp, bin, display_names)
     } else {
       # an exchangeable fit only when it is accepted, else independence (R3-4)
-      fc <- gee_fit_checked(function(cs_) fit_gee(f, df2, id_col, fam, use_weights, corstr = cs_),
-                            if (ind) "independence" else "exchangeable")
+      fc <- if (length(sep_why)) {
+        # separated_estimates = "report": the model has no finite estimate and
+        # never converges - fitted once with the run's working correlation,
+        # geepack's own default iterations and the rows in the data's order (as
+        # an earlier script ran it; fit_gee data_order), no refit; its
+        # separated comparisons are marked below
+        cs_sep <- if (ind) "independence" else "exchangeable"
+        f_sep <- fit_gee(f, df2, id_col, fam, use_weights, corstr = cs_sep, control = geepack::geese.control(),
+                         data_order = TRUE)
+        list(fit = f_sep, corstr = cs_sep, refit = "", why = if (is.null(f_sep)) "the model could not be fitted" else "")
+      } else gee_fit_checked(function(cs_) fit_gee(f, df2, id_col, fam, use_weights, corstr = cs_),
+                             if (ind) "independence" else "exchangeable")
       fit <- fc$fit
       if (is.null(fit)) {
         res_list[[outc]] <- dplyr::bind_rows(na_row(outc, eff, paste0(note, "Model failed: ",
@@ -1752,12 +1798,17 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
                                              left_out, empty_rows)
         next
       }
-      model_txt <- if (w_ind) paste0(if (bin) "GEE Binomial" else "GEE Gaussian",
-                                     ", working correlation: independence (weighted)")
+      model_txt <- if (w_ind && ind) paste0(if (bin) "GEE Binomial" else "GEE Gaussian",
+                                            ", working correlation: independence (weighted)")
                    else if (ind) paste0(if (bin) "GEE Binomial" else "GEE Gaussian",
                                         ", working correlation: independence (matched cohort)")
                    else if (nzchar(fc$refit)) paste0(if (bin) "GEE Binomial" else "GEE Gaussian", ", ",
                                                      gee_refit_label(fc$refit))
+                   # matched_gee_corstr = "exchangeable": a matched cohort's
+                   # exchangeable fit, weighted or not
+                   else if (exch_m) paste0(if (bin) "GEE Binomial" else "GEE Gaussian",
+                                           ", working correlation: exchangeable (",
+                                           if (w_ind) "weighted, " else "", "matched cohort)")
                    else if (bin) "GEE Binomial (exchangeable)" else "GEE Gaussian (exchangeable)"
     }
     # covariate levels held by one patient: estimate only (extract_gee_tidy)
@@ -1780,12 +1831,27 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
       bad <- !is.na(t$term) & t$term != "(Intercept)" &
         (big | (!(t$term %in% lone) & (!is.finite(t$estimate) | !is.finite(t$std.error) | unrep)))
       bad[is.na(bad)] <- FALSE
+      # separated_estimates = "report": the separated comparisons are printed
+      # as the model returns them (marked below), never blanked here
+      sep_k <- !is.na(t$term) & t$term %in% paste0("GroupLabel", names(sep_why))
+      bad[sep_k] <- FALSE
       if (any(bad)) {
         t$statistic[bad] <- NA_real_; t$p.value[bad] <- NA_real_
         t$EffectValue[bad] <- NA_real_; t$CI_low[bad] <- NA_real_; t$CI_high[bad] <- NA_real_
         t$CI[bad] <- NA_character_
         t$Model[bad] <- paste0(note, "Skipped: unstable estimate (quasi-separation) - effect not reported")
       }
+      # each separated comparison: its effect text (two significant digits in
+      # scientific notation from 1e6 up), and its Model cell names the reason
+      # and the marker, which the tables and sheets read (SEP_MODEL_TAG)
+      for (gn in names(sep_why)) {
+        k <- !is.na(t$term) & t$term == paste0("GroupLabel", gn)
+        if (!any(k)) next
+        t$CI[k] <- paste0(fmt_effect_sep("OR", t$EffectValue[k], t$CI_low[k], t$CI_high[k]), SEP_DAGGER)
+        t$Model[k] <- paste0(t$Model[k], "; ", SEP_MODEL_TAG, ": ", sep_why[[gn]], " - ",
+                             sub("^[^:]*: ", "", sep_foot_of(sep_why[[gn]])), " ", SEP_DAGGER)
+      }
+      if (length(sep_why)) sep_report_add(cn(outc))
     }
     t$Note <- NA_character_
     k_lone <- !is.na(t$term) & t$term %in% lone & is.finite(t$EffectValue)
@@ -1835,7 +1901,7 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
       # a reported comparison involving a group of few patients carries the
       # caution - of a robust SE: not the ordinary per-patient model of an
       # unmatched cohort, whose model-based SE it does not concern
-      ordinary_pp <- identical(cs$unit, "patient") && outc %in% patient_level && !ind && !isTRUE(pp$gee)
+      ordinary_pp <- identical(cs$unit, "patient") && outc %in% patient_level && !ind_pp && !isTRUE(pp$gee)
       for (gn in setdiff(.groups_with_data(df2$GroupLabel), c(ref_g, names(one_pt)))) {
         k <- !is.na(t$term) & t$term == paste0("GroupLabel", gn) & is.finite(t$p.value)
         few <- if (any(k) && !ordinary_pp) .pair_caution(df2, id_col, ref_g, gn, cs$unit) else ""
@@ -1859,10 +1925,20 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
 # by matching weights that are not all 1, R4-1). The fit's console output never
 # reaches stdout (quiet_eval); a failure's message, with what geepack printed,
 # is left in .gee_err$msg on one line.
-fit_gee <- function(f, df2, patient_id_clean, family_name, use_weights, corstr = "exchangeable") {
+# control: geepack's iteration control (gee_control(), the engine's; the
+# separated fits of separated_estimates = "report" pass geepack's default).
+# data_order = TRUE (those separated fits): the rows are grouped by patient in
+# the order the patients first appear in the data - the data's own order when
+# a patient's eyes are adjacent, as an earlier script fitted them - instead of
+# sorted by the patient ID. A model with no finite estimate stops where its
+# iterations end, and that point depends on the order of the rows; every other
+# model gives the same estimate in either order.
+fit_gee <- function(f, df2, patient_id_clean, family_name, use_weights, corstr = "exchangeable",
+                    control = gee_control(), data_order = FALSE) {
   .gee_err$msg <- ""
   fam <- if (family_name == "binomial") binomial else gaussian
-  ord <- order(df2[[patient_id_clean]])
+  idk <- df2[[patient_id_clean]]
+  ord <- if (isTRUE(data_order)) order(match(idk, unique(idk))) else order(idk)
   df2 <- df2[ord, , drop = FALSE]
   # geepack needs a NUMERIC id: a character id (e.g. "PT0001") gets coerced to
   # NA internally, silently destroying the clustering and the robust SEs.
@@ -1878,12 +1954,12 @@ fit_gee <- function(f, df2, patient_id_clean, family_name, use_weights, corstr =
       # a weighted quasi-likelihood fit); glm's start-value warning is noise
       withCallingHandlers(
         geepack::geeglm(formula = f, data = df2, id = .gee_id,
-                        family = fam, corstr = corstr, weights = .gee_w, control = gee_control()),
+                        family = fam, corstr = corstr, weights = .gee_w, control = control),
         warning = function(w) if (grepl("non-integer #successes", conditionMessage(w)))
           invokeRestart("muffleWarning"))
     } else {
       geepack::geeglm(formula = f, data = df2, id = .gee_id,
-                      family = fam, corstr = corstr, control = gee_control())
+                      family = fam, corstr = corstr, control = control)
     }
   })
   if (is.null(q$value)) .gee_err$msg <- quiet_error_text(q)
@@ -1905,8 +1981,11 @@ build_gee_lookup <- function(gee_df, group_term) {
     dplyr::filter(!is.na(Outcome), !is.na(term), term %in% group_term)
   p_shown <- rows$p.value
   holm <- rep(FALSE, nrow(rows))
+  # (a separated comparison printed with separated_estimates = "report" has no
+  # usable P and stays out of the adjustment)
+  sep0 <- if ("Model" %in% names(rows)) grepl(SEP_MODEL_TAG, as.character(rows$Model), fixed = TRUE) else rep(FALSE, nrow(rows))
   if (length(group_term) > 1) for (oc in unique(rows$Outcome)) {
-    k <- which(rows$Outcome == oc & is.finite(rows$p.value) & !is.na(rows$EffectValue))
+    k <- which(rows$Outcome == oc & is.finite(rows$p.value) & !is.na(rows$EffectValue) & !sep0)
     if (length(k) >= 2) {
       p_shown[k] <- stats::p.adjust(rows$p.value[k], method = "holm")
       holm[k] <- TRUE
@@ -1933,6 +2012,9 @@ build_gee_lookup <- function(gee_df, group_term) {
   # (with its CI) and P cells; an outcome all of whose comparisons are NE
   # prints one NE
   rows$.ne_w <- grepl(paste0("not estimable - ", NE_WITHIN_REASON), mdl, fixed = TRUE)
+  # a comparison of an outcome with no events in one group, printed as the
+  # model returns it (separated_estimates = "report"): both cells marked
+  rows$.sep <- grepl(SEP_MODEL_TAG, mdl, fixed = TRUE)
   rows <- rows %>%
     dplyr::mutate(
       # one effect style for every table (D24): "β = -9.98 (95% CI, -29.04
@@ -1940,13 +2022,15 @@ build_gee_lookup <- function(gee_df, group_term) {
       gee_effect_label = dplyr::case_when(
         .ne_w ~ NE_TEXT,
         is.na(EffectValue) ~ "not estimable",
+        .sep ~ paste0(fmt_effect_sep("OR", EffectValue, CI_low, CI_high), SEP_DAGGER),
         Effect == "OR" ~ fmt_effect("OR", EffectValue, CI_low, CI_high),
         TRUE ~ fmt_effect("beta", EffectValue, CI_low, CI_high)),
       # a comparison without an estimate (or without a P) reads "not
       # estimable" in the P column too, never a bare "Cohort D: "
       gee_p_label = ifelse(.ne_w, NE_TEXT,
                     ifelse(is.na(EffectValue) | !is.finite(p_shown), "not estimable",
-                           paste0(dplyr::coalesce(fmt_p(p_shown), ""), ifelse(holm, " [Holm]", ""), tag))))
+                           paste0(dplyr::coalesce(fmt_p(p_shown), ""), ifelse(.sep, SEP_DAGGER, ""),
+                                  ifelse(holm, " [Holm]", ""), tag))))
   if (length(group_term) > 1 && nrow(rows) > 0) {
     rows <- rows %>%
       dplyr::mutate(.cmp = sub("^GroupLabel", "", term), .ord = match(term, group_term)) %>%
@@ -2007,6 +2091,17 @@ merge_gee_into_summary_table <- function(summary_tbl, gee_lookup) {
         pin <- as.character(out[["Practical Interpretation"]][hit])
         k <- !is.na(pin) & nzchar(pin) & !startsWith(pin, "Not estimable") & !grepl("Caution", pin, fixed = TRUE)
         if (any(k)) out[hit[k], "Practical Interpretation"] <- paste0(pin[k], " GEE column - ", cau, ".")
+      }
+      # an outcome with no events in one group printed as its model returns it
+      # (separated_estimates = "report"): the row's Interpretation says what
+      # the dagger of its GEE cells means
+      if (grepl(SEP_DAGGER, as.character(gee_lookup$gee_effect_label[i]), fixed = TRUE) &&
+          "Practical Interpretation" %in% names(out)) {
+        pin <- as.character(out[["Practical Interpretation"]][hit])
+        pin[is.na(pin)] <- ""
+        k <- !grepl(SEP_FOOT_NONE, pin, fixed = TRUE)
+        if (any(k)) out[hit[k], "Practical Interpretation"] <-
+          trimws(paste0(pin[k], " GEE column: ", SEP_DAGGER, " ", SEP_FOOT_NONE, "."))
       }
     }
   }
@@ -3002,7 +3097,11 @@ run_reference_pairwise_matching <- function(dat, glevels, reference_group,
     # the denominator is the treated (non-reference) group's - the standard
     # for the ATT that matchit() estimates here - stated explicitly so the
     # documentation and the numbers cannot drift apart.
-    bal <- tryCatch(cobalt::bal.tab(m.out, un = TRUE, binary = "std", continuous = "std",
+    # smd_binary = "raw" (reproducing an earlier analysis): binary covariates
+    # get cobalt's own default, the raw difference in proportions
+    bal <- tryCatch(cobalt::bal.tab(m.out, un = TRUE,
+                                    binary = if (identical(repro_opt("smd_binary"), "raw")) "raw" else "std",
+                                    continuous = "std",
                                     s.d.denom = "treated", m.threshold = 0.1),
                     error = function(e) NULL)
     results[[tg]] <- list(label = paste0(tg, "_vs_", reference_group),

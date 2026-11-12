@@ -681,6 +681,138 @@ GEE_EXCH_STEP_MAX <- 0.01
 GEE_EPSILON <- 1e-8
 GEE_MAXIT <- 100L
 gee_control <- function() geepack::geese.control(epsilon = GEE_EPSILON, maxit = GEE_MAXIT)
+
+# ------------------------------------------------------------
+# Options to reproduce an earlier analysis (build se.12; the interface's
+# section "Reproduce an earlier analysis (advanced)"). The first value of each
+# is the default and keeps the StandardEyes rule; the second repeats what an
+# earlier analysis script did:
+#   matched_gee_corstr  "independence" | "exchangeable": the working
+#                       correlation of the matched-cohort GEE models (the GEE
+#                       sheets of a matched cohort and the GEE columns of its
+#                       tables; decision D18 = independence). The clustered
+#                       table tests and the figure P values keep independence.
+#   gee_refit           "on" | "off": "off" keeps every exchangeable fit that
+#                       converged, whatever its working correlation (no
+#                       acceptance check, decision R3-4); a fit that did not
+#                       converge is still refitted with an independence
+#                       working correlation and labeled so. Every exchangeable
+#                       GEE of the run (models, clustered table tests, figure
+#                       P values).
+#   separated_estimates "ne" | "report": a 0/1 outcome with no events (or only
+#                       events) in one group has no finite estimate. "ne"
+#                       reports the comparison as not estimable; "report"
+#                       prints the estimate, CI and P the model returns (the
+#                       GEE sheets and the tables' GEE columns), each marked
+#                       with SEP_DAGGER and the footnote "no events in one
+#                       group: estimate unreliable", and the run log counts
+#                       them. Such a model never converges: it is fitted with
+#                       geepack's own default iterations (at most 25, a change
+#                       below 1e-4), as an earlier script ran it, so the
+#                       printed estimate is where those iterations stop.
+#   std_axis_range      "as_recorded" | "0-179": the axis of a standardized
+#                       refraction (the minus-cylinder conversion) - as
+#                       recorded (a transposed plus cylinder in 1-180), or
+#                       every axis reduced modulo 180, so 180 reads 0 (the
+#                       sphere, cylinder and SEQ are the same either way).
+#   smd_binary          "standardized" | "raw": the balance statistic of a
+#                       binary matching covariate - the standardized
+#                       difference, or the raw difference in proportions
+#                       (cobalt's default for binary covariates).
+# The pipeline reads them once per run (set_repro_options); a blank or missing
+# value is the default, an unknown one is logged and the default used.
+# ------------------------------------------------------------
+REPRO_OPTIONS <- list(
+  matched_gee_corstr  = c("independence", "exchangeable"),
+  gee_refit           = c("on", "off"),
+  separated_estimates = c("ne", "report"),
+  std_axis_range      = c("as_recorded", "0-179"),
+  smd_binary          = c("standardized", "raw"))
+.repro <- new.env(parent = emptyenv())
+# a value as the engine reads it: the option's own word, NA when unknown, ""
+# when blank (= the default)
+repro_norm <- function(key, x) {
+  if (is.null(x) || !length(x)) return("")
+  if (is.logical(x) && length(x) == 1 && !is.na(x) && identical(key, "gee_refit")) return(if (x) "on" else "off")
+  v <- tolower(trimws(as.character(unlist(x))[1]))
+  if (is.na(v) || !nzchar(v)) return("")
+  v <- gsub("[_ ]+", " ", v)
+  alias <- switch(key,
+    gee_refit = c(true = "on", `1` = "on", yes = "on", on = "on", false = "off", `0` = "off", no = "off", off = "off"),
+    separated_estimates = c(ne = "ne", `not estimable` = "ne", report = "report"),
+    std_axis_range = c(`as recorded` = "as_recorded", `as-recorded` = "as_recorded", `0-179` = "0-179",
+                       `0 179` = "0-179", `0 to 179` = "0-179", `modulo 180` = "0-179"),
+    smd_binary = c(standardized = "standardized", std = "standardized",
+                   raw = "raw"),
+    matched_gee_corstr = c(independence = "independence", exchangeable = "exchangeable"))
+  if (v %in% names(alias)) unname(alias[[v]]) else NA_character_
+}
+# the option's value for the models that follow (the default until a run sets it)
+repro_opt <- function(key) .repro[[key]] %||% REPRO_OPTIONS[[key]][1]
+set_repro_options <- function(cfg = list(), logger = NULL) {
+  for (k in names(REPRO_OPTIONS)) {
+    v <- repro_norm(k, cfg[[k]])
+    if (is.na(v)) {
+      if (!is.null(logger))
+        logger(sprintf("Setting %s = '%s' is not known (use %s) - %s is used.", k,
+                       as.character(unlist(cfg[[k]]))[1], paste(REPRO_OPTIONS[[k]], collapse = " or "),
+                       REPRO_OPTIONS[[k]][1]))
+      v <- ""
+    }
+    .repro[[k]] <- if (nzchar(v)) v else REPRO_OPTIONS[[k]][1]
+  }
+  invisible(repro_nondefault())
+}
+# the options of this run that are not at their default: key -> value
+repro_nondefault <- function() {
+  v <- vapply(names(REPRO_OPTIONS), repro_opt, character(1))
+  v[v != vapply(REPRO_OPTIONS, `[`, character(1), 1)]
+}
+# each non-default option in words, for the run log and the Manifest
+REPRO_OPTION_WORDS <- c(
+  matched_gee_corstr = "matched-cohort GEE models with an exchangeable working correlation",
+  gee_refit = "every converged exchangeable GEE kept, whatever its working correlation, with no refit to independence",
+  separated_estimates = paste0("an outcome with no events in one group prints the model's estimate, CI and P, ",
+                               "marked † as unreliable"),
+  std_axis_range = "the axis of a standardized refraction reduced to 0-179, so an axis of 180 reads 0",
+  smd_binary = "the balance of a binary matching covariate as the raw difference in proportions")
+repro_options_text <- function() {
+  nd <- repro_nondefault()
+  if (!length(nd)) return("none - every option at its default")
+  paste(sprintf("%s = %s (%s)", names(nd), nd, REPRO_OPTION_WORDS[names(nd)]), collapse = "; ")
+}
+# The marker of an estimate printed for an outcome with no events in one
+# group (separated_estimates = "report") and its footnote.
+SEP_DAGGER <- "†"
+SEP_FOOT_NONE <- "no events in one group: estimate unreliable"
+SEP_FOOT_ONLY <- "only events in one group: estimate unreliable"
+# the Model text such a comparison carries (run_gee_models), which the tables
+# and sheets read to mark its cells
+SEP_MODEL_TAG <- "separated_estimates = report"
+sep_foot_of <- function(reason) if (any(grepl("^only events", reason))) SEP_FOOT_ONLY else SEP_FOOT_NONE
+# The outcomes so reported while one workbook is built, for the run log line
+.sep_rows <- new.env(parent = emptyenv())
+.sep_rows$vars <- character(0)
+sep_report_add <- function(var) .sep_rows$vars <- unique(c(.sep_rows$vars, as.character(var)))
+sep_report_take <- function() { v <- .sep_rows$vars; .sep_rows$vars <- character(0); v }
+sep_report_log_text <- function(v, where) {
+  if (!length(v)) return(NULL)
+  sprintf(paste0("%s: %d outcome(s) with no events (or only events) in one group print the estimate, CI and P the ",
+                 "model returns (separated_estimates = report), each marked %s - %s: %s."),
+          where, length(v), SEP_DAGGER, SEP_FOOT_NONE, paste0("'", v, "'", collapse = ", "))
+}
+# A number of a separated estimate as the tables print it: two decimals, or
+# two significant digits in scientific notation from 1e6 up (an odds ratio of
+# a separated fit can be 1e19)
+fmt_sep_num <- function(x) {
+  x <- suppressWarnings(as.numeric(x))
+  ifelse(!is.finite(x), "n/a", ifelse(abs(x) >= 1e6, formatC(x, format = "e", digits = 1), fmt_fix(x, 2)))
+}
+fmt_effect_sep <- function(kind, est, lo = NA_real_, hi = NA_real_) {
+  sym <- ifelse(toupper(kind) == "OR", "OR", "β")
+  ci <- ifelse(is.finite(lo) & is.finite(hi), paste0(" (95% CI, ", fmt_sep_num(lo), " to ", fmt_sep_num(hi), ")"), "")
+  paste0(sym, " = ", fmt_sep_num(est), ci)
+}
 # The label of an independence refit states the actual reason (decision
 # V12-2): "independence working correlation (the exchangeable fit was not
 # accepted: working correlation 0.973)", "(...: did not converge)", "(...:
@@ -816,7 +948,11 @@ gee_fit_checked <- function(fit_fun, corstr = "exchangeable") {
     return(list(fit = f, corstr = corstr, refit = "", why = ""))
   }
   f1 <- fit_fun("exchangeable")
-  why <- gee_exch_reject(f1)
+  # gee_refit = "off" (reproducing an earlier analysis): a converged
+  # exchangeable fit is kept whatever its working correlation; one that did
+  # not converge is refitted below, as always (it is never printed as
+  # converged)
+  why <- if (identical(repro_opt("gee_refit"), "off") && gee_converged(f1)) "" else gee_exch_reject(f1)
   if (!nzchar(why)) return(list(fit = f1, corstr = "exchangeable", refit = "", why = ""))
   f2 <- fit_fun("independence")
   # the reason names a constant outcome only when it is constant within every
@@ -1727,8 +1863,12 @@ wrap_axis_0_180 <- function(ax) {
 # report: log the count of each kind of cylinder (plus ones transposed, minus,
 # zero, blank) - the run log of the analysis data (decision DS-B); the export
 # tabs, which log their own count, pass FALSE.
+# axis_range: "as_recorded" (default) or "0-179" (setting std_axis_range): after
+# the transposition every axis is reduced modulo 180, so an axis of 180 (also
+# one a transposition gives) reads 0, as an earlier analysis script wrote it;
+# the count is logged. Sphere, cylinder and SEQ are the same either way.
 standardize_minus_cyl <- function(df, sph_clean, cyl_clean, axis_clean, logger = message,
-                                  display_names = NULL, report = TRUE) {
+                                  display_names = NULL, report = TRUE, axis_range = "as_recorded") {
   if (any(is.na(c(sph_clean, cyl_clean, axis_clean)))) {
     logger("Standardization skipped: one or more columns not found."); return(df)
   }
@@ -1762,7 +1902,17 @@ standardize_minus_cyl <- function(df, sph_clean, cyl_clean, axis_clean, logger =
     ax[idx]  <- wrap_axis_0_180(ax[idx] + 90)
   }
   odd <- setdiff(which(is.finite(ax) & (ax < 0 | ax > 180)), idx)
-  if (length(odd) > 0)
+  if (identical(axis_range, "0-179")) {
+    k180 <- which(is.finite(ax) & ax == 180)
+    if (length(odd) > 0)
+      logger(sprintf(
+        "Standardization: %d axis value(s) in '%s' outside 0-180 reduced modulo 180 (std_axis_range = 0-179; e.g. %s) - check the data.",
+        length(odd), disp_name(axis_clean, display_names),
+        paste(utils::head(unique(ax[odd]), 3), collapse = ", ")))
+    ax[is.finite(ax)] <- ax[is.finite(ax)] %% 180
+    logger(sprintf("Standardization of '%s': %d axis value(s) of 180 written as 0 (std_axis_range = 0-179: every axis in 0-179).",
+                   disp_name(axis_clean, display_names), length(k180)))
+  } else if (length(odd) > 0)
     logger(sprintf(
       "Standardization: %d axis value(s) in '%s' outside 0-180 left as recorded (e.g. %s) - check the data.",
       length(odd), disp_name(axis_clean, display_names),

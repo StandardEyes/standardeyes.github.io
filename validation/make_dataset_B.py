@@ -379,7 +379,7 @@ def write_settings():
         outcome={"continuous": ["FollowUp_Days", "Postop_SEQ_D", "Postop_Cylinder_D"],
                  "ordinal": [], "dichotomous": ["Retreatment_Indicated"], "categorical": []},
         groups={"Center 1": ["Center 1"], "Center 2": ["Center 2"]}, reference_group="Center 1",
-        group_colors={"Center 1": "#1F5FA8", "Center 2": "#D1495B"},
+        group_colors={"Center 1": "#0072B2", "Center 2": "#D55E00"},
         std_triples=[{"sph": "Preop_Sphere_D", "cyl": "Preop_Cylinder_D", "axis": "Preop_Axis_Deg"},
                      {"sph": "Target_Sphere_D", "cyl": "Target_Cylinder_D", "axis": "Target_Axis_Deg"},
                      {"sph": "Postop_Sphere_D", "cyl": "Postop_Cylinder_D", "axis": "Postop_Axis_Deg"}],

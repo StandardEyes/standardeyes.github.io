@@ -1109,6 +1109,7 @@ write_stacked_tables <- function(wb, sheet_name, sections, note = NULL, model_re
     # three decimals for the model numbers and the matching numbers (T1-03, T1-08)
     n3 <- if (is_model) names(d) %in% GEE_SHEET_NUM3
           else names(d) %in% c("Standardized difference before matching", "Standardized difference after matching",
+                                PSM_BALANCE_WORDS_RAW[["Diff.Un"]], PSM_BALANCE_WORDS_RAW[["Diff.Adj"]],
                                 "Matching weight") | startsWith(names(d), "Propensity score")
     if (nrow(d)) for (j in which(n3 & vapply(d, is.numeric, logical(1))))
       openxlsx::addStyle(wb, sn, num3, rows = row + seq_len(nrow(d)), cols = j, gridExpand = TRUE, stack = TRUE)
@@ -1160,6 +1161,12 @@ gee_sheet_frame <- function(d, ref = NULL) {
     # effect (95% CI) cell of the row
     if ("Model" %in% names(d))
       pf[!is.na(d$Model) & grepl(paste0("not estimable - ", NE_WITHIN_REASON), d$Model, fixed = TRUE)] <- NE_TEXT
+    # an outcome with no events in one group printed as the model returns it
+    # (separated_estimates = "report"): its P carries the marker too
+    if ("Model" %in% names(d)) {
+      sp <- !is.na(d$Model) & grepl(SEP_MODEL_TAG, d$Model, fixed = TRUE) & nzchar(pf)
+      pf[sp] <- paste0(pf[sp], SEP_DAGGER)
+    }
     at <- if ("CI" %in% names(d)) match("CI", names(d)) else ncol(d)
     d <- data.frame(d[seq_len(at)], .p_fmt = pf, d[setdiff(seq_len(ncol(d)), seq_len(at))],
                     check.names = FALSE, stringsAsFactors = FALSE)
@@ -1190,6 +1197,11 @@ gee_skip_note <- function(g, corstr = NULL) {
            ", ", gee_se_label(1), ". ", m_note)
     else if (length(corstr) && grepl("independence", corstr[1], fixed = TRUE))
       paste0("Matched cohort - working correlation: ", corstr[1], ". ", m_note)
+    # matched_gee_corstr = "exchangeable" (reproducing an earlier analysis)
+    else if (length(corstr) && startsWith(corstr[1], "exchangeable ("))
+      paste0("Matched cohort - working correlation: exchangeable (matched_gee_corstr = exchangeable)",
+             if (grepl("weighted", corstr[1], fixed = TRUE)) ", models weighted by the matching weights" else "",
+             ", ", gee_se_label(1), ". ", m_note)
     else NULL
   if (is.null(g) || nrow(g) == 0) return("NOTE: no GEE models were fitted.")
   if (!("Model" %in% names(g))) return(if (length(wtxt)) paste("NOTE:", wtxt) else NULL)
@@ -1228,6 +1240,11 @@ gee_skip_note <- function(g, corstr = NULL) {
   # an independence refit's label states its reason (decision V12-2); every
   # such label starts with GEE_INDEP_REFIT_HEAD
   n_ind <- n_of(get0("GEE_INDEP_REFIT_HEAD", ifnotfound = "independence working correlation (the exchangeable fit was not accepted"))
+  # separated_estimates = "report": the outcomes printed with their separated fit
+  n_sep <- n_of(get0("SEP_MODEL_TAG", ifnotfound = "separated_estimates = report"))
+  sep_txt <- if (n_sep > 0) paste0(n_sep, " outcome(s) have no events (or only events) in one group: the estimate, ",
+                                   "CI and P the model returns are printed, marked ", SEP_DAGGER, " - ",
+                                   SEP_FOOT_NONE, " (separated_estimates = report).")
   r34 <- c(if (n_pp > n_pp_gee) paste0(n_pp - n_pp_gee, " outcome(s) are per-patient variables: modeled on one row per patient ",
                                 "by an ordinary linear or logistic model (model-based SE), never by an eye-level ",
                                 "GEE - see the 'Model' column."),
@@ -1239,6 +1256,7 @@ gee_skip_note <- function(g, corstr = NULL) {
                                  "exchangeable fit was not accepted (working correlation 0.95 or more, no ",
                                  "convergence, or an unstable scoring step - the 'Model' column gives the reason of ",
                                  "each); the robust SE stay clustered by patient."))
+  r34 <- c(r34, sep_txt)
   if (bad == 0 && !few && !length(wtxt) && !length(r34) && !length(ne_txt)) return(NULL)
   # without a patient ID each eye is its own cluster and the cautions count eyes
   unit <- if (few && all(grepl("with few eyes$", cau))) "eyes" else "patients"
@@ -1432,12 +1450,29 @@ pub_values_note <- function(out, va_decimal = character(0)) {
 # the classical table tests can differ from the figures' clustered P values
 # (table_tests = "classical", finding S3). va_decimal: the acuity columns
 # analyzed as decimal acuity, by their headers (pub_values_note).
+# The Publication Table footnote line on the GEE columns when an option that
+# reproduces an earlier analysis changes how they are fitted (helpers.R
+# REPRO_OPTIONS); NULL with the defaults. matched / weighted: the table's
+# cohort is matched / its GEE models use non-unit matching weights.
+gee_rule_foot <- function(matched = FALSE, weighted = FALSE) {
+  parts <- c(
+    if (isTRUE(matched) && matched_gee_exchangeable())
+      paste0("an exchangeable working correlation (matched_gee_corstr = exchangeable)",
+             if (isTRUE(weighted)) ", models weighted by the matching weights" else ""),
+    if (identical(repro_opt("gee_refit"), "off"))
+      "every exchangeable fit that converged is kept, whatever its working correlation (gee_refit = off)")
+  if (!length(parts)) return(NULL)
+  paste0("GEE columns: ", paste(parts, collapse = "; "), ".")
+}
+
+# model_note: an optional footnote line on how the GEE column was fitted, when
+# an option reproducing an earlier analysis changes it (gee_rule_foot).
 make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_note = NULL,
-                                   va_decimal = character(0), weights_note = NULL) {
+                                   va_decimal = character(0), weights_note = NULL, model_note = NULL) {
   drop_cols <- c("Test", "Practical Interpretation")
   secs <- list()
   ne_why <- character(0); ne_row <- character(0)
-  nw_row <- character(0)
+  nw_row <- character(0); sep_row <- character(0)
   t_lab <- character(0); t_row <- character(0)
   c_txt <- character(0); c_row <- character(0)
   for (nm in names(sections)) {
@@ -1466,6 +1501,14 @@ make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_
     if (any(nw))
       nw_row <- c(nw_row, if (!is.null(rv)) rv[nw] else if ("Parameter" %in% names(d)) d$Parameter[nw]
                           else rep(nm, sum(nw)))
+    # an outcome with no events in one group printed as its model returns it
+    # (separated_estimates = "report"): marked, and named in a footnote
+    sp <- rep(FALSE, nrow(d))
+    for (cc in intersect(c("GEE effect (95% CI)", "GEE p value"), names(d)))
+      sp <- sp | grepl(SEP_DAGGER, as.character(d[[cc]]), fixed = TRUE)
+    if (any(sp))
+      sep_row <- c(sep_row, if (!is.null(rv)) rv[sp] else if ("Parameter" %in% names(d)) d$Parameter[sp]
+                            else rep(nm, sum(sp)))
     # the few-patients caution of a row's P value or GEE column (D19, finding
     # S2-3): the Interpretation column is not in this sheet, so a footnote
     # names it with the rows it applies to
@@ -1542,6 +1585,9 @@ make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_
   foot <- character(0)
   if (length(nw_row))
     foot <- paste0(NE_WITHIN_FOOT, " (", paste(unique(nw_row), collapse = "; "), ").")
+  if (length(sep_row))
+    foot <- c(foot, if (length(foot)) "",
+              paste0(SEP_DAGGER, " ", SEP_FOOT_NONE, " (", paste(unique(sep_row), collapse = "; "), ")."))
   if (length(ne_why)) {
     if (length(foot)) foot <- c(foot, "")
     # one line per distinct reason, in order of first appearance
@@ -1558,6 +1604,10 @@ make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_
   if (length(vals)) foot <- c(foot, if (length(foot)) "", vals)
   # an unweighted matched table (matched_table_weights = none) says so
   if (length(weights_note) && nzchar(weights_note[1])) foot <- c(foot, if (length(foot)) "", weights_note[1])
+  # how the GEE column was fitted, when an option reproducing an earlier
+  # analysis changes it (an exchangeable working correlation on a matched
+  # cohort, no refit to independence)
+  if (length(model_note) && nzchar(model_note[1])) foot <- c(foot, if (length(foot)) "", model_note[1])
   if (length(t_lab)) {
     # one line per test, in order of first appearance (decision D12)
     foot <- c(foot, if (length(foot)) "", "Tests behind the P values:",
@@ -1709,13 +1759,22 @@ psm_method_label <- function(psm) {
 PSM_BALANCE_WORDS <- c(Type = "Type", Diff.Un = "Standardized difference before matching",
                        Diff.Adj = "Standardized difference after matching",
                        M.Threshold = "Balanced (|SMD| < 0.1)", M.Threshold.Un = "Balanced before matching (|SMD| < 0.1)")
+# smd_binary = "raw" (reproducing an earlier analysis): a binary covariate's
+# row is the raw difference in proportions, and the headers say so
+PSM_BALANCE_WORDS_RAW <- c(Type = "Type",
+                           Diff.Un = "Difference before matching (standardized; binary: raw difference in proportions)",
+                           Diff.Adj = "Difference after matching (standardized; binary: raw difference in proportions)",
+                           M.Threshold = "Balanced (|difference| < 0.1)",
+                           M.Threshold.Un = "Balanced before matching (|difference| < 0.1)")
+psm_balance_raw <- function() identical(repro_opt("smd_binary"), "raw")
 psm_balance_words <- function(d) {
+  words <- if (psm_balance_raw()) PSM_BALANCE_WORDS_RAW else PSM_BALANCE_WORDS
   if ("Type" %in% names(d))
     d$Type <- ifelse(as.character(d$Type) == "Contin.", "Continuous", as.character(d$Type))
   for (k in c("M.Threshold", "M.Threshold.Un")) if (k %in% names(d))
     d[[k]] <- sub("^Balanced, <0.1$", "yes", sub("^Not Balanced, >0.1$", "no", as.character(d[[k]])))
-  hit <- names(d) %in% names(PSM_BALANCE_WORDS)
-  names(d)[hit] <- unname(PSM_BALANCE_WORDS[names(d)[hit]])
+  hit <- names(d) %in% names(words)
+  names(d)[hit] <- unname(words[names(d)[hit]])
   d
 }
 
@@ -2120,7 +2179,8 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
       list(`Baseline characteristics`      = baseline_tbl,
            `Preoperative / intraoperative` = preop_tbl,
            `Outcomes`                      = outcome_tbl), tests_note = tests_note,
-      va_decimal = dn(vi$as_decimal))
+      va_decimal = dn(vi$as_decimal),
+      model_note = if (gee_stage %in% c("unmatched", "both") && isTRUE(cfg$add_gee_columns)) gee_rule_foot(FALSE))
 
   if (isTRUE(cfg$make_meyestro))
     optional_tab("mEYEstro tabs", make_meyestro_tabs(dat, wb, res$roles, pairing = NULL,
@@ -2325,7 +2385,10 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
                                    # their folder can still be told apart
                                    if (!is.null(run) && length(run$values)) paste0(", subset: ", run$label) else "",
                                    if (by_patient) paste0(", ", PSM_PATIENT_UNIT_TEXT) else ""),
-                            c(paste0("Standardized mean differences of the matching covariates before ",
+                            c(paste0("Standardized mean differences of the matching covariates",
+                                     # smd_binary = raw: a binary covariate's point is its raw difference
+                                     if (psm_balance_raw()) " (a binary covariate: the raw difference in proportions, smd_binary = raw)",
+                                     " before ",
                                      "and after matching (the key's \"Before matching\" and \"After matching\" ",
                                      "samples), computed by cobalt",
                                      if (by_patient) paste0(" on the patient units (one per patient per group; ",
@@ -2334,11 +2397,14 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
                                      "; the ",
                                      "dashed lines mark -0.1 and 0.1; gray circles, before matching; black ",
                                      "triangles, after matching."),
-                              "* (where shown): the raw (unstandardized) difference in means.",
+                              if (psm_balance_raw())
+                                "* (where shown): the raw (unstandardized) difference - in proportions for a binary covariate."
+                              else "* (where shown): the raw (unstandardized) difference in means.",
                               if (!is.na(psm_score_scale(psm$distance)))
                                 paste0(psm_score_label(psm$distance), ": the ", psm_score_scale(psm$distance),
                                        ", on which the matching was done.")),
-                            texts = c(bal_shown, "Standardized Mean Differences"), cfg = cfg)
+                            texts = c(bal_shown, if (psm_balance_raw()) "Mean Differences" else "Standardized Mean Differences"),
+                            cfg = cfg)
           }
         }
       }
@@ -2375,7 +2441,10 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
 
       # One merged PSM sheet per pairing: settings (with the method this pairing
       # actually ran) + covariates + balance + PS dist
-      bal_title <- if (by_patient)
+      bal_title <- if (psm_balance_raw())
+        paste0("Covariate balance", if (by_patient) " on the patient units", " (cobalt; standardized differences, ",
+               "raw differences in proportions for binary covariates - smd_binary = raw)")
+        else if (by_patient)
         "Covariate balance on the patient units (cobalt; standardized differences for every covariate)"
         else "Covariate balance (cobalt; standardized differences for every covariate)"
       psm_secs <- list(
@@ -2515,7 +2584,9 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
           list(`Baseline characteristics`      = b_m,
                `Preoperative / intraoperative` = p_m,
                `Outcomes`                      = o_m), note = w_note, tests_note = tests_note,
-          va_decimal = dn(vi$as_decimal), weights_note = w_foot)
+          va_decimal = dn(vi$as_decimal), weights_note = w_foot,
+          model_note = if (gee_stage %in% c("matched", "both") && isTRUE(cfg$add_gee_columns))
+                         gee_rule_foot(TRUE, use_w && w_nonunit))
 
       # the pairing's number names its export tabs ("AstigMATIC_M1_<group>")
       pair_no <- match(lab, vapply(pairings, function(q) as.character(q$label)[1], character(1)))
@@ -3022,13 +3093,28 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
         paste0(gee_small_sample(), " - ",
                gee_inference_text(unit = if (!is.na(pid[1]) && pid[1] %in% names(dat)) "patient" else "eye"))),
       c("GEE working correlation",
-        paste0("exchangeable, kept only if the fit converged, its working correlation is below ",
+        paste0(if (identical(repro_opt("gee_refit"), "off"))
+                 paste0("exchangeable, every fit that converged kept whatever its working correlation (gee_refit = ",
+                        "off) - one that did not converge refitted with an independence working correlation and ",
+                        "labeled so (sheets, tables, figures, run log); ")
+               else paste0("exchangeable, kept only if the fit converged, its working correlation is below ",
                get0("GEE_EXCH_ALPHA_MAX", ifnotfound = 0.95), " and one further scoring step moves no coefficient ",
                "by more than ", get0("GEE_EXCH_STEP_MAX", ifnotfound = 0.01), " SE - otherwise refitted with an ",
-               "independence working correlation and labeled so (sheets, tables, figures, run log); independence on ",
-               "matched cohorts; variables marked per patient are modeled on one row per patient by an ordinary ",
+               "independence working correlation and labeled so (sheets, tables, figures, run log); "),
+               if (matched_gee_exchangeable())
+                 paste0("exchangeable on matched cohorts too for the GEE models (matched_gee_corstr = exchangeable; ",
+                        "the clustered table tests and figure P values: independence); ")
+               else "independence on matched cohorts; ",
+               "variables marked per patient are modeled on one row per patient by an ordinary ",
                "linear or logistic model (on matched cohorts, and when a patient has eyes in more than one group, ",
-               "by an independence GEE with the robust SE clustered by patient), never by an eye-level GEE")),
+               "by an independence GEE with the robust SE clustered by patient), never by an eye-level GEE",
+               if (identical(repro_opt("separated_estimates"), "report"))
+                 paste0("; an outcome with no events (or only events) in one group prints the estimate, CI and P ",
+                        "its model returns (geepack's default iterations, no refit), marked ", SEP_DAGGER, " - ",
+                        SEP_FOOT_NONE, " (separated_estimates = report)"))),
+      # the options that reproduce an earlier analysis, when any is not at its
+      # default (helpers.R REPRO_OPTIONS)
+      if (length(repro_nondefault())) c("Reproduce an earlier analysis", repro_options_text()),
       # (the per-patient rows of an unmatched cohort with a patient in two
       # groups are tested clustered: said only for such a cohort - never in
       # the matched-only workbook, whose tables are all matched)
@@ -3055,7 +3141,10 @@ add_contents_and_manifest <- function(wb, dat, cfg, res, logger = message,
                                             paste(dn(as.character(unlist(res$regression_covs_clean))), collapse = ", ")
                                           else "none",
                                           if (length(unres$regression)) paste0("; ", .not_found_txt(unres$regression)) else "")),
-      c("Minus-cyl standardization", ifelse(isTRUE(cfg$do_standardize_minus_cyl), "on", "off")),
+      c("Minus-cyl standardization", paste0(ifelse(isTRUE(cfg$do_standardize_minus_cyl), "on", "off"),
+                                            if (isTRUE(cfg$do_standardize_minus_cyl) &&
+                                                identical(repro_opt("std_axis_range"), "0-179"))
+                                              "; every axis of a standardized refraction in 0-179, an axis of 180 written as 0 (std_axis_range = 0-179)")),
       c("Astigmatism vectors",  paste0("plus-cylinder format (JCRS 2025), converted by the sign of each cylinder ",
                                        "whatever the minus-cylinder switch; with-the-rule on the left of the ",
                                        "double-angle plots; SIA = postoperative - preoperative, PE = postoperative - ",

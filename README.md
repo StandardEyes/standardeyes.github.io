@@ -108,6 +108,30 @@ runs as before, and it matches eyes. The table rows are named in a print-ready f
   nearest-neighbor matching without replacement: with exact or coarsened exact matching, subclassification or
   replacement the weights are the matching itself, so the interface refuses the run and the matched tables of
   a settings file asking for it keep the weights (the run log says why).
+- **Options to reproduce an earlier analysis.** GEE tab, the collapsed section *Reproduce an earlier analysis
+  (advanced)*, to repeat the numbers of an analysis script that used other rules. The first value of each
+  settings-file key is the default and keeps the 1.1.0 rule, so a settings file without the keys runs as
+  before: `matched_gee_corstr` (`"independence"` | `"exchangeable"`), the working correlation of the matched
+  GEE models (GEE sheets and GEE columns; the clustered table tests and figure P values stay independence);
+  `gee_refit` (`"on"` | `"off"`), where off keeps every exchangeable GEE that converged whatever its working
+  correlation (one that did not converge is still refitted and labeled); `separated_estimates` (`"ne"` |
+  `"report"`), where report prints, for an outcome with no events in one group, the estimate, CI and P the
+  GEE returns (fitted as geepack fits it by default, on the rows in the data's order), each marked † with the
+  footnote "no events in one group: estimate unreliable" and counted in the run log; `std_axis_range`
+  (`"as_recorded"` | `"0-179"`), where 0-179 reduces every axis of a converted refraction modulo 180, so an
+  axis of 180 reads 0 (the axis rows and the export tabs change; sphere, cylinder and SEQ do not); and
+  `smd_binary` (`"standardized"` | `"raw"`), where raw gives the balance of a binary matching covariate as
+  the raw difference in proportions (cobalt's own default) in the PSM sheet and the love plot. *Matched
+  tables* (above) stays on the Matching tab. The Manifest, the run log and the table footnotes and legends
+  name every value that is not the default.
+- **An R version notice.** When the R found is not 4.5.x (the version the bundled R packages were built for),
+  the interface shows a notice with the link to R 4.5.2 for Windows
+  (https://cran.r-project.org/bin/windows/base/old/4.5.2/), and so do the console window, the run log and the
+  R setup screen. The analysis still runs.
+- **Color-blind-safe example colors.** The seven example settings files and presets draw their groups in
+  Okabe-Ito colors (blue, orange, vermillion, sky blue, reddish purple), chosen so that the black identity
+  line and the green / magenta ±0.50 D / ±1.00 D lines stay clear of every group. The software's own default
+  colors are unchanged.
 - **Display labels for print-ready tables and figures.** Variables & Types tab, *Output order*: type a label
   beside a variable, such as "Age (y)" or "Central pachymetry (µm)", and the tables, model sheets, balance
   tables and love plots print it instead of the column name (settings-file key `display_labels`, column → label;

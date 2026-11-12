@@ -779,17 +779,23 @@ def apply_mutations(df: pd.DataFrame, cfg: dict, resolver: Resolver) -> pd.DataF
             "sph": cfg.get("std_sph_raw"), "cyl": cfg.get("std_cyl_raw"),
             "axis": cfg.get("std_axis_raw"),
         }]
+        # setting std_axis_range (R/helpers.R standardize_minus_cyl): "0-179"
+        # reduces every axis of a converted set modulo 180, so a filter on the
+        # axis sees what the run analyzes
+        ax_rng = str(cfg.get("std_axis_range") or "").strip().lower().replace("_", "-").replace(" ", "-")
+        zero_179 = ax_rng in ("0-179", "0-to-179", "modulo-180")
         for tr in triples:
             df = standardize_minus_cyl(
                 df,
                 resolve((tr or {}).get("sph"), resolver),
                 resolve((tr or {}).get("cyl"), resolver),
                 resolve((tr or {}).get("axis"), resolver),
+                zero_179=zero_179,
             )
     return df
 
 
-def standardize_minus_cyl(df: pd.DataFrame, sph_c, cyl_c, axis_c) -> pd.DataFrame:
+def standardize_minus_cyl(df: pd.DataFrame, sph_c, cyl_c, axis_c, zero_179: bool = False) -> pd.DataFrame:
     if not all(c in df.columns for c in (sph_c, cyl_c, axis_c) if c is not None):
         return df
     if sph_c is None or cyl_c is None or axis_c is None:
@@ -803,6 +809,9 @@ def standardize_minus_cyl(df: pd.DataFrame, sph_c, cyl_c, axis_c) -> pd.DataFram
     idx = pd.Series(np.isfinite(cyl.to_numpy()), index=cyl.index) & (cyl > 0)   # is.finite()
     sph = sph.where(~idx, sph + cyl)
     ax_new = ax.where(~idx, _wrap_axis_0_180(ax + 90))
+    if zero_179:
+        # std_axis_range = "0-179": every axis modulo 180 (an axis of 180 reads 0)
+        ax_new = ax_new.mod(180)
     cyl = cyl.where(~idx, -cyl)
     df[sph_c], df[cyl_c], df[axis_c] = sph, cyl, ax_new
     return df

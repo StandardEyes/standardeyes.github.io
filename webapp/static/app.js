@@ -65,6 +65,21 @@ const PSM_UNITS = [["eye","eyes"],["patient","patients (both eyes together)"]];
 // MATCHED_TABLE_WEIGHTS; R/analysis.R matched_table_weights_of)
 const MATCHED_TABLE_WEIGHTS = [["weights","weighted by the matching weights (default)"],
                                ["none","unweighted: every matched eye counts once"]];
+// the options that reproduce an earlier analysis (config_schema REPRO_CHOICES;
+// R/helpers.R REPRO_OPTIONS): the first value of each is the default
+const REPRO_OPTIONS = {
+  matched_gee_corstr: [["independence","independence (default)"],["exchangeable","exchangeable"]],
+  gee_refit: [["on","on: refit when the exchangeable fit is not accepted (default)"],["off","off: keep every converged exchangeable fit"]],
+  separated_estimates: [["ne","not estimable (default)"],["report","report the model's estimate, marked †"]],
+  std_axis_range: [["as_recorded","as recorded, 1-180 (default)"],["0-179","0-179: an axis of 180 written as 0"]],
+  smd_binary: [["standardized","standardized difference (default)"],["raw","raw difference in proportions"]]};
+// the words the engine reads as each value (R/helpers.R repro_norm)
+const REPRO_ALIASES = {
+  gee_refit: {"true":"on","1":"on","yes":"on","false":"off","0":"off","no":"off"},
+  separated_estimates: {"not estimable":"ne"},
+  std_axis_range: {"as recorded":"as_recorded","as-recorded":"as_recorded","0 179":"0-179",
+                   "0 to 179":"0-179","modulo 180":"0-179"},
+  smd_binary: {"std":"standardized"}};
 // matching distances that are not propensity scores (config_schema
 // _NON_PS_DISTANCES): MatchIt takes no caliper in score SDs and no
 // largest / smallest match order with them, and subclass cannot use them
@@ -250,6 +265,9 @@ function defaultState(){
       // v1.0.0) and the summary tables' tests (D12: "auto" = patient-clustered
       // when a patient has two analysed eyes, "classical" = v1.0.0)
       gee_small_sample:"md", table_tests:"auto",
+      // reproduce an earlier analysis (REPRO_OPTIONS): the StandardEyes rules by default
+      matched_gee_corstr:"independence", gee_refit:"on", separated_estimates:"ne",
+      std_axis_range:"as_recorded", smd_binary:"standardized",
       // subset_mode: "separate" (one workbook per subset) | "both" (+ pooled) | "pooled" (pooled only)
       subset_col_raw:"", subsets:[], subset_mode:"separate",
       do_standardize_minus_cyl:true, std_triples:[],
@@ -401,6 +419,16 @@ function builder(){
     // ratio (config_schema matched_table_weights_problem; with exact, cem,
     // subclassification or replacement the weights are the matching itself)
     mtwNoneOk(){ return this.s.psm_method==="nearest" && !this.s.psm_replace; },
+    // the choices of an option that reproduces an earlier analysis, with a
+    // value from loaded settings that is not one of them kept (and named)
+    reproChoices(k){
+      const o=REPRO_OPTIONS[k]||[];
+      return o.some(u=>u[0]===this.s[k]) ? o : o.concat([[this.s[k], this.s[k]+" (from the loaded settings)"]]);
+    },
+    // the options of REPRO_OPTIONS not at their default: [key, value]
+    reproNonDefault(){
+      return Object.keys(REPRO_OPTIONS).filter(k=>this.s[k]!==REPRO_OPTIONS[k][0][0]).map(k=>[k,this.s[k]]);
+    },
     // the chosen distance is not a propensity score (mahalanobis, ...)
     psmNonPS(){ return NON_PS_DISTANCES.includes(rTrim(this.s.psm_distance??"").toLowerCase()); },
     // options the server accepts with the chosen method / distance (others are greyed out)
@@ -598,7 +626,7 @@ function builder(){
     },
 
     // ---- R setup: first-run "where is R?" screen ----
-    rSetupOpen:false, rInfo:{rscript:null,info:"",candidates:[]},
+    rSetupOpen:false, rInfo:{rscript:null,info:"",candidates:[],notice:"",r45_url:""},
     rPathInput:"", rMsg:"", rMsgOk:false,
     async loadRSetup(openIfMissing){
       try{
@@ -654,6 +682,9 @@ function builder(){
         this.serverBusy = !!j.running && !this.running;
         this.watchBusy();
         if(!j.rscript) this.loadRSetup(true);
+        // R found: ask once for its version, for the notice shown when it is
+        // not R 4.5.x (rInfo.notice; never blocks a run)
+        else if(!this._rVersionAsked){ this._rVersionAsked=true; this.loadRSetup(false); }
       }catch(e){
         this.serverDown=true;
         this._hcT=setTimeout(()=>this.checkVersion(), 3000);
@@ -1654,6 +1685,8 @@ function builder(){
         gee_adjust_covariates_raw:s.gee_adjust_covariates_raw, use_matching_weights_in_gee:s.use_matching_weights_in_gee,
         add_gee_columns:s.add_gee_columns, gee_source_for_tables:s.gee_source_for_tables,
         gee_small_sample:s.gee_small_sample, table_tests:s.table_tests,
+        matched_gee_corstr:s.matched_gee_corstr, gee_refit:s.gee_refit, separated_estimates:s.separated_estimates,
+        std_axis_range:s.std_axis_range, smd_binary:s.smd_binary,
         subset_col_raw:s.subset_col_raw, subsets, subset_rows, subset_mode,
         subset_pooled: subset_mode!=="separate",   // legacy flag, kept for older readers
         within_group: wg,
@@ -1723,6 +1756,7 @@ function builder(){
        "age_var","fu_var","sex_var","do_matching","psm_covariates_raw","psm_method","psm_distance",
        "psm_ratio","psm_replace","psm_caliper","psm_std_caliper","psm_m_order","psm_unit",
        "matched_table_weights","run_gee_stage",
+       "matched_gee_corstr","gee_refit","separated_estimates","std_axis_range","smd_binary",
        "run_main_gee","run_adjusted_gee","gee_adjust_covariates_raw","use_matching_weights_in_gee",
        "add_gee_columns","gee_source_for_tables","gee_small_sample","table_tests","subset_col_raw",
        "do_standardize_minus_cyl",
@@ -1752,6 +1786,15 @@ function builder(){
       if(s.p_style==="jcrs") s.p_style="ama";
       if(s.psm_unit==="eyes") s.psm_unit="eye";
       if(s.psm_unit==="patients") s.psm_unit="patient";
+      // the options that reproduce an earlier analysis: read as the engine
+      // reads them (blank or missing = the default, their aliases, true / false
+      // for the refit); an unknown value is kept, so the run's check names it
+      for(const k of Object.keys(REPRO_OPTIONS)){
+        const canon=REPRO_OPTIONS[k].map(o=>o[0]);
+        const v=String(s[k]??"").trim().toLowerCase().replace(/[_ ]+/g," ");
+        s[k] = !v ? canon[0]
+             : (canon.find(o=>o.replace(/_/g," ")===v) ?? (REPRO_ALIASES[k]||{})[v] ?? String(s[k]).trim());
+      }
       // the on/off settings are read as the server reads them (config_schema
       // SWITCHES): blank = the default, "true" / "false" (yes / no, on / off)
       // text and 1 / 0 the switch; any other value is kept, so the run's check
@@ -2185,6 +2228,12 @@ function builder(){
       out.push(["GEE inference", s.gee_small_sample==="none"
         ? "uncorrected robust SE, normal reference (v1.0.0)"
         : "Mancl-DeRouen robust SE, t reference (F for joint tests)"]);
+      // the options that reproduce an earlier analysis, only when one is changed
+      { const nd=this.reproNonDefault();
+        if(nd.length) out.push(["Reproduce an earlier analysis", nd.map(([k,v])=>{
+          const o=(REPRO_OPTIONS[k]||[]).find(u=>u[0]===v);
+          return k+" = "+(o ? o[1] : v+" (not a known value: the run is refused)");
+        }).join("; ")]); }
       out.push(["Table tests", s.table_tests==="classical" ? "classical (v1.0.0)"
         : !s.cluster_by_patient ? "classical - patient clustering is switched off (Special outputs)"
         : !pid ? "classical - no patient ID column is mapped"

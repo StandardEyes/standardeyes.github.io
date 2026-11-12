@@ -77,8 +77,8 @@
   },
   "reference_group": "LASIK",
   "group_colors": {
-    "LASIK": "#F26522",
-    "KLEx": "#1B9E4B"
+    "LASIK": "#E69F00",
+    "KLEx": "#56B4E9"
   },
   "group_labels": {},
   "do_matching": false,

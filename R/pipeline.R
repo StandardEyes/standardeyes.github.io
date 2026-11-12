@@ -904,6 +904,20 @@ display_labels_of <- function(cfg, raw_names, disp_map, logger = message) {
     logger(sprintf(paste0("Display label '%s' of column '%s' is not used: another variable is printed under the ",
                           "same name - the column header is printed instead."), labs[match(k, keys)],
                    disp_name(k, disp_map)))
+  # a label that is another column's own header (ignoring case), whether or
+  # not that column has a label of its own: the run log and the Manifest name
+  # that column by its header, so the tables would print one variable under
+  # another's name (finding R5 of the build se.12 review)
+  hdr <- stats::setNames(tolower(trimws(as.character(disp_map))), names(disp_map))
+  for (k in setdiff(keys, clash)) {
+    lab_k <- tolower(labs[match(k, keys)])
+    other <- names(hdr)[names(hdr) != k & hdr == lab_k]
+    if (!length(other)) next
+    clash <- c(clash, k)
+    logger(sprintf(paste0("Display label '%s' of column '%s' is not used: it is the header of another column ",
+                          "('%s') - the column header is printed instead."), labs[match(k, keys)],
+                   disp_name(k, disp_map), disp_name(other[1], disp_map)))
+  }
   ok <- !(keys %in% clash)
   if (!any(ok)) return(NULL)
   logger(sprintf(paste0("Display labels: %d column(s) labeled - the tables, model sheets, balance tables and ",
@@ -1066,6 +1080,14 @@ run_analysis_pipeline <- function(cfg, logger = message, progress = NULL) {
   if (length(mtw_req) && !is.na(mtw_req) && nzchar(mtw_req) && !(mtw_req %in% MATCHED_TABLE_WEIGHTS))
     logger(sprintf("Matched tables setting '%s' is not known (use weights or none) - weights is used.",
                    as.character(unlist(cfg$matched_table_weights))[1]))
+  # "none" where the weights are the matching (analysis.R
+  # matched_table_weights_refused): refused, said why, and the weights used
+  mtw_no <- if (isTRUE(cfg$do_matching)) matched_table_weights_refused(cfg) else ""
+  if (nzchar(mtw_no))
+    logger(paste0("WARNING: Matched tables 'none' (unweighted) is not available with ", mtw_no,
+                  ": an unweighted table of the retained eyes would not be a matched comparison, so the matched ",
+                  "tables use the matching weights. Unweighted matched tables need nearest-neighbor matching ",
+                  "without replacement."))
   if (isTRUE(cfg$do_matching)) logger(paste0("Matched tables: ", matched_table_weights_text(cfg), "."))
 
   # matching on, but none of its covariates is in the file: said once, here

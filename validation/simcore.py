@@ -593,8 +593,8 @@ def settings(data_file, **over):
 
 # Clinical labels for print (setting display_labels, build se.12): every
 # variable a settings file prints in a table, a model sheet, a balance table or
-# a love plot gets one (acuity: analyzed in logMAR in every shipped settings
-# file, whatever the recorded notation). A label equal to its column name is
+# a love plot gets one (acuity without a unit: its cells print Snellen and logMAR,
+# as the Values footnote says, finding R2-07). A label equal to its column name is
 # not written.
 _MU = "\u00b5"
 DISPLAY_LABELS = {
@@ -619,7 +619,7 @@ DISPLAY_LABELS = {
 for _when, _word in (("Preop", "Preoperative"), ("Postop", "Postoperative")):
     for _va in ("UDVA", "CDVA"):
         for _sfx in ("", "_logMAR", "_Snellen", "_Letters"):
-            DISPLAY_LABELS[f"{_when}_{_va}{_sfx}"] = f"{_word} {_va} (logMAR)"
+            DISPLAY_LABELS[f"{_when}_{_va}{_sfx}"] = f"{_word} {_va}"
 
 
 def display_labels_for(cfg):

@@ -66,38 +66,57 @@ runs as before, and it matches eyes. The table rows are named in a print-ready f
   holds the 20 columns of mEYEstro's data file in its order (row 1 its headers, one row per eye from row 2):
   refraction in minus cylinder, vertex distance 12 mm, acuity as the Snellen denominator (text), and the
   postoperative SEQ at up to five stability visits in its last five columns (blank without stability visits),
-  so the block pastes into the data file as one range. The AstigMATIC tab holds its 5 input columns. A zero
-  cylinder gets the axis 180 in both (a blank axis made AstigMATIC drop the eye); an unknown cylinder stays
-  blank. AstigMATIC assumes a plano astigmatic target, so eyes with a non-plano astigmatic target are left out of
-  its tab, and the tab's note, the Contents sheet and the run log count them ("183 eyes kept, 39 left out:
-  non-plano astigmatic target"). The Contents sheet gives the cells to copy for each tab.
+  so the block pastes into the data file as one range. Columns 1-15 are required by mEYEstro, so an eye without
+  a refraction or target value is left out of the tab, and a missing acuity (an off-chart CF, HM, LP or NLP
+  included) is a text cell holding one space, as mEYEstro data files hold it; the run log and the Contents sheet
+  count both. The AstigMATIC tab holds its 5 input columns. A zero cylinder gets the axis 180 in both (a blank
+  axis made AstigMATIC drop the eye); the mEYEstro paper writes a plano target as 0, 0, 0, and the axis of a
+  zero cylinder enters no calculation. AstigMATIC assumes a plano astigmatic target and discards a row with a
+  missing value, so eyes with a non-plano astigmatic target or a missing cylinder, axis or eye code are left
+  out of its tab, and the tab's note, the Contents sheet and the run log count them ("183 eyes kept, 39 left
+  out: non-plano astigmatic target"). The Contents sheet gives the cells to copy for each tab.
+  **Correction:** in 1.1.0 the mEYEstro tab placed the postoperative CDVA before the UDVA. mEYEstro reads the
+  UDVA first, so mEYEstro graphs made from a 1.1.0 tab show the two swapped: export the tab again with 1.2.0.
 - **NE when a variable does not vary within the groups.** A continuous or ordinal variable that is constant
   within each compared group but differs between them (one optical zone per platform) leaves no variability to
-  test against: its table test, GEE and adjusted-regression comparisons, unmatched and matched, print NE in the
-  effect, CI and P cells instead of β = 0.00 (95% CI, 0.00 to 0.00) and P < .001, with the footnote "NE, not
-  estimable: no variation within groups"; the run log names the rows. Every other value is unchanged.
+  estimate: its GEE and adjusted-regression comparisons, unmatched and matched, print NE in the effect, CI and P
+  cells instead of β = 0.00 (95% CI, 0.00 to 0.00) and P < .001, with the footnote "NE, not estimable: no
+  variation within groups", and so does a table test that needs a within-group variance (Welch, the weighted
+  Wald test); a rank test or the permutation test over patients needs none and keeps its P value. With three or
+  more groups, a comparison of two groups that both do not vary is NE while the other comparisons are
+  estimated, and it stays out of the Holm adjustment. The run log names the rows. Every other value is
+  unchanged.
 - **The identity and zero lines are never a group color.** The y = x line of the two scatters and the zero line
   of the stability graph are solid black (dark gray when a group is drawn close to black); the legends name it.
+  The ±0.50 D and ±1.00 D lines of the scatters stay green and magenta unless a group is drawn in a color close
+  to them; then they take another color far from every group color (olive or dark green; violet or pink), and
+  the legends name it.
 - **An enlarged centroid panel beside every double-angle plot.** At print size the 95% confidence region of a
   centroid is often smaller than its marker, so each double-angle plot (preoperative astigmatism, SIA,
   prediction error and postoperative astigmatism) now has a small panel with each cohort's centroid and the
   dashed 95% confidence region of the centroid, enlarged on the plot's own axes (x and y in diopters) at a scale
   set by the regions. It is drawn at the right of the plot, or under it when the figure is too narrow (a
-  combined figure 12.69 cm wide); the legend file says which. The centroid markers of the plot are smaller, so a larger region shows around them there
-  too. No number changes. Special outputs tab, untick *Enlarged centroid panels* (`astig_centroid_panels:
-  false`) to leave the panels out.
+  combined figure 12.69 cm wide); the legend file says which. The centroid markers of the plot are smaller, so
+  a larger region shows around them there too. No number changes. Special outputs tab, untick *Enlarged
+  centroid panels* (`astig_centroid_panels: false`) to leave the panels out.
 - **Matched tables without the weights (option).** Matching tab, *Matched tables* = unweighted; settings-file
   key `matched_table_weights: "none"` (the default `"weights"` keeps the 1.1.0 rule). Every matched eye then
   counts once in the matched descriptives and table tests; the matched GEE and regression models still follow
   *Use matching weights in matched GEE* (GEE tab). The note above each matched table, the Publication Table
-  footnote, the Manifest and the figure legends say which weighting the matched tables use.
+  footnote, the Manifest and the figure legends say which weighting the matched tables use. It needs
+  nearest-neighbor matching without replacement: with exact or coarsened exact matching, subclassification or
+  replacement the weights are the matching itself, so the interface refuses the run and the matched tables of
+  a settings file asking for it keep the weights (the run log says why).
 - **Display labels for print-ready tables and figures.** Variables & Types tab, *Output order*: type a label
   beside a variable, such as "Age (y)" or "Central pachymetry (µm)", and the tables, model sheets, balance
   tables and love plots print it instead of the column name (settings-file key `display_labels`, column → label;
   empty = the column name). The data sheets, the mEYEstro / AstigMATIC tabs, the filtered CSV and the WHWK files
   keep the column names. Rows now read "Age (y), per patient", "Glare or halo symptoms, n/N (%)" and "Sex: F, per
-  patient, n/N (%)" instead of "Age_Years [per patient]" and "Sex (F) [per patient]". The seven example
-  settings files carry clinical labels.
+  patient, n/N (%)" instead of "Age_Years [per patient]" and "Sex (F) [per patient]". A counted level is left
+  out of the row's name only when it is the "yes" of a natural pair (Yes / No, Y / N, True / False, 1 / 0,
+  Present / Absent, Positive / Negative); a variable coded 1 / 2 reads "Sex: 1, per patient, n/N (%)". A label
+  that is another variable's printed name or another column's header is not used (the run log says so). The
+  seven example settings files carry clinical labels.
 - **The sheet viewer wraps long cells.** On the Run & Results tab a sheet opens as the workbook holds it (no
   "Unnamed: 1" headers), long cells wrap and every column is bounded, so the group columns of a Publication
   Table stay in view.

@@ -418,6 +418,37 @@ _PSM_UNIT_ALIASES = {"eyes": "eye", "patients": "patient"}
 MATCHED_TABLE_WEIGHTS = ("weights", "none")
 
 
+def matched_table_weights_problem(cfg: dict) -> str | None:
+    """Why matched_table_weights = "none" cannot be used with this matching
+    design (None = it can), as R/analysis.R matched_table_weights_refused
+    decides: unweighted matched tables need nearest-neighbor matching without
+    replacement; with exact, cem, subclassification or replacement the weights
+    are the matching itself."""
+    cfg = cfg or {}
+    if not cfg.get("do_matching") or _choice(cfg, "matched_table_weights") != "none":
+        return None
+    m = psm_method(cfg)
+    rep = cfg.get("psm_replace")
+    rep = rep is True or (isinstance(rep, str) and rep.strip().lower() in ("true", "1", "yes")) or \
+        (isinstance(rep, (int, float)) and not isinstance(rep, bool) and rep == 1)
+    why = None
+    if m == "nearest" and rep:
+        why = "matching with replacement (the weights count the controls used more than once)"
+    elif m == "exact":
+        why = "exact matching (the weights weight its strata)"
+    elif m == "cem":
+        why = "coarsened exact matching (the weights weight its strata)"
+    elif m == "subclass":
+        why = "subclassification (the weights weight its subclasses)"
+    elif m != "nearest":
+        why = f"matching method '{m}' (its weights are part of the matching)"
+    if why is None:
+        return None
+    return (f"Matched tables 'unweighted' is not available with {why}: an unweighted table of the retained "
+            "eyes would not be a matched comparison. Choose Matched tables = weighted, or nearest-neighbor "
+            "matching without replacement.")
+
+
 def psm_unit(cfg: dict) -> str:
     """The matching unit as R reads it: trimmed, lower case, "eyes" /
     "patients" accepted; blank / missing = "eye" (settings files of 1.1.0)."""
@@ -788,6 +819,10 @@ def validate_cfg(cfg: dict, columns: list | None = None, data: Any = None) -> li
     if _choice(cfg, "matched_table_weights") not in MATCHED_TABLE_WEIGHTS:
         errs.append(f"Matched tables '{cfg.get('matched_table_weights')}' is not supported - use weights "
                     "(weighted by the matching weights) or none (every matched eye counts once).")
+    else:
+        why = matched_table_weights_problem(cfg)
+        if why:
+            errs.append(why)
 
     bad_fmts = [f for f in (cfg.get("graph_formats") or []) if f not in GRAPH_FORMATS]
     if bad_fmts:

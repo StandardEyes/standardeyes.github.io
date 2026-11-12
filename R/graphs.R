@@ -28,26 +28,49 @@ IND_HALF <- "#1E8A2E"; IND_ONE <- "#E31FC4"   # green / magenta (the ±0.50 D an
 # legends.
 REF_LINE_CANDIDATES <- c(black = "#000000", `dark gray` = "#4D4D4D", gray = "#8C8C8C")
 REF_LINE_MIN_DIST <- 60
-ref_line_col_for <- function(pal) {
-  pal <- as.character(unlist(pal)); pal <- pal[!is.na(pal) & nzchar(pal)]
+# The first of `cands` (named colors) whose RGB distance from every color in
+# `avoid` is at least REF_LINE_MIN_DIST; when each is close to one, the
+# farthest. Returns the color, named.
+line_col_far_from <- function(cands, avoid) {
+  avoid <- as.character(unlist(avoid)); avoid <- avoid[!is.na(avoid) & nzchar(avoid)]
   rgb_of <- function(cols) tryCatch(grDevices::col2rgb(cols), error = function(e) NULL)
-  pm <- if (length(pal)) rgb_of(pal) else NULL
-  for (nm in names(REF_LINE_CANDIDATES)) {
-    cc <- REF_LINE_CANDIDATES[[nm]]
-    if (is.null(pm)) return(stats::setNames(cc, nm))
-    d <- sqrt(colSums((pm - as.vector(rgb_of(cc)))^2))
-    if (all(d >= REF_LINE_MIN_DIST)) return(stats::setNames(cc, nm))
-  }
-  # every candidate is close to a group color (three near-black, gray and
-  # mid-gray groups): the farthest candidate
-  far <- vapply(REF_LINE_CANDIDATES, function(cc) min(sqrt(colSums((pm - as.vector(rgb_of(cc)))^2))), numeric(1))
-  REF_LINE_CANDIDATES[which.max(far)]
+  pm <- if (length(avoid)) rgb_of(avoid) else NULL
+  if (is.null(pm)) return(cands[1])
+  dmin <- vapply(cands, function(cc) min(sqrt(colSums((pm - as.vector(rgb_of(cc)))^2))), numeric(1))
+  ok <- which(dmin >= REF_LINE_MIN_DIST)
+  cands[if (length(ok)) ok[1] else which.max(dmin)]
 }
+ref_line_col_for <- function(pal) line_col_far_from(REF_LINE_CANDIDATES, pal)
 gr_ref_line_col <- function() unname(.gr_opts$ref_line %||% REF_LINE_CANDIDATES[["black"]])
 gr_ref_line_name <- function() {
   v <- .gr_opts$ref_line %||% REF_LINE_CANDIDATES["black"]
   nm <- names(v)
   if (is.null(nm) || !nzchar(nm[1])) "black" else nm[1]
+}
+# The ±0.50 D and ±1.00 D lines of the two scatters: green and magenta, unless
+# a group is drawn in a color close to them (finding R2-06 of the build se.12
+# review: the green lines were within 35 RGB units of the default third group
+# color, #1B9E4B); then the first of the other candidates far (by the rule
+# above) from every group color, from the identity line and from each other,
+# and the legends name it. With the default palette and up to 2 groups they
+# stay green and magenta.
+IND_HALF_CANDIDATES <- c(green = IND_HALF, olive = "#808000", `dark green` = "#0B5D1E")
+IND_ONE_CANDIDATES <- c(magenta = IND_ONE, violet = "#9B59D0", pink = "#F781BF")
+ind_line_cols_for <- function(pal, ref = REF_LINE_CANDIDATES[["black"]]) {
+  half <- line_col_far_from(IND_HALF_CANDIDATES, c(pal, ref))
+  one <- line_col_far_from(IND_ONE_CANDIDATES, c(pal, ref, half))
+  list(half = half, one = one)
+}
+gr_ind_col <- function(which = c("half", "one")) {
+  which <- match.arg(which)
+  v <- .gr_opts[[paste0("ind_", which)]] %||% (if (which == "half") IND_HALF_CANDIDATES[1] else IND_ONE_CANDIDATES[1])
+  unname(v)
+}
+gr_ind_name <- function(which = c("half", "one")) {
+  which <- match.arg(which)
+  v <- .gr_opts[[paste0("ind_", which)]] %||% (if (which == "half") IND_HALF_CANDIDATES[1] else IND_ONE_CANDIDATES[1])
+  nm <- names(v)
+  if (is.null(nm) || !nzchar(nm[1])) (if (which == "half") "green" else "magenta") else nm[1]
 }
 
 gr_num <- function(v) as_numeric_safe(v)
@@ -267,10 +290,11 @@ GR_THIN_NOTE <- paste0("Value labels of some bars are not printed at this width 
 # Method lines a panel's legend carries whatever its text (journal style): the
 # reference lines of the two scatters, and the bin rules of the two histograms
 # (decisions D20, D27), so an eye on a bin edge can be placed from the legend.
-# (the scatter line's "{REF}" is the identity line's color, gr_ref_line_name)
+# (the scatter line's "{REF}" is the identity line's color, gr_ref_line_name; "{HALF}" and
+# "{ONE}" the ±0.50 D and ±1.00 D lines' colors, gr_ind_name)
 GR_PANEL_NOTES <- list(
-  scatter = paste0("Solid {REF} line, y = x (attempted equals achieved); green lines, ±0.50 D; ",
-                   "magenta lines, ±1.00 D; dotted line, the least-squares regression line of each group."),
+  scatter = paste0("Solid {REF} line, y = x (attempted equals achieved); {HALF} lines, ±0.50 D; ",
+                   "{ONE} lines, ±1.00 D; dotted line, the least-squares regression line of each group."),
   "10_CIhist" = paste0("Correction index bins are closed on the right: a bin labeled 0.16 to 0.30 holds ",
                        "0.15 < CI ≤ 0.30, so a ratio of 0.153 is in it."),
   "11_AEhist" = paste0("Angle-of-error bins include the edge nearer zero: 5° and -5° are in -5 to 5, ",
@@ -292,6 +316,7 @@ gr_panel_notes <- function(nm, texts = NULL) {
             (is.null(texts) || any(grepl("\\bP ?[=<>]", as.character(unlist(texts)))))) GR_PANEL_P[[nm]]
         else character(0)
   sc <- sub("{REF}", gr_ref_line_name(), GR_PANEL_NOTES$scatter, fixed = TRUE)
+  sc <- sub("{ONE}", gr_ind_name("one"), sub("{HALF}", gr_ind_name("half"), sc, fixed = TRUE), fixed = TRUE)
   if (key == "scatter" && nm == "09_CYLregress")
     return(c(sub("attempted equals achieved", "SIA equals TIA", sc, fixed = TRUE),
              GR_SCATTER_HDR[["09_CYLregress"]]))
@@ -2918,8 +2943,8 @@ scatter_ind <- function(d, pal, xlab, ylab, title, from_zero = FALSE,
   d_fit <- d[d$Group %in% fit_grp, , drop = FALSE]
   p <- ggplot2::ggplot(d, ggplot2::aes(x, y, colour = Group)) +
     ggplot2::geom_abline(slope = 1, intercept = 0, colour = gr_ref_line_col(), linewidth = .55) +
-    ggplot2::geom_abline(slope = 1, intercept = c(-.5, .5), colour = IND_HALF, linewidth = .45) +
-    ggplot2::geom_abline(slope = 1, intercept = c(-1, 1), colour = IND_ONE, linewidth = .45) +
+    ggplot2::geom_abline(slope = 1, intercept = c(-.5, .5), colour = gr_ind_col("half"), linewidth = .45) +
+    ggplot2::geom_abline(slope = 1, intercept = c(-1, 1), colour = gr_ind_col("one"), linewidth = .45) +
     ggplot2::geom_point(alpha = .7, size = 1.5) +
     (if (nrow(d_fit))
        ggplot2::geom_smooth(data = d_fit, method = "lm", formula = y ~ x, se = FALSE,
@@ -5625,6 +5650,11 @@ g_centroid_panel <- function(st, present, pal, cd, title = NULL) {
   }
   bx <- ticks(xlim); by <- ticks(ylim)
   ts <- max(0.7, gr_ts())
+  # the space beside a text scales with the text as drawn: at a reduced text
+  # scale the labels keep their 6-pt floor (gr_pt), so a gap scaled by gr_sp
+  # alone shrank under them - the rotated y title touched the tick labels in
+  # the 12.69-cm combined figure (finding R2-08 of the build se.12 review)
+  tsp <- function(pt) pt * max(gr_ts(), gr_pt(7) / 7)
   q <- ggplot2::ggplot()
   if (origin)
     q <- q + ggplot2::geom_hline(yintercept = 0, colour = "grey55", linewidth = .3) +
@@ -5644,17 +5674,17 @@ g_centroid_panel <- function(st, present, pal, cd, title = NULL) {
     ggplot2::theme(legend.position = "none",
                    panel.grid.major = ggplot2::element_line(colour = "grey88", linewidth = .25),
                    axis.text.x = ggplot2::element_text(size = gr_pt(7), colour = "grey15",
-                                                       margin = ggplot2::margin(t = gr_sp(1.5))),
+                                                       margin = ggplot2::margin(t = tsp(1.5))),
                    axis.text.y = ggplot2::element_text(size = gr_pt(7), colour = "grey15", hjust = 1,
-                                                       margin = ggplot2::margin(r = gr_sp(1.5))),
+                                                       margin = ggplot2::margin(r = tsp(1.5))),
                    axis.ticks = ggplot2::element_line(colour = "grey40", linewidth = .25),
                    axis.ticks.length = grid::unit(gr_sp(2), "pt"),
                    axis.title.x = ggplot2::element_text(face = "bold", size = gr_pt(8),
-                                                        margin = ggplot2::margin(t = gr_sp(2))),
+                                                        margin = ggplot2::margin(t = tsp(2))),
                    axis.title.y = ggplot2::element_text(face = "bold", size = gr_pt(8), angle = 90,
-                                                        margin = ggplot2::margin(r = gr_sp(2))),
+                                                        margin = ggplot2::margin(r = tsp(4))),
                    plot.title = ggplot2::element_text(face = "bold", size = gr_pt(8), hjust = 0.5,
-                                                      margin = ggplot2::margin(b = gr_sp(3))),
+                                                      margin = ggplot2::margin(b = tsp(3))),
                    plot.background = ggplot2::element_rect(fill = "white", colour = NA),
                    plot.margin = ggplot2::margin(gr_sp(2), gr_sp(2), gr_sp(2), gr_sp(2)))
   list(p = q, origin = origin, groups = names(regs))
@@ -6825,6 +6855,9 @@ generate_standard_graphs <- function(df, cfg, res, out_dir, tag = "", logger = m
   pal <- stats::setNames(unname(pal0), glv)
   # the identity and zero lines: neutral, never a group color (ref_line_col_for)
   .gr_opts$ref_line <- ref_line_col_for(pal)
+  # the ±0.50 D and ±1.00 D lines: far from every group color too (ind_line_cols_for)
+  ind_c <- ind_line_cols_for(pal, .gr_opts$ref_line)
+  .gr_opts$ind_half <- ind_c$half; .gr_opts$ind_one <- ind_c$one
   gl <- unname(lab_map[as.character(df$GroupLabel)])
   tg <- gr_file_tag(tag, out_dir, logger)
 

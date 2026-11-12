@@ -396,6 +396,11 @@ function builder(){
       if(field==="distance") return m==="subclass";
       return !["ratio","order","replace","caliper","std_caliper","seed"].includes(field);
     },
+    // unweighted matched tables are possible: nearest-neighbor matching
+    // without replacement, where the weights reflect only a variable matching
+    // ratio (config_schema matched_table_weights_problem; with exact, cem,
+    // subclassification or replacement the weights are the matching itself)
+    mtwNoneOk(){ return this.s.psm_method==="nearest" && !this.s.psm_replace; },
     // the chosen distance is not a propensity score (mahalanobis, ...)
     psmNonPS(){ return NON_PS_DISTANCES.includes(rTrim(this.s.psm_distance??"").toLowerCase()); },
     // options the server accepts with the chosen method / distance (others are greyed out)
@@ -2173,7 +2178,10 @@ function builder(){
             : (this.psmUses('caliper') ? "; no caliper" : ""))
           + (s.psm_unit==="patient" ? (pid ? "; patients matched (both eyes kept together)"
                                            : "; patients requested, but no patient ID column is mapped") : "")
-          + (s.do_matching && s.matched_table_weights==="none" ? "; matched tables unweighted (every matched eye counts once)" : "")]);
+          + (s.do_matching && s.matched_table_weights==="none"
+              ? (this.mtwNoneOk() ? "; matched tables unweighted (every matched eye counts once)"
+                                  : "; matched tables unweighted is not available with this matching (choose weighted)")
+              : "")]);
       out.push(["GEE inference", s.gee_small_sample==="none"
         ? "uncorrected robust SE, normal reference (v1.0.0)"
         : "Mancl-DeRouen robust SE, t reference (F for joint tests)"]);

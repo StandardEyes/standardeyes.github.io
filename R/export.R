@@ -304,16 +304,31 @@ export_group_tab <- function(wb, fmt, g, pairing = NULL, pairing_no = NULL) {
 # 31-character truncation. The data file's units and notation: refraction in
 # diopters and minus cylinder (a plus-cylinder row is transposed in the tab
 # only; the SEQ is unchanged by the transposition); axis in degrees, 180
-# wherever the cylinder is 0 - preoperative, intended and postoperative - and
-# as recorded where the cylinder is blank; vertex distance 12 mm; acuity as
-# the Snellen denominator (20/20 written 20, letters 20-1 / 20+2) in cells
-# formatted as text, from the canonical decimal value (no floor), a cell
-# recorded as CF / HM / LP / NLP showing that label; the intended refraction
-# from the target columns (meyestro_intended); columns 16-20 (P-T) the
-# postoperative SEQ at the first five stability visits (visits: the
-# pipeline's res$stability_visits; meyestro_stability_seq), blank when the
-# analysis has none. Missing roles leave a blank column (logged); with fewer
-# than 6 of the 9 roles the tabs are skipped (logged).
+# wherever the cylinder is 0 - preoperative, intended and postoperative (the
+# mEYEstro paper writes a plano target as 0, 0, 0; the axis of a zero cylinder
+# enters no calculation, and the Contents sheet says so); vertex distance
+# 12 mm; acuity as the Snellen denominator (20/20 written 20, letters 20-1 /
+# 20+2) in cells formatted as text, from the canonical decimal value (no
+# floor); the intended refraction from the target columns
+# (meyestro_intended); columns 16-20 (P-T) the postoperative SEQ at the first
+# five stability visits (visits: the pipeline's res$stability_visits;
+# meyestro_stability_seq), blank when the analysis has none (those columns
+# are optional). Columns 1-15 are required by mEYEstro, and the authors' own
+# input files hold no empty cell in them (finding R2-01 of the build se.12
+# review), so:
+#  - an eye without a value in a refraction or target cell (columns A-C, F-H,
+#    J-L: a blank sphere, cylinder or axis of a non-zero cylinder, a target
+#    cylinder without an axis) is left out of the tab and counted in the run
+#    log and the Contents sheet;
+#  - a missing acuity is a text cell holding one space - the way the authors'
+#    mEYEstro input files, from which mEYEstro drew the published figures,
+#    hold a missing acuity - counted in the run log and the Contents sheet;
+#  - an acuity recorded off the chart (CF / HM / LP / NLP) is missing there
+#    too, as the analysis reads it (counted in the run log).
+# A role that is not mapped leaves its column blank (logged: mEYEstro needs
+# every column filled); with fewer than 6 of the 9 roles the tabs are skipped
+# (logged).
+MEYESTRO_MISSING_VA <- " "
 make_meyestro_tabs <- function(df, wb, roles, pairing = NULL, target = list(), logger = message,
                                display_names = NULL, pairing_no = NULL, visits = list()) {
   r <- function(nm) .role_col(roles, nm)
@@ -386,23 +401,33 @@ make_meyestro_tabs <- function(df, wb, roles, pairing = NULL, target = list(), l
       rep(NA_character_, n)
     }
     # the Snellen denominator from the embedded table (no external workbook);
-    # no value = a blank cell, as the data file leaves a missing acuity
+    # no value = NA here (written below as the data file's missing acuity, one
+    # space). An off-chart label (CF / HM / LP / NLP) is no Snellen line and,
+    # as in the analysis, no acuity: it is missing too, and counted (finding
+    # R2-05 of the build se.12 review)
+    off_n <- 0L
     snel <- function(role) {
-      x <- decimal_to_snellen(pick_va(role), offchart = pick_off(role))
+      va <- pick_va(role)
+      x <- decimal_to_snellen(va, offchart = rep(NA_character_, n))
       k <- attr(x, "n_out_of_range")
       if (isTRUE(k > 0))
-        logger(sprintf("mEYEstro tab '%s': %d %s acuity value(s) outside logMAR -0.5 to 3.0 have no Snellen line - the Snellen cell is left blank.",
+        logger(sprintf("mEYEstro tab '%s': %d %s acuity value(s) outside logMAR -0.5 to 3.0 have no Snellen line - written as a missing acuity.",
                        tab_what, k, role))
+      oc <- pick_off(role)
+      off <- !is.finite(va) & !is.na(oc) & nzchar(oc)
       x <- as.vector(x)
       x[!is.na(x) & !nzchar(x)] <- NA_character_
+      attr(x, "off") <- off
       x
     }
     sq <- meyestro_stability_seq(dfg, visits)
+    va_pre <- snel("pre_bcva"); va_ud <- snel("post_ucva"); va_cd <- snel("post_bcva")
+    va_off <- list(attr(va_pre, "off"), attr(va_ud, "off"), attr(va_cd, "off"))
     # the data file's 20 columns, in its order (MEYESTRO_COLUMNS)
-    out <- data.frame(pick("pre_sph"), pick("pre_cyl"), pick("pre_axis"), rep(12, n), snel("pre_bcva"),
+    out <- data.frame(pick("pre_sph"), pick("pre_cyl"), pick("pre_axis"), rep(12, n), as.vector(va_pre),
                       it$sph, it$cyl, it$axis, rep(12, n),
                       pick("post_sph"), pick("post_cyl"), pick("post_axis"), rep(12, n),
-                      snel("post_ucva"), snel("post_bcva"),
+                      as.vector(va_ud), as.vector(va_cd),
                       sq[, 1], sq[, 2], sq[, 3], sq[, 4], sq[, 5],
                       check.names = FALSE, stringsAsFactors = FALSE)
     names(out) <- MEYESTRO_COLUMNS
@@ -431,6 +456,53 @@ make_meyestro_tabs <- function(df, wb, roles, pairing = NULL, target = list(), l
       logger(sprintf("mEYEstro tab '%s': %d plus-cylinder refraction(s) written in minus-cylinder notation, as the data file requires.",
                      tab_what, n_plus))
 
+    # columns 1-15 are required (finding R2-01 of the build se.12 review): an
+    # eye without a value in a refraction or target cell of a mapped role is
+    # left out (a role that is not mapped leaves its whole column blank, said
+    # above, and leaves no eye out); the intended cells are blank only for a
+    # target cylinder without an axis
+    mapped <- need_roles[found]
+    gap <- function(cols, roles = NULL) {
+      m <- rep(FALSE, n)
+      for (j in seq_along(cols)) {
+        if (!is.null(roles) && !(roles[j] %in% mapped)) next
+        m <- m | !is.finite(as_numeric_safe(out[[cols[j]]]))
+      }
+      m
+    }
+    gap_pre  <- gap(MEYESTRO_COLUMNS[1:3], c("pre_sph", "pre_cyl", "pre_axis"))
+    gap_tgt  <- gap(MEYESTRO_COLUMNS[6:8])
+    gap_post <- gap(MEYESTRO_COLUMNS[10:12], c("post_sph", "post_cyl", "post_axis"))
+    keep <- !(gap_pre | gap_tgt | gap_post)
+    n_left <- sum(!keep)
+    out <- out[keep, , drop = FALSE]
+    rownames(out) <- NULL
+    n_all <- n
+    n <- nrow(out)
+    # a missing acuity of a mapped role: one space in its text cell, as the
+    # mEYEstro data files hold it (never an empty cell in a required column)
+    va_roles <- c("pre_bcva", "post_ucva", "post_bcva")
+    va_cols <- c("Preop_CDVA", "Postop_UDVA", "Postop_CDVA")
+    n_miss <- 0L; n_off <- 0L
+    for (j in seq_along(va_cols)) {
+      if (!(va_roles[j] %in% mapped)) next
+      x <- as.character(out[[va_cols[j]]])
+      miss <- is.na(x) | !nzchar(trimws(x))
+      n_miss <- n_miss + sum(miss)
+      n_off <- n_off + sum(miss & va_off[[j]][keep])
+      x[miss] <- MEYESTRO_MISSING_VA
+      out[[va_cols[j]]] <- x
+    }
+    if (n_left > 0 || n_miss > 0)
+      logger(paste0("mEYEstro tab '", tab_what, "': ", n, if (n == 1) " eye" else " eyes", " written",
+                    if (n_left > 0) sprintf(paste0(", %d left out: a missing refraction or target value (preoperative ",
+                                                   "%d, intended %d, postoperative %d)"),
+                                            n_left, sum(gap_pre), sum(gap_tgt), sum(gap_post)) else "",
+                    if (n_miss > 0) sprintf(paste0("; %d missing acuity cell(s) written as a single space, as ",
+                                                   "mEYEstro data files hold a missing acuity%s"), n_miss,
+                                            if (n_off > 0) sprintf(" (%d of them recorded off the chart: CF, HM, LP or NLP)", n_off)
+                                            else "") else "", "."))
+
     sh <- export_group_tab(wb, "mEYEstro", g, pairing, pairing_no)
     openxlsx::writeData(wb, sh, out)
     # the acuity columns as text (E, N, O), as the data file asks, so Excel
@@ -444,8 +516,11 @@ make_meyestro_tabs <- function(df, wb, roles, pairing = NULL, target = list(), l
     openxlsx::addStyle(wb, sh, head_st("#FF9999"), 1, 10:15, gridExpand = TRUE, stack = TRUE)
     openxlsx::addStyle(wb, sh, head_st("#99CCFF"), 1, 16:20, gridExpand = TRUE, stack = TRUE)
     openxlsx::setColWidths(wb, sh, cols = seq_along(MEYESTRO_COLUMNS), widths = "auto")
-    set_sheet_note(sh, sprintf("%d %s in rows 2-%d: copy A2:T%d into cell A2 of the mEYEstro data file.",
-                               n, if (n == 1) "eye" else "eyes", n + 1, n + 1))
+    set_sheet_note(sh, paste0(sprintf("%d %s in rows 2-%d", n, if (n == 1) "eye" else "eyes", n + 1),
+                              if (n_left > 0) sprintf(" (%d of the group's %d left out: a missing refraction or target value)",
+                                                      n_left, n_all) else "",
+                              if (n_miss > 0) sprintf("; %d missing acuity cell(s) hold a single space", n_miss) else "",
+                              sprintf(": copy A2:T%d into cell A2 of the mEYEstro data file.", n + 1)))
   }
 }
 
@@ -519,11 +594,6 @@ make_alpins_tabs <- function(df, wb, roles, pairing = NULL, logger = message, di
     n_out <- sum(out_t)
     dfg <- dfg[!out_t, , drop = FALSE]
     n <- nrow(dfg)
-    kept_txt <- sprintf("%d %s kept, %d left out: non-plano astigmatic target", n, if (n == 1) "eye" else "eyes", n_out)
-    logger(sprintf("AstigMATIC tab '%s': %s%s.", tab_what, kept_txt,
-                   if (is.na(tcyl)) " (no astigmatism target mapped: every target taken as plano)"
-                   else paste0(" (a cylinder other than 0 in '", disp_name(tcyl, display_names),
-                               "'; AstigMATIC assumes a plano astigmatic target)")))
     pick <- function(role) {
       cc <- r(role)
       if (is.na(cc)) return(rep(NA, n))
@@ -569,6 +639,32 @@ make_alpins_tabs <- function(df, wb, roles, pairing = NULL, logger = message, di
       `postoperative cylinder` = post$cyl,
       `postoperative axis` = post$axis,
       check.names = FALSE, stringsAsFactors = FALSE)
+    # AstigMATIC discards a row with missing data ("Rows with missing data are
+    # automatically discarded"), so such an eye is left out here and counted,
+    # and the tab's n is the n AstigMATIC analyzes (finding R2-01 of the build
+    # se.12 review): a missing cylinder or axis of a mapped role, or a missing
+    # eye code when the eye column is mapped and its codes can be read (a role
+    # that is not mapped, or ambiguous 0/1 eye codes, leave their whole column
+    # blank - said above - and leave no eye out)
+    mapped <- need_roles[found]
+    miss <- rep(FALSE, n)
+    for (j in 2:5) if (need_roles[j] %in% mapped) miss <- miss | !is.finite(as_numeric_safe(out[[j]]))
+    if ("eye" %in% mapped && eye_num_ok) miss <- miss | is.na(out$Eye)
+    n_miss <- sum(miss)
+    out <- out[!miss, , drop = FALSE]
+    rownames(out) <- NULL
+    n <- nrow(out)
+    kept_txt <- if (n_miss == 0)
+      sprintf("%d %s kept, %d left out: non-plano astigmatic target", n, if (n == 1) "eye" else "eyes", n_out)
+      else if (n_out == 0)
+        sprintf("%d %s kept, %d left out: missing cylinder, axis or eye", n, if (n == 1) "eye" else "eyes", n_miss)
+      else sprintf("%d %s kept, %d left out: %d non-plano astigmatic target, %d missing cylinder, axis or eye",
+                   n, if (n == 1) "eye" else "eyes", n_out + n_miss, n_out, n_miss)
+    logger(sprintf("AstigMATIC tab '%s': %s (%s%s).", tab_what, kept_txt,
+                   if (is.na(tcyl)) "no astigmatism target mapped: every target taken as plano"
+                   else paste0("a cylinder other than 0 in '", disp_name(tcyl, display_names),
+                               "'; AstigMATIC assumes a plano astigmatic target"),
+                   if (n_miss > 0) "; AstigMATIC discards a row with a missing value" else ""))
     sh <- export_group_tab(wb, "AstigMATIC", g, pairing, pairing_no)
     # the sheet note (row 1), then AstigMATIC's input columns only, from row 3
     openxlsx::writeData(wb, sh, paste0("NOTE: ", kept_txt, ". AstigMATIC has no target input and assumes a plano ",
@@ -1102,9 +1198,20 @@ gee_skip_note <- function(g, corstr = NULL) {
   ne_w <- !is.na(g$Model) & grepl(paste0("not estimable - ", NE_WITHIN_REASON), g$Model, fixed = TRUE)
   hit <- !is.na(g$Model) & grepl("Skipped|failed", g$Model) & !by_design & !ne_w
   bad <- if ("Outcome" %in% names(g)) length(unique(g$Outcome[hit])) else sum(hit)
-  n_ne <- if ("Outcome" %in% names(g)) length(unique(g$Outcome[ne_w])) else sum(ne_w)
-  ne_txt <- if (n_ne > 0) paste0(n_ne, " outcome(s) have no variation within groups: not estimable, NE in the ",
-                                 "effect, CI and P cells (", NE_WITHIN_FOOT, ").") else NULL
+  # an outcome all of whose comparisons are NE, and one with some NE
+  # comparisons beside estimated ones (two groups that do not vary, others
+  # that do: finding R1 of the build se.12 review)
+  oc <- if ("Outcome" %in% names(g)) as.character(g$Outcome) else as.character(seq_len(nrow(g)))
+  ne_oc <- unique(oc[ne_w])
+  tm <- if ("term" %in% names(g)) as.character(g$term) else rep(NA_character_, nrow(g))
+  cmp_row <- !is.na(tm) & startsWith(tm, "GroupLabel")
+  part <- vapply(ne_oc, function(o) any(oc == o & cmp_row & !ne_w), logical(1))
+  n_all <- sum(!part); n_part <- sum(part)
+  outc_word <- function(n) if (n == 1) "1 outcome has" else paste(n, "outcomes have")
+  ne_txt <- c(if (n_all > 0) paste0(outc_word(n_all), " no variation within groups: NE in the effect, CI and P cells."),
+              if (n_part > 0) paste0(outc_word(n_part), " comparisons of two groups that do not vary within ",
+                                     "themselves: NE in their effect, CI and P cells; the other comparisons are ",
+                                     "estimated."))
   cau <- if ("Note" %in% names(g)) as.character(g$Note) else character(0)
   cau <- cau[!is.na(cau) & startsWith(cau, "Caution")]
   few <- length(cau) > 0
@@ -1159,7 +1266,8 @@ gee_skip_note <- function(g, corstr = NULL) {
 # va_cols: the acuity columns analysed in logMAR (va_info()$in_logmar).
 describe_within_group <- function(df_g, params_clean, type_map, dicho_pref_clean = list(),
                                   levels_map = list(), patient_id_clean = NA_character_,
-                                  display_names = NULL, va_cols = character(0)) {
+                                  display_names = NULL, va_cols = character(0),
+                                  all_levels = list()) {
   # a row names its variable by its display label (helpers.R disp_label,
   # row_label: "Glare or halo symptoms, n (%)", "Sex: F, n (%)")
   dn <- function(x) disp_label(x, display_names)
@@ -1213,7 +1321,8 @@ describe_within_group <- function(df_g, params_clean, type_map, dicho_pref_clean
         lev <- pick_display_level(pn, v, dicho_pref_clean, display_names = display_names)
         c_ <- sum(as.character(v) == as.character(lev), na.rm = TRUE)
         rows[[length(rows)+1]] <- tibble::tibble(
-          Parameter = row_label(dn(pn), lev, count = "n (%)"), n = nn,
+          Parameter = row_label(dn(pn), lev, count = "n (%)",
+                                levels = all_levels[[pn]] %||% unique(as.character(v[!is.na(v)]))), n = nn,
           Summary = paste0(c_, " (", fmt_pct(c_, nn), ")"), .unit = unit)
       }
     } else if (vt == "categorical") {
@@ -1348,8 +1457,12 @@ make_publication_table <- function(wb, sheet_name, sections, note = NULL, tests_
     # columns, analysis.R): NE in the effect, CI and P cells, with a footnote
     # of its own (NE_WITHIN_FOOT) naming the rows
     nw <- !is.na(interp) & startsWith(interp, paste0("Not estimable - ", NE_WITHIN_REASON))
-    for (cc in intersect(c("GEE effect (95% CI)", "Adjusted effect (95% CI)"), names(d)))
-      nw <- nw | (as.character(d[[cc]]) %in% NE_TEXT)
+    # a model cell that is NE as a whole, or one comparison line of it that is
+    # ("Platform 2: NE"; finding R1 of the build se.12 review)
+    for (cc in intersect(c("GEE effect (95% CI)", "Adjusted effect (95% CI)"), names(d))) {
+      x <- as.character(d[[cc]])
+      nw <- nw | (!is.na(x) & (x == NE_TEXT | grepl(paste0("(^|\\n)[^\\n]*: ", NE_TEXT, "(\\n|$)"), x, perl = TRUE)))
+    }
     if (any(nw))
       nw_row <- c(nw_row, if (!is.null(rv)) rv[nw] else if ("Parameter" %in% names(d)) d$Parameter[nw]
                           else rep(nm, sum(nw)))
@@ -1972,6 +2085,10 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
   within_sections <- function(df_src, lvls) {
     out <- list()
     if (length(res$within_params_clean %||% character(0)) == 0) return(out)
+    # the levels each variable has in the whole cohort described, so a row
+    # names a counted level the same way in every group (helpers.R row_label)
+    lv_all <- lapply(stats::setNames(nm = intersect(res$within_params_clean, names(df_src))),
+                     function(pn) unique(as.character(df_src[[pn]][!is.na(df_src[[pn]])])))
     # show the patient count in the heading too as soon as any variable is
     # summarised per patient, so the two denominators are both visible
     any_pat <- any(vapply(res$within_levels_clean %||% list(),
@@ -1981,7 +2098,8 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
       dfg <- df_src[as.character(df_src$GroupLabel) == g, , drop = FALSE]
       tbl <- describe_within_group(dfg, res$within_params_clean, res$within_type_map,
                                    res$dicho_pref_clean, res$within_levels_clean,
-                                   res$patient_id_clean, display_names = dmap, va_cols = va_lm)
+                                   res$patient_id_clean, display_names = dmap, va_cols = va_lm,
+                                   all_levels = lv_all)
       denom <- paste0(nrow(dfg), " eyes")
       if (any_pat && res$patient_id_clean %in% names(dfg))
         denom <- paste0(denom, "; ", dplyr::n_distinct(dfg[[res$patient_id_clean]]), " patients")
@@ -2315,10 +2433,17 @@ build_workbook_for_data <- function(dat, cfg, res, logger = message,
         # unit weights: the matched tables' clustered tests and models follow
         # decision D18 too, and the sheet says so
         else paste0("NOTE: matched cohort (unit matching weights). ", matched_analysis_note())
-      # the Publication Table's footnote of an unweighted matched table
-      w_foot <- if (w_nonunit && tbl_unw)
-        paste0("Matched cohort, unweighted (matched_table_weights = none): every matched eye counts once in the ",
-               "cells and P values; the matching weights (", w_rng, ") are not used.") else NULL
+      # the Publication Table's footnote of an unweighted matched table, worded
+      # from the table's own columns (finding R2-04 of the build se.12 review):
+      # the model columns use the weights when the matched GEE / regression do
+      w_foot <- if (w_nonunit && tbl_unw) {
+        if (w_gee_cols && isTRUE(cfg$use_matching_weights_in_gee))
+          paste0("Matched cohort: the values and the P column count every matched eye once; the GEE and adjusted ",
+                 "columns use the matching weights (", w_rng, ").")
+        else paste0("Matched cohort: every matched eye counts once in the cells and P values",
+                    if (w_gee_cols) ", the GEE and adjusted columns included" else "",
+                    "; the matching weights (", w_rng, ") are not used.")
+      } else NULL
       sub_glevels <- pair_lvls
       msum <- function(params, tmap) create_summary_table(
         md, params, tmap, sub_glevels, "GroupLabel",
@@ -2464,13 +2589,16 @@ describe_sheet <- function(nm) {
                 "cylinder, axis, vertex distance (12 mm), CDVA; green F-I intended sphere, cylinder, axis, vertex ",
                 "distance; red J-O postoperative sphere, cylinder, axis, vertex distance, UDVA, CDVA; blue P-T the ",
                 "postoperative SEQ at up to five stability visits (blank when the analysis has none). Refraction in ",
-                "diopters, minus cylinder; axis 180 where the cylinder is 0 (as recorded where the cylinder is ",
-                "blank); acuity as the Snellen denominator (20/20 written 20, letters as 20-1), as text.")
+                "diopters, minus cylinder; axis 180 where the cylinder is 0, the intended axis of a plano target ",
+                "included (the mEYEstro paper writes a plano target as 0, 0, 0; the axis of a zero cylinder enters ",
+                "no calculation); acuity as the Snellen denominator (20/20 written 20, letters as 20-1), as text; a ",
+                "missing acuity (off-chart CF, HM, LP or NLP included) is a single space, as mEYEstro data files ",
+                "hold one. An eye without a refraction or target value is left out.")
   ast <- paste0("laid out in the input format of AstigMATIC - columns A-E from row 3 (eye OD/OS, preoperative ",
                 "cylinder, preoperative axis, postoperative cylinder, postoperative axis), minus cylinder, axis 180 ",
-                "where the cylinder is 0 (blank where the cylinder is unknown); row 1 is the sheet's note. ",
-                "AstigMATIC assumes a plano astigmatic target, so eyes with a non-plano astigmatic target are ",
-                "left out.")
+                "where the cylinder is 0; row 1 is the sheet's note. AstigMATIC assumes a plano astigmatic target ",
+                "and discards a row with a missing value, so eyes with a non-plano astigmatic target or a missing ",
+                "value are left out.")
   jcrs <- paste0("plus-cylinder format: per vector (PRE, SIA, PE, and POST with a target that is not plano) and ",
                  "cohort the centroid, total SD, magnitudes and cumulative intervals; the tests (centroid against ",
                  "zero; centroid, precision, mean magnitude and intervals between cohorts; McNemar preop vs postop) ",

@@ -206,22 +206,46 @@ with_display_labels <- function(map, labels) {
 #   "<label>, per patient"                      ... of a variable analyzed per patient
 #   "<label>, n/N (%)"                          a dichotomous row counting a yes-like
 #                                               level (Yes, Y, True, 1, Present, Positive)
+#                                               whose other level is its negative
 #   "<label>: <level>, n/N (%)"                 any other counted level (dichotomous
 #                                               or a level row of a categorical variable)
 #   "<label>: <level>, per patient, n/N (%)"    ... analyzed per patient
 # count: the descriptor of a count cell - "n/N (%)" in the between-group
 # tables (cells "12/50 (24.0%)"), "n (%)" in the within-group descriptions
 # (cells "12 (24.0%)" beside an n column); NULL for a row that is no count.
+# A level is yes-like only as one of a natural pair - Yes / No, Y / N, True /
+# False, 1 / 0, Present / Absent, Positive / Negative - with the variable's
+# other recorded level (levels: every level the variable has in the data the
+# row describes). A variable coded 1 / 2 (sex 1 = male, 2 = female) counting
+# 1 names it, "Sex: 1, per patient, n/N (%)", so the reader can tell which
+# category is counted (finding R4 of the build se.12 review). With no other
+# level recorded a yes-like word stands alone and "1" is named.
 ROW_PER_PATIENT <- ", per patient"
-YES_LIKE_LEVELS <- c("yes", "y", "true", "1", "present", "positive")
-level_is_yes_like <- function(lev) {
-  l <- tolower(trimws(as.character(lev)))
-  !is.na(l) & l %in% YES_LIKE_LEVELS
+YES_NO_PAIRS <- list(c("yes", "no"), c("y", "n"), c("true", "false"), c("1", "0"),
+                     c("present", "absent"), c("positive", "negative"))
+YES_LIKE_LEVELS <- vapply(YES_NO_PAIRS, `[`, character(1), 1)
+.yes_no_key <- function(x) {
+  l <- tolower(trimws(as.character(x)))
+  # a number written 1.0 / 0.0 is the level 1 / 0
+  num <- suppressWarnings(as.numeric(l))
+  ifelse(!is.na(num) & is.finite(num) & num == round(num) & grepl("^[-+]?[0-9]+(\\.0*)?$", l),
+         as.character(as.integer(round(num))), l)
 }
-row_label <- function(label, level = NULL, per_patient = FALSE, count = NULL, named_level = FALSE) {
+level_is_yes_like <- function(lev, levels = NULL) {
+  l <- .yes_no_key(lev)[1]
+  if (is.na(l)) return(FALSE)
+  i <- match(l, YES_LIKE_LEVELS)
+  if (is.na(i)) return(FALSE)
+  other <- unique(.yes_no_key(levels))
+  other <- other[!is.na(other) & nzchar(other) & other != l]
+  if (!length(other)) return(l != "1")
+  length(other) == 1 && other == YES_NO_PAIRS[[i]][2]
+}
+row_label <- function(label, level = NULL, per_patient = FALSE, count = NULL, named_level = FALSE,
+                      levels = NULL) {
   out <- as.character(label)
   if (length(level) && !is.na(level[1]) && nzchar(as.character(level[1])) &&
-      (isTRUE(named_level) || !level_is_yes_like(level[1])))
+      (isTRUE(named_level) || !level_is_yes_like(level[1], levels)))
     out <- paste0(out, ": ", as.character(level[1]))
   if (isTRUE(per_patient)) out <- paste0(out, ROW_PER_PATIENT)
   if (length(count) && nzchar(count[1])) out <- paste0(out, ", ", count[1])
@@ -1946,38 +1970,82 @@ p_value_guard <- function(v, g, kind = "continuous") {
 # ------------------------------------------------------------
 # No variation within the compared groups: a continuous or ordinal variable
 # whose values differ between the groups but not within any of them (e.g. one
-# optical zone per platform). The table test and the GEE then have nothing to
-# estimate the variability from (an SE of 0: a P of 0 and a CI of zero
-# width), so they are not estimable: the effect, CI and P cells print "NE"
-# (NE_TEXT), the footnote of the Publication Tables is NE_WITHIN_FOOT and the
-# run log names the rows. TRUE only when at least two groups have data, the
-# variable is not constant in the cohort (p_value_guard's own case) and the
-# values of every group are identical. v: the values; g: the group of each.
+# optical zone per platform). A model that estimates the variability within
+# the groups (the GEE, the adjusted regression, the Welch and weighted Wald
+# table tests) then has nothing to estimate it from (an SE of 0: a P of 0 and
+# a CI of zero width), so its effect, CI and P cells print "NE" (NE_TEXT),
+# the footnote of the Publication Tables is NE_WITHIN_FOOT and the run log
+# names the rows. A rank test (Wilcoxon, Kruskal-Wallis) and the permutation
+# test over patients need no within-group variance: their table P stands
+# (finding R2 of the build se.12 review; create_summary_table). TRUE only
+# when at least two groups have data, the variable is not constant in the
+# cohort (p_value_guard's own case) and the values of every group are
+# identical. v: the values; g: the group of each.
 # ------------------------------------------------------------
 NE_TEXT <- "NE"
 NE_WITHIN_REASON <- "no variation within groups"
 NE_WITHIN_FOOT <- "NE, not estimable: no variation within groups"
-no_within_variation <- function(v, g) {
+.ne_values <- function(v, g) {
   x <- if (is.numeric(v)) as.numeric(v) else as_numeric_safe(v)
   ok <- is.finite(x) & !is.na(g)
-  if (!any(ok)) return(FALSE)
-  x <- x[ok]; gg <- as.character(g[ok])
+  list(x = x[ok], g = as.character(g[ok]))
+}
+.ne_tol <- function(x) 1e-9 * max(1, max(abs(x)))
+no_within_variation <- function(v, g) {
+  d <- .ne_values(v, g)
+  x <- d$x; gg <- d$g
+  if (!length(x)) return(FALSE)
   if (length(unique(gg)) < 2) return(FALSE)
-  tol <- 1e-9 * max(1, max(abs(x)))
+  tol <- .ne_tol(x)
   if (diff(range(x)) <= tol) return(FALSE)
   all(vapply(split(x, gg), function(z) diff(range(z)) <= tol, logical(1)))
 }
+# The comparisons with the reference `ref` that are not estimable for this
+# reason when other groups do vary (finding R1 of the build se.12 review): a
+# group g whose values are all equal, compared with a reference whose values
+# are all equal too, leaves the comparison's robust SE nothing to estimate
+# from (0, whatever the other groups hold), so that comparison - not the
+# whole row - is NE and stays out of the Holm adjustment. Returns the groups
+# g (never `ref`); none when the reference varies, when the variable is
+# constant in the cohort (p_value_guard's own case), or with fewer than two
+# groups. A group of one value counts as one that does not vary; the models
+# report such a group by its own rule first (a group needs at least 2 eyes).
+ne_within_pairs <- function(v, g, ref) {
+  d <- .ne_values(v, g)
+  x <- d$x; gg <- d$g
+  if (!length(x) || length(ref) != 1 || is.na(ref) || length(unique(gg)) < 2) return(character(0))
+  tol <- .ne_tol(x)
+  if (diff(range(x)) <= tol) return(character(0))
+  flat <- vapply(split(x, gg), function(z) diff(range(z)) <= tol, logical(1))
+  if (!isTRUE(flat[as.character(ref)])) return(character(0))
+  setdiff(names(flat)[flat], as.character(ref))
+}
+# A table test whose P value stands when the groups do not vary within
+# themselves: a rank test or the permutation test over patients (they need no
+# within-group variance; the label as group_test / .clustered_test give it).
+ne_within_valid_test <- function(test) {
+  t <- as.character(test %||% "")[1]
+  !is.na(t) && (startsWith(t, "Wilcoxon") || startsWith(t, "Kruskal-Wallis") ||
+                  grepl("Permutation test over patients", t, fixed = TRUE))
+}
 # The variables reported NE for this reason while one workbook is built
 # (create_summary_table, run_gee_models, run_regression_models), for the run
-# log line pipeline.R writes per workbook (ne_within_log_text).
+# log line pipeline.R writes per workbook (ne_within_log_text). cmp: the
+# comparisons concerned when not all of them are ("Platform 2 vs Platform 1").
 .ne_within_rows <- new.env(parent = emptyenv())
 .ne_within_rows$vars <- character(0)
-ne_within_add <- function(var) .ne_within_rows$vars <- unique(c(.ne_within_rows$vars, as.character(var)))
+ne_within_add <- function(var, cmp = NULL) {
+  v <- as.character(var)
+  if (length(cmp)) v <- paste0(v, " (", paste(cmp, collapse = "; "), ")")
+  .ne_within_rows$vars <- unique(c(.ne_within_rows$vars, v))
+}
 ne_within_take <- function() { v <- .ne_within_rows$vars; .ne_within_rows$vars <- character(0); v }
 ne_within_log_text <- function(v, where) {
   if (!length(v)) return(NULL)
-  sprintf(paste0("%s: %d row(s) not estimable (NE) - no variation within groups: %s. Their table test, GEE and ",
-                 "adjusted-regression comparisons print NE in the effect, CI and P cells."),
+  sprintf(paste0("%s: %d row(s) not estimable (NE) - no variation within groups: %s. Their GEE and ",
+                 "adjusted-regression comparisons (only those named, where other groups vary) print NE in the ",
+                 "effect, CI and P cells, and so does a table test that needs a within-group variance; a rank ",
+                 "test or the permutation test over patients keeps its P value."),
           where, length(v), paste0("'", v, "'", collapse = ", "))
 }
 

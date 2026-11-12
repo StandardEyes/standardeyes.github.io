@@ -508,9 +508,10 @@ create_summary_table <- function(df, params_clean, type_map,
     # (a yes-like level of a dichotomous variable is the variable itself),
     # ", per patient" for a variable analyzed per patient, ", n/N (%)" on a
     # count row
-    mk_row <- function(cells, pval, test, level = NULL, count = NULL, named_level = FALSE, note = "") {
+    mk_row <- function(cells, pval, test, level = NULL, count = NULL, named_level = FALSE, note = "",
+                       levels = NULL) {
       row <- tibble::tibble(Parameter = row_label(pl, level, per_patient = nzchar(unit_tag), count = count,
-                                                  named_level = named_level))
+                                                  named_level = named_level, levels = levels))
       for (j in seq_along(col_names)) row[[col_names[j]]] <- cells[j]
       row$p_value <- fmt_p(pval)
       # a row without a P value names no test as if it had run (finding T2-09):
@@ -584,17 +585,8 @@ create_summary_table <- function(df, params_clean, type_map,
         } else fmt_quartiles(quart(sel), q_dig)
       }, character(1))
       cells <- with_n(cells, nn)
-      # no variation within the compared groups (helpers.R no_within_variation):
-      # no test can estimate the variability - the P cell prints NE, the reason
-      # in the Interpretation column, and the run log names the row. The other
-      # reasons (constant in the cohort, a group with n = 1) keep their words
+      # no variation within the compared groups (helpers.R no_within_variation)
       ne_w <- !nzchar(p_value_guard(v_num, gvec, var_type)) && no_within_variation(v_num, gvec)
-      if (ne_w) {
-        ne_within_add(dn(pn))
-        r <- mk_row(cells, NA_real_, "Not tested", note = NE_WITHIN_REASON)
-        r$p_value <- NE_TEXT
-        return(r)
-      }
       tt <- if (weighted) .weighted_wald(v_num, gvec, w, ids, "gaussian", ranks = var_type == "ordinal",
                                          unit = cl_unit)
             else if (clustered_row(fin & !is.na(gvec), ids, unit_tag))
@@ -604,6 +596,26 @@ create_summary_table <- function(df, params_clean, type_map,
             else if ((n_x <- cross_pp(fin & !is.na(gvec), ids, unit_tag, pn)) > 0)
               .clustered_test(v_num, gvec, ids, var_type, per_patient = TRUE, cross = n_x)
             else group_test(v_num, gvec, var_type)
+      if (ne_w) {
+        ne_within_add(dn(pn))
+        # a rank test, or the permutation test over patients, needs no
+        # within-group variance: its P value stands, and the note says why the
+        # row's model columns read NE (finding R2 of the build se.12 review)
+        if (is.finite(tt$p) && ne_within_valid_test(tt$test))
+          return(mk_row(cells, tt$p, tt$test,
+                        note = paste0(NE_WITHIN_REASON, " - the P value comes from a ",
+                                      if (grepl("Permutation", tt$test, fixed = TRUE)) "permutation test"
+                                      else "rank test",
+                                      ", which needs no within-group variance; model columns read NE")))
+        # a test that estimates the variability within the groups (Welch, the
+        # weighted Wald test, a GEE) has none to estimate: the P cell prints
+        # NE, the reason in the Interpretation column, and the run log names
+        # the row. The other reasons (constant in the cohort, a group with
+        # n = 1) keep their words
+        r <- mk_row(cells, NA_real_, "Not tested", note = NE_WITHIN_REASON)
+        r$p_value <- NE_TEXT
+        return(r)
+      }
       return(mk_row(cells, tt$p, tt$test, note = tt$note))
     }
 
@@ -632,7 +644,8 @@ create_summary_table <- function(df, params_clean, type_map,
             else if ((n_x <- cross_pp(present & !is.na(gvec), ids, unit_tag, pn)) > 0)
               .clustered_test(y, gvec, ids, "dichotomous", per_patient = TRUE, cross = n_x)
             else group_test(y, gvec, "dichotomous")
-      return(mk_row(cells, tt$p, tt$test, level = lev, count = "n/N (%)", note = tt$note))
+      return(mk_row(cells, tt$p, tt$test, level = lev, count = "n/N (%)", note = tt$note,
+                    levels = unique(as.character(v[!is.na(v)]))))
     }
 
     if (var_type == "categorical") {
@@ -706,15 +719,44 @@ safe_colname_vec <- function(x, max_chars = 60) vapply(x, safe_colname, characte
 # "none" with that switch on prints unweighted cells beside weighted model
 # columns - the tables' note says which is which. Blank or missing = "weights";
 # an unknown value is logged by the pipeline and "weights" used.
+# "none" applies only where the weights reflect nothing but a variable
+# matching ratio: nearest-neighbor matching without replacement (finding R3
+# of the build se.12 review). With exact or coarsened exact matching,
+# subclassification or matching with replacement the weights ARE the matching
+# (they weight the strata or subclasses, or count the controls used more than
+# once), so a table that counts every retained eye once is not a matched
+# comparison (with subclassification it equals the unmatched table): "none" is
+# refused there (the server refuses it before a run; matched_table_weights_refused
+# gives the reason the pipeline logs) and the matched tables keep the weights.
 MATCHED_TABLE_WEIGHTS <- c("weights", "none")
-matched_table_weights_of <- function(cfg) {
+matched_table_weights_requested <- function(cfg) {
   v <- tolower(trimws(as.character(unlist(cfg$matched_table_weights %||% "weights"))[1]))
   if (!length(v) || is.na(v) || !nzchar(v) || !(v %in% MATCHED_TABLE_WEIGHTS)) "weights" else v
+}
+matched_table_weights_refused <- function(cfg) {
+  if (!identical(matched_table_weights_requested(cfg), "none")) return("")
+  m <- tolower(trimws(as.character(unlist(cfg$psm_method %||% ""))[1]))
+  if (!length(m) || is.na(m) || !nzchar(m)) m <- "nearest"
+  if (m == "nearest" && isTRUE(as.logical(unlist(cfg$psm_replace %||% FALSE))[1]))
+    return("matching with replacement (the weights count the controls used more than once)")
+  switch(m, nearest = "",
+         exact = "exact matching (the weights weight its strata)",
+         cem = "coarsened exact matching (the weights weight its strata)",
+         subclass = "subclassification (the weights weight its subclasses)",
+         paste0("matching method '", m, "' (its weights are part of the matching)"))
+}
+matched_table_weights_of <- function(cfg) {
+  v <- matched_table_weights_requested(cfg)
+  if (identical(v, "none") && nzchar(matched_table_weights_refused(cfg))) "weights" else v
 }
 matched_table_weights_text <- function(cfg) {
   if (identical(matched_table_weights_of(cfg), "none"))
     paste0("unweighted (matched_table_weights = none) - every matched eye counts once: unweighted descriptives ",
            "and the unweighted table tests, whatever the matching weights")
+  else if (nzchar(no <- matched_table_weights_refused(cfg)))
+    paste0("weighted by the matching weights - matched_table_weights = none was asked for, but unweighted matched ",
+           "tables are not available with ", no, "; with weights that are not all 1, weighted descriptives and ",
+           "weighted Wald tests (GEE)")
   else paste0("weighted by the matching weights (matched_table_weights = weights) - with weights that are not all 1, ",
               "weighted descriptives and weighted Wald tests (GEE)")
 }
@@ -1624,6 +1666,14 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
       ne_within_add(cn(outc))
       next
     }
+    # other groups vary, but the reference and group g do not (helpers.R
+    # ne_within_pairs; finding R1 of the build se.12 review): the comparison of
+    # g with the reference has a robust SE of 0 - that comparison alone is NE
+    # (its effect, CI and P cells; out of the Holm adjustment), the others are
+    # estimated by the same fit
+    ne_cmp <- if (grp_in && !bin)
+      setdiff(ne_within_pairs(df2[[outc]], df2$GroupLabel, ref_g), c(empty, names(un$out), names(one_pt)))
+      else character(0)
     const <- preds[vapply(preds, is_const, logical(1))]
     if (length(const)) {
       notes <- c(notes, paste0("Covariate(s) dropped (constant in this cohort): ",
@@ -1751,6 +1801,37 @@ run_gee_models <- function(df, outcomes_clean, outcome_type_map, predictors_clea
         t$CI_low[k] <- NA_real_; t$CI_high[k] <- NA_real_; t$CI[k] <- NA_character_
         t$Model[k] <- paste0(note, .unestimable_text(one_pt[[gn]], bin))
       }
+      # a comparison of two groups that do not vary within themselves (ne_cmp,
+      # above): NE in its effect, CI and P cells (build_gee_lookup and
+      # export.R gee_sheet_frame read the Model text), out of the Holm
+      # adjustment (no P value); the other comparisons of the fit stand
+      for (gn in ne_cmp) {
+        k <- !is.na(t$term) & t$term == paste0("GroupLabel", gn)
+        if (!any(k)) next
+        t$estimate[k] <- NA_real_; t$std.error[k] <- NA_real_; t$statistic[k] <- NA_real_
+        t$p.value[k] <- NA_real_; t$EffectValue[k] <- NA_real_
+        t$CI_low[k] <- NA_real_; t$CI_high[k] <- NA_real_; t$CI[k] <- NE_TEXT
+        t$Model[k] <- paste0(note, "Skipped: not estimable - ", NE_WITHIN_REASON, " (", gn, " and ", ref_g,
+                             " each hold a single value)")
+      }
+      if (length(ne_cmp)) ne_within_add(cn(outc), paste(ne_cmp, "vs", ref_g))
+    }
+    # backstop: a term whose standard error is 0 (or numerically 0) - e.g. the
+    # intercept (the reference mean) when the reference does not vary, or a
+    # comparison the rule above did not name - has no P value or CI that means
+    # anything: never a P of 0 or a CI of zero width
+    if (!bin) {
+      sc <- suppressWarnings(stats::sd(df2[[outc]], na.rm = TRUE))
+      sc <- if (is.finite(sc) && sc > 0) sc else 1
+      k0 <- !is.na(t$term) & is.finite(t$estimate) & is.finite(t$std.error) & t$std.error <= 1e-10 * sc
+      if (any(k0)) {
+        t$std.error[k0] <- NA_real_; t$statistic[k0] <- NA_real_; t$p.value[k0] <- NA_real_
+        t$EffectValue[k0] <- NA_real_; t$CI_low[k0] <- NA_real_; t$CI_high[k0] <- NA_real_
+        t$CI[k0] <- NA_character_
+        t$Model[k0] <- paste0(note, "Not estimable - standard error of 0 (no variation left to estimate it from)")
+      }
+    }
+    if ("GroupLabel" %in% preds) {
       # a reported comparison involving a group of few patients carries the
       # caution - of a robust SE: not the ordinary per-patient model of an
       # unmatched cohort, whose model-based SE it does not concern
@@ -2154,6 +2235,12 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
       ne_within_add(cn(outc))
       next
     }
+    # other groups vary, but the reference and group g do not (helpers.R
+    # ne_within_pairs; finding R1 of the build se.12 review): that comparison
+    # alone is NE - adjusted and crude, out of the Holm adjustment
+    ne_cmp <- if (!dich)
+      setdiff(ne_within_pairs(df2[[outc]], df2$GroupLabel, ref), c(empty, names(un$out), names(one_pt)))
+      else character(0)
     if (dich) {
       sep <- .separation_levels(df2, outc, covs)
       sep_cov <- names(sep)
@@ -2275,6 +2362,33 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
       td$CI_low[k] <- NA_real_; td$CI_high[k] <- NA_real_; td$CI[k] <- NA_character_
       td$Model[k] <- .unestimable_text(one_pt[[gn]], dich)
     }
+    # a comparison of two groups that do not vary within themselves (ne_cmp):
+    # NE on the regression sheet too (export.R gee_sheet_frame reads the Model)
+    ne_why <- function(gn) paste0("Skipped: not estimable - ", NE_WITHIN_REASON, " (", gn, " and ", ref,
+                                  " each hold a single value)")
+    for (gn in ne_cmp) {
+      k <- !is.na(td$term) & td$term == paste0("GroupLabel", gn)
+      td$estimate[k] <- NA_real_; td$std.error[k] <- NA_real_; td$statistic[k] <- NA_real_
+      td$p.value[k] <- NA_real_; td$EffectValue[k] <- NA_real_
+      td$CI_low[k] <- NA_real_; td$CI_high[k] <- NA_real_; td$CI[k] <- NE_TEXT
+      td$Model[k] <- ne_why(gn)
+    }
+    if (length(ne_cmp)) ne_within_add(cn(outc), paste(ne_cmp, "vs", ref))
+    # backstop (as in run_gee_models): a term whose standard error is 0 has no
+    # P value or CI that means anything (the crude comparison below: the same)
+    se0_tol <- 1e-10 * {
+      sc <- suppressWarnings(stats::sd(df2[[outc]], na.rm = TRUE))
+      if (is.finite(sc) && sc > 0) sc else 1
+    }
+    if (!dich) {
+      k0 <- !is.na(td$term) & is.finite(td$estimate) & is.finite(td$std.error) & td$std.error <= se0_tol
+      if (any(k0)) {
+        td$std.error[k0] <- NA_real_; td$statistic[k0] <- NA_real_; td$p.value[k0] <- NA_real_
+        td$EffectValue[k0] <- NA_real_; td$CI_low[k0] <- NA_real_; td$CI_high[k0] <- NA_real_
+        td$CI[k0] <- NA_character_
+        td$Model[k0] <- "Not estimable - standard error of 0 (no variation left to estimate it from)"
+      }
+    }
     tfull <- td
     tfull$term <- .display_terms(tfull$term, covs, display_names)
     full[[length(full) + 1]] <- tfull
@@ -2300,11 +2414,24 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
           n = n_txt, Note = .join_note(note, .unestimable_text(one_pt[[g]], dich)), check.names = FALSE)
         next
       }
+      if (g %in% ne_cmp) {
+        ne_row <- data.frame(
+          Outcome = dn(outc), Comparison = paste(g, "vs", ref),
+          `Adjusted effect (95% CI)` = NE_TEXT, `P value` = NE_TEXT, .p_num = NA_real_,
+          crude_eff = NE_TEXT, crude_p = NE_TEXT, .cp_num = NA_real_,
+          n = n_txt, Note = .join_note(note, sub("^Skipped: not estimable", "Not estimable", ne_why(g))),
+          check.names = FALSE)
+        names(ne_row)[match(c("crude_eff", "crude_p"), names(ne_row))] <- c(REG_CRUDE_EFF, REG_CRUDE_P)
+        rows[[length(rows) + 1]] <- ne_row
+        next
+      }
       # the same backstop as the GEE tables: a group OR beyond 1e-4..1e4
       # (quasi-separation the level check cannot see) is not a usable estimate
       unstable <- dich && (!is.finite(row$estimate[1]) || !is.finite(row$std.error[1]) ||
                              abs(row$estimate[1]) > log(1e4))
-      eff <- if (unstable) "not estimable"
+      # a comparison the standard-error backstop blanked (an SE of 0)
+      se0 <- !dich && !is.finite(row$EffectValue[1])
+      eff <- if (unstable || se0) "not estimable"
              else fmt_effect(if (dich) "OR" else "beta", row$EffectValue[1], row$CI_low[1], row$CI_high[1])
       # a reported comparison involving a group of few patients carries the
       # caution of a robust SE (not an unmatched per-patient model's model-based SE)
@@ -2314,11 +2441,12 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
       # the crude estimate on the same eyes, with the same backstop
       crow <- if (is.null(tcr)) NULL else tcr[tcr$term == paste0("GroupLabel", g), , drop = FALSE]
       c_ok <- !is.null(crow) && nrow(crow) == 1 && is.finite(crow$estimate[1]) &&
-        is.finite(crow$std.error[1]) && !(dich && abs(crow$estimate[1]) > log(1e4))
+        is.finite(crow$std.error[1]) && !(dich && abs(crow$estimate[1]) > log(1e4)) &&
+        !(!dich && crow$std.error[1] <= se0_tol)
       rows[[length(rows) + 1]] <- data.frame(
         Outcome = dn(outc), Comparison = paste(g, "vs", ref),
-        `Adjusted effect (95% CI)` = eff, `P value` = if (unstable) "" else fmt_p(row$p.value[1]),
-        .p_num = if (unstable) NA_real_ else row$p.value[1],
+        `Adjusted effect (95% CI)` = eff, `P value` = if (unstable || se0) "" else fmt_p(row$p.value[1]),
+        .p_num = if (unstable || se0) NA_real_ else row$p.value[1],
         crude_eff = if (!c_ok) "not estimable"
                     else fmt_effect(if (dich) "OR" else "beta", crow$EffectValue[1],
                                     crow$CI_low[1], crow$CI_high[1]),
@@ -2327,6 +2455,7 @@ run_regression_models <- function(df, outcomes_clean, outcome_type_map, covs_cle
         n = n_txt,
         Note = if (unstable) paste0(note, if (nzchar(caution)) ". " else "",
                                     "Unstable estimate (quasi-separation) - effect not reported")
+               else if (se0) .join_note(note, "Not estimable - standard error of 0 (no variation left to estimate it from)")
                else .join_note(note, few), check.names = FALSE)
       names(rows[[length(rows)]])[match(c("crude_eff", "crude_p"), names(rows[[length(rows)]]))] <-
         c(REG_CRUDE_EFF, REG_CRUDE_P)
